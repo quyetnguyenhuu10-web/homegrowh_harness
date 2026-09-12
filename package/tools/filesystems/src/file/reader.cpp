@@ -2,7 +2,7 @@
 
 #if defined(_WIN32)
 
-#include "../platform/windows/windows_reader.h"
+#include "../platform/windows/file/reader/windows_reader.h"
 
 namespace file
 {
@@ -14,7 +14,7 @@ namespace file
 
 #elif defined(__linux__)
 
-#include "../platform/linux/linux_reader.h"
+#include "../platform/linux/file/reader/linux_reader.h"
 
 namespace file
 {

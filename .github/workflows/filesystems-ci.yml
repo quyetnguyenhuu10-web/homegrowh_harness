@@ -41,5 +41,13 @@ jobs:
       - name: Build
         run: cmake --build build-ci --config ${{ matrix.build_type }} --parallel
 
-      - name: Test
-        run: ctest --test-dir build-ci -C ${{ matrix.build_type }} --output-on-failure
+      - name: Edit integration test with a real file
+        run: ctest --test-dir build-ci -C ${{ matrix.build_type }} --output-on-failure -R "^file_edit_test$"
+
+      - name: Upload edit binary
+        if: success() && github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: file-edit-${{ matrix.os }}
+          path: package/tools/filesystems/build-ci/**/file_edit*
+          if-no-files-found: error

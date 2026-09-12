@@ -1,0 +1,28 @@
+homegrowh_harness/
+├── .github
+│   └── workflows
+│       └── filesystems-ci.yml
+├── package
+│   ├── compaction
+│   └── tools
+│       ├── filesystems
+│       │   ├── include
+│       │   │   └── file
+│       │   │       └── reader.h
+│       │   ├── src
+│       │   │   ├── config
+│       │   │   │   └── reader_config.h
+│       │   │   ├── file
+│       │   │   │   └── reader.cpp
+│       │   │   └── platform
+│       │   │       ├── linux
+│       │   │       │   ├── linux_reader.cpp
+│       │   │       │   └── linux_reader.h
+│       │   │       └── windows
+│       │   │           ├── windows_reader.cpp
+│       │   │           └── windows_reader.h
+│       │   └── CMakeLists.txt
+│       └── CMakeLists.txt
+├── .gitattributes
+├── .gitignore
+└── tree.txt

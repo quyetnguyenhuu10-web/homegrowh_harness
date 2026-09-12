@@ -1,6 +1,6 @@
 #include "windows_reader.h"
 
-#include "../../config/reader_config.h"
+#include "../../../../config/reader_config.h"
 
 #include <Windows.h>
 #include <memory>

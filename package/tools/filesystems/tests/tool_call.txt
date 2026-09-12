@@ -1,0 +1,6 @@
+{
+    "tool": "edit",
+    "path": "example.txt",
+    "old_data": "world",
+    "new_data": "world"
+}
