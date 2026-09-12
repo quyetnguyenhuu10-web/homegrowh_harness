@@ -1,9 +1,14 @@
 #include "linux_reader.h"
 
+#include "../../config/reader_config.h"
+
 #include <cerrno>
+#include <cstddef>
 #include <cstdint>
 #include <fcntl.h>
-#include <limits>
+#include <memory>
+#include <span>
+#include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
@@ -11,72 +16,141 @@ namespace file::linux
 {
     namespace
     {
-        struct file_descriptor
+        class fd_handle
         {
-            int value{-1};
+        public:
+            constexpr fd_handle() noexcept = default;
+            constexpr fd_handle(std::nullptr_t) noexcept {}
+            explicit constexpr fd_handle(int value) noexcept : value_(value) {}
 
-            ~file_descriptor()
+            constexpr int get() const noexcept
             {
-                if (value >= 0)
-                    ::close(value);
+                return value_;
             }
 
-            file_descriptor(const file_descriptor&) = delete;
-            file_descriptor& operator=(const file_descriptor&) = delete;
-
-            int get() const
+            constexpr explicit operator bool() const noexcept
             {
-                return value;
+                return value_ >= 0;
+            }
+
+            friend constexpr bool operator==(fd_handle lhs, fd_handle rhs) noexcept
+            {
+                return lhs.value_ == rhs.value_;
+            }
+
+            friend constexpr bool operator!=(fd_handle lhs, fd_handle rhs) noexcept
+            {
+                return !(lhs == rhs);
+            }
+
+            friend constexpr bool operator==(fd_handle lhs, std::nullptr_t) noexcept
+            {
+                return lhs.value_ < 0;
+            }
+
+            friend constexpr bool operator==(std::nullptr_t, fd_handle rhs) noexcept
+            {
+                return rhs == nullptr;
+            }
+
+            friend constexpr bool operator!=(fd_handle lhs, std::nullptr_t) noexcept
+            {
+                return !(lhs == nullptr);
+            }
+
+            friend constexpr bool operator!=(std::nullptr_t, fd_handle rhs) noexcept
+            {
+                return !(rhs == nullptr);
+            }
+
+        private:
+            int value_{-1};
+        };
+
+        struct fd_deleter
+        {
+            using pointer = fd_handle;
+
+            void operator()(pointer handle) const noexcept
+            {
+                if (handle != nullptr)
+                    (void)::close(handle.get());
             }
         };
+
+        using unique_fd = std::unique_ptr<int, fd_deleter>;
     }
 
-    ReadResult read_file(
-        std::filesystem::path path,
-        std::uint32_t MAX_BYTES_READ
-    )
+    ReadResult read_file(std::filesystem::path path)
     {
         ReadResult result{};
 
-        file_descriptor handle{::open(path.c_str(), O_RDONLY)};
+        constexpr std::uint32_t block_size =
+            file::config::kReadBlockSize;
 
-        if (handle.get() < 0)
+        unique_fd handle{fd_handle{::open(path.c_str(), O_RDONLY)}};
+
+        if (!handle)
         {
             result.error = static_cast<std::uint32_t>(errno);
             return result;
         }
 
-        const std::size_t block_size = MAX_BYTES_READ;
+        struct stat file_status{};
 
-        if (block_size > static_cast<std::size_t>(std::numeric_limits<ssize_t>::max()))
+        if (::fstat(handle.get().get(), &file_status) < 0)
+        {
+            result.error = static_cast<std::uint32_t>(errno);
+            return result;
+        }
+
+        if (file_status.st_size < 0)
         {
             result.error = EOVERFLOW;
             return result;
         }
 
-        std::string buffer(block_size, '\0');
-        std::uint64_t block_index = 0;
+        const std::uintmax_t file_size_for_allocation =
+            static_cast<std::uintmax_t>(file_status.st_size);
 
-        while (true)
+        if (file_size_for_allocation >
+            static_cast<std::uintmax_t>(result.content.max_size()))
         {
-            if (MAX_BYTES_READ != 0 &&
-                block_index >
-                    static_cast<std::uint64_t>(std::numeric_limits<off_t>::max()) /
-                        MAX_BYTES_READ)
-            {
-                result.error = EOVERFLOW;
-                result.content.clear();
-                return result;
-            }
+            result.error = EFBIG;
+            return result;
+        }
 
-            const std::uint64_t position =
-                static_cast<std::uint64_t>(MAX_BYTES_READ) * block_index;
+        result.content.resize(
+            static_cast<std::size_t>(file_size_for_allocation)
+        );
+
+        const std::size_t block_size_bytes = block_size;
+        const off_t file_size = file_status.st_size;
+        off_t position = 0;
+
+        if (file_size == 0)
+            return result;
+
+        while (position < file_size)
+        {
+            const off_t remaining = file_size - position;
+
+            const std::size_t chunk_size =
+                remaining < static_cast<off_t>(block_size_bytes)
+                    ? static_cast<std::size_t>(remaining)
+                    : block_size_bytes;
+
+            std::span<char> destination(
+                result.content.data() +
+                    static_cast<std::size_t>(position),
+                chunk_size
+            );
 
             const ssize_t bytes_read = ::pread(
-                handle.get(),
-                buffer.data(),
-                block_size,
-                static_cast<off_t>(position)
+                handle.get().get(),
+                destination.data(),
+                destination.size(),
+                position
             );
 
             if (bytes_read < 0)
@@ -89,18 +163,15 @@ namespace file::linux
                 return result;
             }
 
-            if (bytes_read == 0)
-                break;
+            if (bytes_read == 0 ||
+                static_cast<std::size_t>(bytes_read) < chunk_size)
+            {
+                result.error = EIO;
+                result.content.clear();
+                return result;
+            }
 
-            result.content.append(
-                buffer.data(),
-                static_cast<std::size_t>(bytes_read)
-            );
-
-            if (static_cast<std::size_t>(bytes_read) < block_size)
-                break;
-
-            ++block_index;
+            position += static_cast<off_t>(bytes_read);
         }
 
         return result;

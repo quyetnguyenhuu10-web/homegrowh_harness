@@ -1,35 +1,38 @@
 #include "windows_reader.h"
 
+#include "../../config/reader_config.h"
+
 #include <Windows.h>
 #include <memory>
-#include <vector>
+#include <span>
 
 namespace file::windows
 {
     namespace
     {
-        struct m_handle
+        struct handle_deleter
         {
             using pointer = HANDLE;
 
-            void operator()(HANDLE handle)
+            void operator()(pointer handle) const noexcept
             {
-                if (handle != INVALID_HANDLE_VALUE)
-                {
-                    CloseHandle(handle);
-                }
+                if (handle == nullptr || handle == INVALID_HANDLE_VALUE)
+                    return;
+
+                (void)CloseHandle(handle);
             }
         };
+
+        using unique_handle = std::unique_ptr<void, handle_deleter>;
     }
 
-    ReadResult read_file(
-        std::filesystem::path path,
-        std::uint32_t MAX_BYTES_READ
-    )
+    ReadResult read_file(std::filesystem::path path)
     {
         ReadResult result{};
 
-        std::unique_ptr<HANDLE, m_handle> handle(CreateFileW(
+        constexpr std::uint32_t block_size = file::config::kReadBlockSize;
+
+        HANDLE raw_handle = CreateFileW(
             path.c_str(),
             GENERIC_READ,
             FILE_SHARE_READ,
@@ -37,25 +40,60 @@ namespace file::windows
             OPEN_EXISTING,
             FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED,
             nullptr
-        ));
+        );
 
-        HANDLE hFile = handle.get();
-
-        if (hFile == INVALID_HANDLE_VALUE)
+        if (raw_handle == INVALID_HANDLE_VALUE)
         {
             result.error = GetLastError();
             return result;
         }
 
-        std::string buffer(MAX_BYTES_READ, '\0');
+        unique_handle handle(raw_handle);
+        HANDLE hFile = handle.get();
+
+        LARGE_INTEGER file_size_info{};
+
+        if (!GetFileSizeEx(hFile, &file_size_info))
+        {
+            result.error = GetLastError();
+            return result;
+        }
+
+        if (file_size_info.QuadPart < 0)
+        {
+            result.error = ERROR_INVALID_DATA;
+            return result;
+        }
+
+        const std::uintmax_t file_size =
+            static_cast<std::uintmax_t>(file_size_info.QuadPart);
+
+        if (file_size > static_cast<std::uintmax_t>(result.content.max_size()))
+        {
+            result.error = ERROR_NOT_ENOUGH_MEMORY;
+            return result;
+        }
+
+        result.content.resize(static_cast<std::size_t>(file_size));
+
+        if (file_size == 0)
+            return result;
+
         DWORD bytesRead = 0;
-        std::uint64_t n = 0;
+        std::uint64_t position = 0;
         OVERLAPPED overlapped{};
 
-        while (true)   // Đọc đến khi gặp lỗi làm kết quả không đầy đủ thì dừng nên không bị âm thầm bỏ qua lỗi.
+        while (position < file_size)
         {
-            std::uint64_t position =
-                static_cast<std::uint64_t>(MAX_BYTES_READ) * n;
+            const std::uint64_t remaining = file_size - position;
+            const DWORD bytesToRead = static_cast<DWORD>(
+                remaining < block_size ? remaining : block_size
+            );
+
+            std::span<char> destination(
+                result.content.data() + static_cast<std::size_t>(position),
+                bytesToRead
+            );
 
             overlapped.Offset =
                 static_cast<DWORD>(position % (1ULL << 32));
@@ -67,20 +105,29 @@ namespace file::windows
 
             BOOL success = ReadFile(
                 hFile,
-                buffer.data(),
-                MAX_BYTES_READ,
+                destination.data(),
+                bytesToRead,
                 nullptr,
                 &overlapped
             );
 
-            if (!success && GetLastError() != ERROR_IO_PENDING) // != để loại trừ trạng thái đang chờ, không phải lỗi crash.
+            if (!success)
             {
-                if (GetLastError() == ERROR_HANDLE_EOF)  // ERROR_HANDLE_EOF là đọc hết file, không phải lỗi cần xóa result.content.
-                    break;
+                const DWORD error = GetLastError();
 
-                result.error = GetLastError();
-                result.content.clear();
-                return result;
+                if (error == ERROR_HANDLE_EOF)
+                {
+                    result.error = error;
+                    result.content.clear();
+                    return result;
+                }
+
+                if (error != ERROR_IO_PENDING)
+                {
+                    result.error = error;
+                    result.content.clear();
+                    return result;
+                }
             }
 
             BOOL resultOverlapped = GetOverlappedResult(
@@ -92,23 +139,35 @@ namespace file::windows
 
             if (!resultOverlapped)   // Nếu trả về FALSE - không hoàn thành trọn vẹn nên cần check lỗi.
             {
-                if (GetLastError() == ERROR_HANDLE_EOF)
-                    break;
+                const DWORD error = GetLastError();
 
-                result.error = GetLastError();
+                if (error == ERROR_HANDLE_EOF)
+                {
+                    result.error = error;
+                    result.content.clear();
+                    return result;
+                }
+
+                result.error = error;
                 result.content.clear();
                 return result;
             }
 
-            if (bytesRead == 0)
-                break;
+            if (bytesRead > bytesToRead)
+            {
+                result.error = ERROR_INVALID_DATA;
+                result.content.clear();
+                return result;
+            }
 
-            result.content.append(buffer.data(), bytesRead);
+            position += bytesRead;
 
-            if (bytesRead < MAX_BYTES_READ)
-                break;
-
-            n++;
+            if (bytesRead < bytesToRead)
+            {
+                result.error = ERROR_HANDLE_EOF;
+                result.content.clear();
+                return result;
+            }
         }
 
         return result;

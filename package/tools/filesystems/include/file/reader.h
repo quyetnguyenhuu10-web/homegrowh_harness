@@ -12,8 +12,5 @@ namespace file
         std::uint32_t error;
     };
 
-    ReadResult read(
-        std::filesystem::path path,
-        std::uint32_t MAX_BYTES_READ = 4096
-    );
+    ReadResult read(std::filesystem::path path);
 }

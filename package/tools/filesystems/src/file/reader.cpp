@@ -6,12 +6,9 @@
 
 namespace file
 {
-    ReadResult read(
-        std::filesystem::path path,
-        std::uint32_t MAX_BYTES_READ
-    )
+    ReadResult read(std::filesystem::path path)
     {
-        return windows::read_file(path, MAX_BYTES_READ);
+        return windows::read_file(path);
     }
 }
 
@@ -21,12 +18,9 @@ namespace file
 
 namespace file
 {
-    ReadResult read(
-        std::filesystem::path path,
-        std::uint32_t MAX_BYTES_READ
-    )
+    ReadResult read(std::filesystem::path path)
     {
-        return linux::read_file(path, MAX_BYTES_READ);
+        return linux::read_file(path);
     }
 }
 
