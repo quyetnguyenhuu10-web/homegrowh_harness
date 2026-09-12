@@ -1,0 +1,36 @@
+# CMake generated Testfile for 
+# Source directory: D:/homegrowh_harness/package/tools/filesystems
+# Build directory: D:/homegrowh_harness/.cmake-build-filesystems
+# 
+# This file includes the relevant testing commands required for 
+# testing this directory and lists subdirectories to be tested as well.
+if(CTEST_CONFIGURATION_TYPE MATCHES "^([Dd][Ee][Bb][Uu][Gg])$")
+  add_test([=[file_reader_test]=] "D:/homegrowh_harness/.cmake-build-filesystems/Debug/file_reader.exe")
+  set_tests_properties([=[file_reader_test]=] PROPERTIES  _BACKTRACE_TRIPLES "D:/homegrowh_harness/package/tools/filesystems/CMakeLists.txt;88;add_test;D:/homegrowh_harness/package/tools/filesystems/CMakeLists.txt;0;")
+elseif(CTEST_CONFIGURATION_TYPE MATCHES "^([Rr][Ee][Ll][Ee][Aa][Ss][Ee])$")
+  add_test([=[file_reader_test]=] "D:/homegrowh_harness/.cmake-build-filesystems/Release/file_reader.exe")
+  set_tests_properties([=[file_reader_test]=] PROPERTIES  _BACKTRACE_TRIPLES "D:/homegrowh_harness/package/tools/filesystems/CMakeLists.txt;88;add_test;D:/homegrowh_harness/package/tools/filesystems/CMakeLists.txt;0;")
+elseif(CTEST_CONFIGURATION_TYPE MATCHES "^([Mm][Ii][Nn][Ss][Ii][Zz][Ee][Rr][Ee][Ll])$")
+  add_test([=[file_reader_test]=] "D:/homegrowh_harness/.cmake-build-filesystems/MinSizeRel/file_reader.exe")
+  set_tests_properties([=[file_reader_test]=] PROPERTIES  _BACKTRACE_TRIPLES "D:/homegrowh_harness/package/tools/filesystems/CMakeLists.txt;88;add_test;D:/homegrowh_harness/package/tools/filesystems/CMakeLists.txt;0;")
+elseif(CTEST_CONFIGURATION_TYPE MATCHES "^([Rr][Ee][Ll][Ww][Ii][Tt][Hh][Dd][Ee][Bb][Ii][Nn][Ff][Oo])$")
+  add_test([=[file_reader_test]=] "D:/homegrowh_harness/.cmake-build-filesystems/RelWithDebInfo/file_reader.exe")
+  set_tests_properties([=[file_reader_test]=] PROPERTIES  _BACKTRACE_TRIPLES "D:/homegrowh_harness/package/tools/filesystems/CMakeLists.txt;88;add_test;D:/homegrowh_harness/package/tools/filesystems/CMakeLists.txt;0;")
+else()
+  add_test([=[file_reader_test]=] NOT_AVAILABLE)
+endif()
+if(CTEST_CONFIGURATION_TYPE MATCHES "^([Dd][Ee][Bb][Uu][Gg])$")
+  add_test([=[file_edit_test]=] "D:/homegrowh_harness/.cmake-build-filesystems/Debug/file_edit.exe")
+  set_tests_properties([=[file_edit_test]=] PROPERTIES  _BACKTRACE_TRIPLES "D:/homegrowh_harness/package/tools/filesystems/CMakeLists.txt;93;add_test;D:/homegrowh_harness/package/tools/filesystems/CMakeLists.txt;0;")
+elseif(CTEST_CONFIGURATION_TYPE MATCHES "^([Rr][Ee][Ll][Ee][Aa][Ss][Ee])$")
+  add_test([=[file_edit_test]=] "D:/homegrowh_harness/.cmake-build-filesystems/Release/file_edit.exe")
+  set_tests_properties([=[file_edit_test]=] PROPERTIES  _BACKTRACE_TRIPLES "D:/homegrowh_harness/package/tools/filesystems/CMakeLists.txt;93;add_test;D:/homegrowh_harness/package/tools/filesystems/CMakeLists.txt;0;")
+elseif(CTEST_CONFIGURATION_TYPE MATCHES "^([Mm][Ii][Nn][Ss][Ii][Zz][Ee][Rr][Ee][Ll])$")
+  add_test([=[file_edit_test]=] "D:/homegrowh_harness/.cmake-build-filesystems/MinSizeRel/file_edit.exe")
+  set_tests_properties([=[file_edit_test]=] PROPERTIES  _BACKTRACE_TRIPLES "D:/homegrowh_harness/package/tools/filesystems/CMakeLists.txt;93;add_test;D:/homegrowh_harness/package/tools/filesystems/CMakeLists.txt;0;")
+elseif(CTEST_CONFIGURATION_TYPE MATCHES "^([Rr][Ee][Ll][Ww][Ii][Tt][Hh][Dd][Ee][Bb][Ii][Nn][Ff][Oo])$")
+  add_test([=[file_edit_test]=] "D:/homegrowh_harness/.cmake-build-filesystems/RelWithDebInfo/file_edit.exe")
+  set_tests_properties([=[file_edit_test]=] PROPERTIES  _BACKTRACE_TRIPLES "D:/homegrowh_harness/package/tools/filesystems/CMakeLists.txt;93;add_test;D:/homegrowh_harness/package/tools/filesystems/CMakeLists.txt;0;")
+else()
+  add_test([=[file_edit_test]=] NOT_AVAILABLE)
+endif()

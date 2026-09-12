@@ -7,8 +7,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_library(filesystems
-    src/file/reader.cpp
-    src/file/edit.cpp
+    src/fsysteam/read/reader.cpp
+    src/fsysteam/edit/edit.cpp
 )
 
 # ---------------------------------------------------------
@@ -19,16 +19,16 @@ if(WIN32)
 
     target_sources(filesystems
         PRIVATE
-            src/platform/windows/file/reader/windows_reader.cpp
-            src/platform/windows/file/edit/windows_edit.cpp
+            src/platform/windows/fsysteam/reader/windows_reader.cpp
+            src/platform/windows/fsysteam/edit/windows_edit.cpp
     )
 
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     target_sources(filesystems
         PRIVATE
-            src/platform/linux/file/reader/linux_reader.cpp
-            src/platform/linux/file/edit/linux_edit.cpp
+            src/platform/linux/fsysteam/reader/linux_reader.cpp
+            src/platform/linux/fsysteam/edit/linux_edit.cpp
     )
 
     target_compile_definitions(filesystems
@@ -51,8 +51,6 @@ endif()
 target_include_directories(filesystems
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
-
-    PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
