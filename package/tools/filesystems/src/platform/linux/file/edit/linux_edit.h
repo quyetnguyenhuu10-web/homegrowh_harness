@@ -2,7 +2,7 @@
 
 #include "file/edit.h"
 
-namespace file::linux
+namespace fsystem::linux
 {
     EditResult edit_file(
         std::filesystem::path path,

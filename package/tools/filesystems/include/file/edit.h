@@ -4,7 +4,7 @@
 #include <string>
 #include <cstdint>
 
-namespace file
+namespace fsystem
 {
     enum class EditNote
     {

@@ -2,7 +2,7 @@
 
 #include "file/reader.h"
 
-namespace file::windows
+namespace fsystem::windows
 {
     ReadResult read_file(std::filesystem::path path);
 }

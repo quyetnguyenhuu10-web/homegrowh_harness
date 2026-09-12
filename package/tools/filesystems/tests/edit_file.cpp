@@ -1,5 +1,4 @@
-#include <file/edit.h>
-#include <file/reader.h>
+#include <fsystem>
 
 #include <chrono>
 #include <filesystem>
@@ -86,7 +85,7 @@ int main()
         return 1;
     }
 
-    const file::EditResult successful_edit = file::edit(
+    const fsystem::EditResult successful_edit = fsystem::edit(
         test_path,
         old_data,
         new_data
@@ -98,7 +97,7 @@ int main()
                 std::to_string(successful_edit.error)
         ) ||
         !expect(
-            successful_edit.note == file::EditNote::none,
+            successful_edit.note == fsystem::EditNote::none,
             "Successful edit returned an unexpected note."
         ) ||
         !expect(
@@ -109,7 +108,7 @@ int main()
         return 1;
     }
 
-    const file::ReadResult edited_file = file::read(test_path);
+    const fsystem::ReadResult edited_file = fsystem::read(test_path);
 
     if (!expect(
             edited_file.error == 0,
@@ -124,7 +123,7 @@ int main()
         return 1;
     }
 
-    const file::EditResult missing_old_data = file::edit(
+    const fsystem::EditResult missing_old_data = fsystem::edit(
         test_path,
         "old_data=does-not-exist",
         new_data
@@ -135,7 +134,7 @@ int main()
             "Missing-old-data case returned an unexpected error."
         ) ||
         !expect(
-            missing_old_data.note == file::EditNote::old_data_not_found,
+            missing_old_data.note == fsystem::EditNote::old_data_not_found,
             "Missing-old-data case returned the wrong note."
         ))
     {
@@ -153,7 +152,7 @@ int main()
         return 1;
     }
 
-    const file::EditResult duplicate_old_data = file::edit(
+    const fsystem::EditResult duplicate_old_data = fsystem::edit(
         test_path,
         old_data,
         new_data
@@ -165,14 +164,14 @@ int main()
         ) ||
         !expect(
             duplicate_old_data.note ==
-                file::EditNote::old_data_appears_more_than_once,
+                fsystem::EditNote::old_data_appears_more_than_once,
             "Duplicate-old-data case returned the wrong note."
         ))
     {
         return 1;
     }
 
-    const file::ReadResult duplicate_file = file::read(test_path);
+    const fsystem::ReadResult duplicate_file = fsystem::read(test_path);
 
     if (!expect(
             duplicate_file.error == 0,

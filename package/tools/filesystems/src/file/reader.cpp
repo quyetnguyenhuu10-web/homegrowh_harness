@@ -4,7 +4,7 @@
 
 #include "../platform/windows/file/reader/windows_reader.h"
 
-namespace file
+namespace fsystem
 {
     ReadResult read(std::filesystem::path path)
     {
@@ -16,7 +16,7 @@ namespace file
 
 #include "../platform/linux/file/reader/linux_reader.h"
 
-namespace file
+namespace fsystem
 {
     ReadResult read(std::filesystem::path path)
     {

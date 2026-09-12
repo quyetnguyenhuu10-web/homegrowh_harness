@@ -4,7 +4,7 @@
 
 #include "../platform/windows/file/edit/window_edit.h"
 
-namespace file
+namespace fsystem
 {
     EditResult edit(
         std::filesystem::path path,
@@ -24,7 +24,7 @@ namespace file
 
 #include "../platform/linux/file/edit/linux_edit.h"
 
-namespace file
+namespace fsystem
 {
     EditResult edit(
         std::filesystem::path path,

@@ -13,7 +13,7 @@
 #include <string>
 #include <unistd.h>
 
-namespace file::linux
+namespace fsystem::linux
 {
     namespace
     {
@@ -227,7 +227,7 @@ namespace file::linux
     {
         EditResult edit_result{};
 
-        auto result = file::read(path);
+        auto result = fsystem::read(path);
 
         if (result.error != 0)
         {

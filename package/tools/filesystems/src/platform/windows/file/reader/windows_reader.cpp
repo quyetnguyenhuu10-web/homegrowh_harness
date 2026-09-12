@@ -6,7 +6,7 @@
 #include <memory>
 #include <span>
 
-namespace file::windows
+namespace fsystem::windows
 {
     namespace
     {
@@ -30,7 +30,7 @@ namespace file::windows
     {
         ReadResult result{};
 
-        constexpr std::uint32_t block_size = file::config::kReadBlockSize;
+        constexpr std::uint32_t block_size = fsystem::config::kReadBlockSize;
 
         HANDLE raw_handle = CreateFileW(
             path.c_str(),

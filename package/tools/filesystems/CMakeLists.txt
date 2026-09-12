@@ -1,33 +1,19 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(file_reader LANGUAGES CXX)
+project(filesystems LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-include(FetchContent)
-
-# ============================================================
-# Dependencies
-# ============================================================
-
-FetchContent_Declare(
-    ftxui
-    GIT_REPOSITORY https://github.com/ArthurSonzogni/FTXUI.git
-    GIT_TAG v6.1.9
-)
-
-FetchContent_MakeAvailable(ftxui)
-
-# ============================================================
-# Filesystem Library
-# ============================================================
-
 add_library(filesystems
     src/file/reader.cpp
     src/file/edit.cpp
 )
+
+# ---------------------------------------------------------
+# Platform implementation
+# ---------------------------------------------------------
 
 if(WIN32)
 
@@ -58,6 +44,10 @@ else()
 
 endif()
 
+# ---------------------------------------------------------
+# Include directories
+# ---------------------------------------------------------
+
 target_include_directories(filesystems
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -66,13 +56,12 @@ target_include_directories(filesystems
         ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-# ============================================================
-# Test
-# ============================================================
+# ---------------------------------------------------------
+# Tests
+# ---------------------------------------------------------
 
-option(
-    FILESYSTEMS_BUILD_TESTS
-    "Build the filesystem test executables"
+option(FILESYSTEMS_BUILD_TESTS
+    "Build filesystem tests"
     ON
 )
 
@@ -80,38 +69,17 @@ if(FILESYSTEMS_BUILD_TESTS)
 
     enable_testing()
 
-    # --------------------------------------------------------
-    # Reader test
-    # --------------------------------------------------------
-
     add_executable(file_reader
         tests/main_test.cpp
+    )
+
+    add_executable(file_edit
+        tests/edit_file.cpp
     )
 
     target_link_libraries(file_reader
         PRIVATE
             filesystems
-            ftxui::component
-            ftxui::dom
-            ftxui::screen
-    )
-
-    add_test(
-        NAME file_reader_test
-        COMMAND file_reader
-    )
-
-    set_tests_properties(file_reader_test
-        PROPERTIES
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests
-    )
-
-    # --------------------------------------------------------
-    # Edit test
-    # --------------------------------------------------------
-
-    add_executable(file_edit
-        tests/edit_file.cpp
     )
 
     target_link_libraries(file_edit
@@ -120,13 +88,13 @@ if(FILESYSTEMS_BUILD_TESTS)
     )
 
     add_test(
-        NAME file_edit_test
-        COMMAND file_edit
+        NAME file_reader_test
+        COMMAND file_reader
     )
 
-    set_tests_properties(file_edit_test
-        PROPERTIES
-            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests
+    add_test(
+        NAME file_edit_test
+        COMMAND file_edit
     )
 
 endif()

@@ -5,7 +5,7 @@
 
 #include <memory>
 
-namespace file::windows
+namespace fsystem::windows
 {
     namespace
     {
@@ -190,7 +190,7 @@ namespace file::windows
     {
         EditResult edit_result{};
 
-        auto result = file::read(path);
+        auto result = fsystem::read(path);
 
         if (result.error != 0)
         {

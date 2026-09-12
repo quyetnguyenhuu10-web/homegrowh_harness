@@ -12,7 +12,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-namespace file::linux
+namespace fsystem::linux
 {
     namespace
     {
@@ -86,7 +86,7 @@ namespace file::linux
         ReadResult result{};
 
         constexpr std::uint32_t block_size =
-            file::config::kReadBlockSize;
+            fsystem::config::kReadBlockSize;
 
         unique_fd handle{fd_handle{::open(path.c_str(), O_RDONLY)}};
 
