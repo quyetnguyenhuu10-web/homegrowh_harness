@@ -6,9 +6,37 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# ---------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------
+
+include(FetchContent)
+
+FetchContent_Declare(
+    CLI11
+    GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
+    GIT_TAG v2.6.1
+)
+
+FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.12.0
+)
+
+FetchContent_MakeAvailable(
+    CLI11
+    nlohmann_json
+)
+
+# ---------------------------------------------------------
+# Library
+# ---------------------------------------------------------
+
 add_library(filesystems
     src/fsysteam/read/reader.cpp
     src/fsysteam/edit/edit.cpp
+    src/fsysteam/watcher/watcher.cpp
 )
 
 # ---------------------------------------------------------
@@ -19,8 +47,9 @@ if(WIN32)
 
     target_sources(filesystems
         PRIVATE
-            src/platform/windows/fsysteam/reader/windows_reader.cpp
-            src/platform/windows/fsysteam/edit/windows_edit.cpp
+            src/platform/windows/fsystem/reader/windows_reader.cpp
+            src/platform/windows/fsystem/edit/windows_edit.cpp
+            src/platform/windows/fsystem/watcher/windows_watcher.cpp
     )
 
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -55,6 +84,21 @@ target_include_directories(filesystems
 )
 
 # ---------------------------------------------------------
+# Executables
+# ---------------------------------------------------------
+
+add_executable(edit_file
+    executables/edit_file.cpp
+)
+
+target_link_libraries(edit_file
+    PRIVATE
+        filesystems
+        CLI11::CLI11
+        nlohmann_json::nlohmann_json
+)
+
+# ---------------------------------------------------------
 # Tests
 # ---------------------------------------------------------
 
@@ -75,12 +119,21 @@ if(FILESYSTEMS_BUILD_TESTS)
         tests/edit_file.cpp
     )
 
+    add_executable(watch_file
+        tests/watch_file.cpp
+    )
+
     target_link_libraries(file_reader
         PRIVATE
             filesystems
     )
 
     target_link_libraries(file_edit
+        PRIVATE
+            filesystems
+    )
+
+    target_link_libraries(watch_file
         PRIVATE
             filesystems
     )
@@ -93,6 +146,11 @@ if(FILESYSTEMS_BUILD_TESTS)
     add_test(
         NAME file_edit_test
         COMMAND file_edit
+    )
+
+    add_test(
+        NAME watch_file_test
+        COMMAND watch_file
     )
 
 endif()

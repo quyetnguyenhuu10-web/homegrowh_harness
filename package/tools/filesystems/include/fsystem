@@ -2,3 +2,4 @@
 
 #include <fsysteam/read/reader.h>
 #include <fsysteam/edit/edit.h>
+#include <fsysteam/watcher/watcher.h>

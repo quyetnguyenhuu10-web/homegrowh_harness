@@ -2,7 +2,7 @@
 
 #if defined(_WIN32)
 
-#include "../../platform/windows/fsysteam/reader/windows_reader.h"
+#include "../../platform/windows/fsystem/reader/windows_reader.h"
 
 namespace fsystem
 {

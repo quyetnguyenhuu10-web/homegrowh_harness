@@ -2,7 +2,7 @@
 
 #if defined(_WIN32)
 
-#include "../../platform/windows/fsysteam/edit/window_edit.h"
+#include "../../platform/windows/fsystem/edit/window_edit.h"
 
 namespace fsystem
 {
