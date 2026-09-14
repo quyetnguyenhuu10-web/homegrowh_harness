@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+find_package(Threads REQUIRED)
+
 # ---------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------
@@ -58,11 +60,13 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         PRIVATE
             src/platform/linux/fsysteam/reader/linux_reader.cpp
             src/platform/linux/fsysteam/edit/linux_edit.cpp
+            src/platform/linux/fsysteam/watcher/linux_watcher.cpp
     )
 
     target_compile_definitions(filesystems
         PRIVATE
             _POSIX_C_SOURCE=200809L
+            _GNU_SOURCE
     )
 
 else()
@@ -136,6 +140,7 @@ if(FILESYSTEMS_BUILD_TESTS)
     target_link_libraries(watch_file
         PRIVATE
             filesystems
+            Threads::Threads
     )
 
     add_test(

@@ -25,6 +25,6 @@ namespace fsystem
 
     WatcherResult watcher(
         std::filesystem::path path,
-        std::uint32_t timeout
+        int timeout_f
     );
 }

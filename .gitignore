@@ -1,3 +1,4 @@
 # Build directories
 **/build/
 **/build-ci/
+**/.cmake-build-filesystems/

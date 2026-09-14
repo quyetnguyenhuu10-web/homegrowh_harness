@@ -1,6 +1,5 @@
 {
-    "tool": "edit",
+    "tool": "chim",
     "path": "example.txt",
     "old_data": "world",
     "new_data": "world"
-d  s

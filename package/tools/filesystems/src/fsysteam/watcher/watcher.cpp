@@ -8,21 +8,25 @@ namespace fsystem
 {
     WatcherResult watcher(
         std::filesystem::path path,
-        std::uint32_t timeout
+        int timeout_f
     )
     {
-        return windows::watcher_file(path, timeout);
+        return windows::watcher_file(path, timeout_f);
     }
 }
 
 #elif defined(__linux__)
 
+#include "../../platform/linux/fsysteam/watcher/linux_watcher.h"
+
 namespace fsystem
 {
-    WatcherResult watcher(std::filesystem::path, std::uint32_t)
+    WatcherResult watcher(
+        std::filesystem::path path,
+        int timeout_f
+    )
     {
-        // Linux implementation is not available yet.
-        return {};
+        return linux::watcher_file(path, timeout_f);
     }
 }
 

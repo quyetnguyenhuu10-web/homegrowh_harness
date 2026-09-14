@@ -2,7 +2,7 @@
 
 #include "fsysteam/watcher/watcher.h"
 
-namespace fsystem::windows
+namespace fsystem::linux
 {
     WatcherResult watcher_file(
         std::filesystem::path path,

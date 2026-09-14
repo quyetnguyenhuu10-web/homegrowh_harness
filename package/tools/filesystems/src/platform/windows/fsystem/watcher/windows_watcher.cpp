@@ -25,16 +25,18 @@ namespace fsystem::windows
 
     WatcherResult watcher_file(
         std::filesystem::path path,
-        std::uint32_t timeout
+        int timeout_f
     )
     {
         WatcherResult watcher_result{};
 
-        if (timeout == INFINITE)
+        if (timeout_f < 0) // Kiểm tra timeout ban đầu cần là số nguyên lớn hơn 0
         {
             watcher_result.error = ERROR_INVALID_PARAMETER;
             return watcher_result;
         }
+        //Khi timeout ban đầu lớn hơn 0 chuyển sang số nguyên không âm để hoạt động ổn định.
+        std::uint32_t timeout = static_cast<std::uint32_t>(timeout_f); 
 
         std::filesystem::path parent_dir = path.parent_path();
         const std::wstring watched_file_name = path.filename().wstring();
@@ -74,7 +76,6 @@ namespace fsystem::windows
             return watcher_result;
         }
 
-        DWORD bytes_returned = 0;
         OVERLAPPED overlapped{};
         constexpr std::size_t event_buffer_capacity = 64 * 1024;
         std::vector<std::byte> events_temp(event_buffer_capacity);
@@ -84,12 +85,48 @@ namespace fsystem::windows
             (void)CancelIoEx(directory_handle, &overlapped);
 
             DWORD ignored_bytes = 0;
-            (void)GetOverlappedResult(
+            if (GetOverlappedResult(
                 directory_handle,
                 &overlapped,
                 &ignored_bytes,
-                TRUE
-            );
+                FALSE
+            ))
+            {
+                return;
+            }
+
+            if (GetLastError() != ERROR_IO_INCOMPLETE)
+                return;
+            
+            /*
+            Khi gọi CancelIoEx(), việc hủy I/O bất đồng bộ chưa chắc hoàn tất ngay.
+            Windows sẽ đưa một gói thông báo hoàn tất vào completion port.
+            Code cần xử lý gói tin đó trước khi giải phóng OVERLAPPED hoặc 
+            đóng handle thư mục, tránh việc hệ thống vẫn còn tham chiếu đến chúng.  
+            */
+            while (true)
+            {
+                OVERLAPPED_ENTRY completion{};
+                ULONG entries_removed = 0;
+
+                if (!GetQueuedCompletionStatusEx(
+                        io_completion_port.get(),
+                        &completion,
+                        1,
+                        &entries_removed,
+                        INFINITE,
+                        FALSE
+                    ))
+                {
+                    return;
+                }
+
+                if (entries_removed != 0 &&
+                    completion.lpOverlapped == &overlapped)
+                {
+                    return;
+                }
+            }
         };
 
         const DWORD wait_timeout = static_cast<DWORD>(timeout);
@@ -97,6 +134,7 @@ namespace fsystem::windows
 
         while (true) // Giữ timeout là thời gian chờ tổng của watcher, không reset lại sau mỗi lần nhận event.
         {
+            overlapped = {};
             events_temp.resize(event_buffer_capacity);
 
             BOOL result = ReadDirectoryChangesW(
@@ -108,7 +146,7 @@ namespace fsystem::windows
                 FILE_NOTIFY_CHANGE_DIR_NAME |
                 FILE_NOTIFY_CHANGE_LAST_WRITE |
                 FILE_NOTIFY_CHANGE_SIZE,
-                &bytes_returned,
+                nullptr,
                 &overlapped,
                 nullptr
             );

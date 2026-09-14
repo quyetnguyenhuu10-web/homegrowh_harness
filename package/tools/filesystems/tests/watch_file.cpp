@@ -1,7 +1,13 @@
 #include <fsystem>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <thread>
+#include <system_error>
 
 #if defined(_WIN32)
 #include <Windows.h>
@@ -89,12 +95,71 @@ namespace
 }
 #endif
 
+namespace
+{
+    struct temporary_file_guard
+    {
+        std::filesystem::path path;
+
+        ~temporary_file_guard() noexcept
+        {
+            std::error_code error;
+            (void)std::filesystem::remove(path, error);
+        }
+    };
+
+    bool write_file(
+        const std::filesystem::path& path,
+        const char* content
+    )
+    {
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+
+        if (!output)
+            return false;
+
+        output << content;
+        return output.good();
+    }
+}
+
 int main()
 {
-    auto result = fsystem::watcher(
-        R"(D:\homegrowh_harness\package\tools\filesystems\tests\tool_call.txt)",
-        10000
-    );
+    std::error_code filesystem_error;
+    const std::filesystem::path temp_directory =
+        std::filesystem::temp_directory_path(filesystem_error);
+
+    if (filesystem_error)
+    {
+        std::cerr << "Unable to determine the temporary directory.\n";
+        return 1;
+    }
+
+    const auto timestamp =
+        std::chrono::steady_clock::now().time_since_epoch().count();
+
+    const std::filesystem::path file_path = temp_directory /
+        ("filesystems-watcher-test-" + std::to_string(timestamp) + ".txt");
+
+    temporary_file_guard cleanup{file_path};
+
+    if (!write_file(file_path, "before\n"))
+    {
+        std::cerr << "Unable to create the watcher integration-test file.\n";
+        return 1;
+    }
+
+    std::atomic_bool writer_succeeded{false};
+
+    std::thread writer([&]()
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        writer_succeeded = write_file(file_path, "after\n");
+    });
+
+    const auto result = fsystem::watcher(file_path, 5000);
+
+    writer.join();
 
     const char* status_name = "NONE";
     switch (result.event_status)
@@ -113,6 +178,26 @@ int main()
               << "error: " << result.error << '\n'
               << "event buffers: " << result.events.size() << '\n'
               << "file event records: " << result.file_events.size() << '\n';
+
+    if (!writer_succeeded)
+    {
+        std::cerr << "Unable to modify the watcher integration-test file.\n";
+        return 1;
+    }
+
+    if (result.error != 0)
+    {
+        std::cerr << "Watcher returned an error: " << result.error << '\n';
+        return 1;
+    }
+
+    if (result.event_status != fsystem::EventStatus::HasEvent ||
+        result.events.empty() ||
+        result.file_events.empty())
+    {
+        std::cerr << "Watcher did not report the modified target file.\n";
+        return 1;
+    }
 
 #if defined(_WIN32)
     std::wcout << L"\nAll event records:\n";
