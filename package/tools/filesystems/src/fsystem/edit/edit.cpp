@@ -1,4 +1,4 @@
-#include "fsysteam/edit/edit.h"
+#include "fsystem/edit/edit.h"
 
 #if defined(_WIN32)
 
@@ -22,7 +22,7 @@ namespace fsystem
 
 #elif defined(__linux__)
 
-#include "../../platform/linux/fsysteam/edit/linux_edit.h"
+#include "../../platform/linux/fsystem/edit/linux_edit.h"
 
 namespace fsystem
 {

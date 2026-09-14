@@ -36,9 +36,10 @@ FetchContent_MakeAvailable(
 # ---------------------------------------------------------
 
 add_library(filesystems
-    src/fsysteam/read/reader.cpp
-    src/fsysteam/edit/edit.cpp
-    src/fsysteam/watcher/watcher.cpp
+    src/fsystem/read/reader.cpp
+    src/fsystem/edit/edit.cpp
+    src/fsystem/watcher/watcher.cpp
+    src/fsystem/watcher/event_decoder.cpp
 )
 
 # ---------------------------------------------------------
@@ -52,15 +53,17 @@ if(WIN32)
             src/platform/windows/fsystem/reader/windows_reader.cpp
             src/platform/windows/fsystem/edit/windows_edit.cpp
             src/platform/windows/fsystem/watcher/windows_watcher.cpp
+            src/platform/windows/fsystem/watcher/event_decoder.cpp
     )
 
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 
     target_sources(filesystems
         PRIVATE
-            src/platform/linux/fsysteam/reader/linux_reader.cpp
-            src/platform/linux/fsysteam/edit/linux_edit.cpp
-            src/platform/linux/fsysteam/watcher/linux_watcher.cpp
+            src/platform/linux/fsystem/reader/linux_reader.cpp
+            src/platform/linux/fsystem/edit/linux_edit.cpp
+            src/platform/linux/fsystem/watcher/linux_watcher.cpp
+            src/platform/linux/fsystem/watcher/event_decoder.cpp
     )
 
     target_compile_definitions(filesystems

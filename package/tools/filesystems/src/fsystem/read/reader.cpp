@@ -1,4 +1,4 @@
-#include "fsysteam/read/reader.h"
+#include "fsystem/read/reader.h"
 
 #if defined(_WIN32)
 
@@ -14,7 +14,7 @@ namespace fsystem
 
 #elif defined(__linux__)
 
-#include "../../platform/linux/fsysteam/reader/linux_reader.h"
+#include "../../platform/linux/fsystem/reader/linux_reader.h"
 
 namespace fsystem
 {

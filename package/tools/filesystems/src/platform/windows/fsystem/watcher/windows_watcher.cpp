@@ -1,5 +1,11 @@
 #include <Windows.h>
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
 #include <memory>
+#include <vector>
 
 #include "windows_watcher.h"
 
@@ -21,6 +27,21 @@ namespace fsystem::windows
         };
 
         using unique_handle = std::unique_ptr<void, handle_deleter>;
+
+        constexpr std::size_t event_buffer_capacity = 64 * 1024;
+        constexpr ULONG max_completion_entries = 10;
+        constexpr ULONG_PTR completion_key = 1001;
+
+        struct read_operation
+        {
+            OVERLAPPED overlapped{};
+            std::vector<std::byte> buffer;
+
+            explicit read_operation(std::size_t capacity)
+                : buffer(capacity)
+            {
+            }
+        };
     }
 
     WatcherResult watcher_file(
@@ -30,16 +51,21 @@ namespace fsystem::windows
     {
         WatcherResult watcher_result{};
 
-        if (timeout_f < 0) // Kiểm tra timeout ban đầu cần là số nguyên lớn hơn 0
+        if (timeout_f < 0)
         {
             watcher_result.error = ERROR_INVALID_PARAMETER;
             return watcher_result;
         }
-        //Khi timeout ban đầu lớn hơn 0 chuyển sang số nguyên không âm để hoạt động ổn định.
-        std::uint32_t timeout = static_cast<std::uint32_t>(timeout_f); 
 
-        std::filesystem::path parent_dir = path.parent_path();
-        const std::wstring watched_file_name = path.filename().wstring();
+        const std::uint32_t timeout =
+            static_cast<std::uint32_t>(timeout_f);
+
+        const std::filesystem::path parent_dir =
+            path.parent_path();
+
+        const std::wstring watched_file_name =
+            path.filename().wstring();
+
         HANDLE directory_handle = CreateFileW(
             parent_dir.c_str(),
             FILE_LIST_DIRECTORY,
@@ -48,7 +74,8 @@ namespace fsystem::windows
             FILE_SHARE_DELETE,
             nullptr,
             OPEN_EXISTING,
-            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+            FILE_FLAG_BACKUP_SEMANTICS |
+            FILE_FLAG_OVERLAPPED,
             nullptr
         );
 
@@ -58,17 +85,16 @@ namespace fsystem::windows
             return watcher_result;
         }
 
-        unique_handle dHandle(directory_handle);
+        unique_handle directory_guard(directory_handle);
 
-        ULONG_PTR completionKey = 1001; // Key định danh thư mục
-
-        // Tạo IOCP mới đồng thời liên kết directory_handle vào luôn
-        unique_handle io_completion_port(CreateIoCompletionPort(
-            directory_handle, // Handle thư mục (hoặc Socket, File...)
-            nullptr,          // Truyền nullptr để báo hiệu TẠO MỚI một IOCP
-            completionKey,    // Key định danh cho handle này
-            0                 // Số luồng tối đa (0 = bằng số nhân CPU)
-        ));
+        unique_handle io_completion_port(
+            CreateIoCompletionPort(
+                directory_handle,
+                nullptr,
+                completion_key,
+                0
+            )
+        );
 
         if (io_completion_port.get() == nullptr)
         {
@@ -76,179 +102,302 @@ namespace fsystem::windows
             return watcher_result;
         }
 
-        OVERLAPPED overlapped{};
-        constexpr std::size_t event_buffer_capacity = 64 * 1024;
-        std::vector<std::byte> events_temp(event_buffer_capacity);
+        read_operation first_operation(event_buffer_capacity);
+        read_operation second_operation(event_buffer_capacity);
 
-        const auto finish_pending_io = [&]() noexcept
+        read_operation* pending_operation = &first_operation;
+        read_operation* spare_operation = &second_operation;
+
+        bool has_pending_io = false;
+
+        const auto submit_read =
+            [&](read_operation& operation) -> DWORD
         {
-            (void)CancelIoEx(directory_handle, &overlapped);
+            operation.overlapped = {};
+            operation.buffer.resize(event_buffer_capacity);
 
-            DWORD ignored_bytes = 0;
-            if (GetOverlappedResult(
+            const BOOL started = ReadDirectoryChangesW(
                 directory_handle,
-                &overlapped,
-                &ignored_bytes,
-                FALSE
-            ))
+                operation.buffer.data(),
+                static_cast<DWORD>(operation.buffer.size()),
+                FALSE,
+                FILE_NOTIFY_CHANGE_FILE_NAME |
+                FILE_NOTIFY_CHANGE_DIR_NAME |
+                FILE_NOTIFY_CHANGE_LAST_WRITE |
+                FILE_NOTIFY_CHANGE_SIZE,
+                nullptr,
+                &operation.overlapped,
+                nullptr
+            );
+
+            if (started == FALSE)
             {
-                return;
+                const DWORD error = GetLastError();
+
+                if (error != ERROR_IO_PENDING)
+                    return error;
             }
 
-            if (GetLastError() != ERROR_IO_INCOMPLETE)
-                return;
-            
-            /*
-            Khi gọi CancelIoEx(), việc hủy I/O bất đồng bộ chưa chắc hoàn tất ngay.
-            Windows sẽ đưa một gói thông báo hoàn tất vào completion port.
-            Code cần xử lý gói tin đó trước khi giải phóng OVERLAPPED hoặc 
-            đóng handle thư mục, tránh việc hệ thống vẫn còn tham chiếu đến chúng.  
-            */
+            return ERROR_SUCCESS;
+        };
+
+        const auto finish_pending_io =
+            [&](read_operation& operation) noexcept
+        {
+            (void)CancelIoEx(
+                directory_handle,
+                &operation.overlapped
+            );
+
             while (true)
             {
                 OVERLAPPED_ENTRY completion{};
                 ULONG entries_removed = 0;
 
                 if (!GetQueuedCompletionStatusEx(
-                        io_completion_port.get(),
-                        &completion,
-                        1,
-                        &entries_removed,
-                        INFINITE,
-                        FALSE
-                    ))
+                    io_completion_port.get(),
+                    &completion,
+                    1,
+                    &entries_removed,
+                    INFINITE,
+                    FALSE
+                ))
                 {
                     return;
                 }
 
-                if (entries_removed != 0 &&
-                    completion.lpOverlapped == &overlapped)
+                if (
+                    entries_removed != 0 &&
+                    completion.lpOverlapped ==
+                        &operation.overlapped
+                )
                 {
                     return;
                 }
             }
         };
 
-        const DWORD wait_timeout = static_cast<DWORD>(timeout);
-        const ULONGLONG wait_started_at = GetTickCount64();
+        const DWORD submit_error =
+            submit_read(*pending_operation);
 
-        while (true) // Giữ timeout là thời gian chờ tổng của watcher, không reset lại sau mỗi lần nhận event.
+        if (submit_error != ERROR_SUCCESS)
         {
-            overlapped = {};
-            events_temp.resize(event_buffer_capacity);
+            watcher_result.error = submit_error;
+            return watcher_result;
+        }
 
-            BOOL result = ReadDirectoryChangesW(
-                directory_handle,
-                events_temp.data(),
-                static_cast<DWORD>(events_temp.size()),
-                FALSE, // không watch subdirectory
-                FILE_NOTIFY_CHANGE_FILE_NAME |
-                FILE_NOTIFY_CHANGE_DIR_NAME |
-                FILE_NOTIFY_CHANGE_LAST_WRITE |
-                FILE_NOTIFY_CHANGE_SIZE,
-                nullptr,
-                &overlapped,
-                nullptr
-            );
+        has_pending_io = true;
 
-            if(result == FALSE)
+        const DWORD wait_timeout =
+            static_cast<DWORD>(timeout);
+
+        const ULONGLONG wait_started_at =
+            GetTickCount64();
+
+        try
+        {
+            while (true)
             {
-                const DWORD read_error = GetLastError();
-                if (read_error != ERROR_IO_PENDING)
+                const ULONGLONG elapsed =
+                    GetTickCount64() - wait_started_at;
+
+                const DWORD remaining_timeout =
+                    elapsed >= wait_timeout
+                        ? 0
+                        : static_cast<DWORD>(
+                            wait_timeout - elapsed
+                        );
+
+                std::array<
+                    OVERLAPPED_ENTRY,
+                    max_completion_entries
+                > completions{};
+
+                ULONG entries_removed = 0;
+
+                const BOOL got_events =
+                    GetQueuedCompletionStatusEx(
+                        io_completion_port.get(),
+                        completions.data(),
+                        max_completion_entries,
+                        &entries_removed,
+                        remaining_timeout,
+                        FALSE
+                    );
+
+                if (got_events == FALSE)
                 {
-                    watcher_result.error = read_error;
+                    const DWORD wait_error = GetLastError();
+
+                    if (wait_error == WAIT_TIMEOUT)
+                    {
+                        finish_pending_io(*pending_operation);
+                        has_pending_io = false;
+
+                        watcher_result.event_status =
+                            watcher_result.events.empty()
+                                ? EventStatus::NoEvent
+                                : EventStatus::HasEvent;
+
+                        watcher_result.error = ERROR_SUCCESS;
+                    }
+                    else
+                    {
+                        finish_pending_io(*pending_operation);
+                        has_pending_io = false;
+
+                        watcher_result.event_status =
+                            EventStatus::None;
+
+                        watcher_result.error = wait_error;
+                    }
+
                     return watcher_result;
                 }
-            }
 
-            const ULONG MAX_ENTRIES = 10;
-            std::vector<OVERLAPPED_ENTRY> events_overlap(MAX_ENTRIES);
-            ULONG numEntriesRemoved = 0;
+                std::size_t completion_index =
+                    entries_removed;
 
-            DWORD remaining_timeout = wait_timeout;
-            const ULONGLONG elapsed = GetTickCount64() - wait_started_at;
-            remaining_timeout = elapsed >= wait_timeout
-                ? 0
-                : static_cast<DWORD>(wait_timeout - elapsed);
-
-            BOOL get_events = GetQueuedCompletionStatusEx(
-                io_completion_port.get(),
-                events_overlap.data(),
-                MAX_ENTRIES,
-                &numEntriesRemoved,
-                remaining_timeout,
-                FALSE   // fAlertable
-            );
-
-            if (get_events == FALSE)
-            {
-                const DWORD wait_error = GetLastError();
-                if (wait_error == WAIT_TIMEOUT)
+                for (
+                    std::size_t index = 0;
+                    index < entries_removed;
+                    ++index
+                )
                 {
-                    finish_pending_io();
-                    watcher_result.event_status = watcher_result.events.empty()
-                        ? EventStatus::NoEvent
-                        : EventStatus::HasEvent;
-                    watcher_result.error = ERROR_SUCCESS;
+                    if (
+                        completions[index].lpCompletionKey ==
+                            completion_key &&
+                        completions[index].lpOverlapped ==
+                            &pending_operation->overlapped
+                    )
+                    {
+                        completion_index = index;
+                        break;
+                    }
                 }
-                else
+
+                if (completion_index == entries_removed)
+                    continue;
+
+                const DWORD bytes_transferred =
+                    static_cast<DWORD>(
+                        completions[completion_index]
+                            .dwNumberOfBytesTransferred
+                    );
+
+                /*
+                 * I/O cũ đã hoàn tất.
+                 * Buffer của pending_operation không còn bị Windows ghi nữa.
+                 */
+                read_operation* completed_operation =
+                    pending_operation;
+
+                /*
+                 * Đăng ký ReadDirectoryChangesW mới ngay lập tức
+                 * bằng buffer và OVERLAPPED khác.
+                 */
+                read_operation* next_operation =
+                    spare_operation;
+
+                has_pending_io = false;
+
+                const DWORD rearm_error =
+                    submit_read(*next_operation);
+
+                if (rearm_error != ERROR_SUCCESS)
                 {
-                    finish_pending_io();
-                    watcher_result.event_status = EventStatus::None;
-                    watcher_result.error = wait_error;
+                    watcher_result.event_status =
+                        EventStatus::None;
+
+                    watcher_result.error =
+                        rearm_error;
+
+                    return watcher_result;
                 }
-                return watcher_result;
-            }
-            // Nếu nhận được sự kiện, lọc sự kiện có mã completionKey = 1001, IOCP
-            std::size_t completion_index = numEntriesRemoved;
-            for (std::size_t index = 0; index < numEntriesRemoved; ++index)
-            {
-                if (events_overlap[index].lpCompletionKey == completionKey)
+
+                pending_operation = next_operation;
+                spare_operation = completed_operation;
+                has_pending_io = true;
+
+                /*
+                 * Chỉ sau khi I/O mới đã được đăng ký,
+                 * mới xử lý buffer cũ.
+                 */
+                if (bytes_transferred == 0)
+                    continue;
+
+                if (
+                    bytes_transferred >
+                    completed_operation->buffer.size()
+                )
                 {
-                    completion_index = index;
-                    break;
+                    watcher_result.event_status =
+                        EventStatus::None;
+
+                    watcher_result.error =
+                        ERROR_INVALID_DATA;
+
+                    finish_pending_io(*pending_operation);
+                    has_pending_io = false;
+
+                    return watcher_result;
                 }
-            }
 
-            // completion_index chứa vị trí trong events_overlap;
-            // nếu bằng numEntriesRemoved thì không tìm thấy phần tử phù hợp.
-            if (completion_index == numEntriesRemoved)
-            {
-                continue;
-            }
+                completed_operation->buffer.resize(
+                    bytes_transferred
+                );
 
-            const DWORD bytes_transferred =
-                static_cast<DWORD>(events_overlap[completion_index].dwNumberOfBytesTransferred);
-
-            if (bytes_transferred > 0)
-            {
-                events_temp.resize(bytes_transferred);
-                watcher_result.events.push_back(events_temp);
+                watcher_result.events.push_back(
+                    completed_operation->buffer
+                );
 
                 constexpr std::size_t notify_header_size =
-                    offsetof(FILE_NOTIFY_INFORMATION, FileName);
+                    offsetof(
+                        FILE_NOTIFY_INFORMATION,
+                        FileName
+                    );
+
                 std::size_t event_offset = 0;
 
-                while (event_offset + notify_header_size <= events_temp.size())
+                while (
+                    event_offset + notify_header_size <=
+                    completed_operation->buffer.size()
+                )
                 {
                     const auto* notify_information =
-                        reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(
-                            events_temp.data() + event_offset);
+                        reinterpret_cast<
+                            const FILE_NOTIFY_INFORMATION*
+                        >(
+                            completed_operation->buffer.data() +
+                            event_offset
+                        );
+
+                    const std::size_t remaining_bytes =
+                        completed_operation->buffer.size() -
+                        event_offset;
 
                     const std::size_t file_name_bytes =
                         notify_information->FileNameLength;
-                    if (file_name_bytes % sizeof(WCHAR) != 0 ||
-                        file_name_bytes > events_temp.size() - event_offset - notify_header_size)
+
+                    if (
+                        file_name_bytes % sizeof(WCHAR) != 0 ||
+                        file_name_bytes >
+                            remaining_bytes -
+                            notify_header_size
+                    )
                     {
                         break;
                     }
 
                     const std::size_t record_size =
                         notify_information->NextEntryOffset == 0
-                            ? events_temp.size() - event_offset
+                            ? remaining_bytes
                             : notify_information->NextEntryOffset;
-                    if (record_size < notify_header_size ||
-                        record_size > events_temp.size() - event_offset)
+
+                    if (
+                        record_size < notify_header_size ||
+                        record_size > remaining_bytes
+                    )
                     {
                         break;
                     }
@@ -261,24 +410,39 @@ namespace fsystem::windows
                     if (event_file_name == watched_file_name)
                     {
                         watcher_result.file_events.emplace_back(
-                            events_temp.begin() + event_offset,
-                            events_temp.begin() + event_offset + record_size
+                            completed_operation->buffer.begin() +
+                                event_offset,
+                            completed_operation->buffer.begin() +
+                                event_offset +
+                                record_size
                         );
                     }
 
-                    if (notify_information->NextEntryOffset == 0)
+                    if (
+                        notify_information->NextEntryOffset ==
+                        0
+                    )
+                    {
                         break;
+                    }
 
-                    event_offset += notify_information->NextEntryOffset;
+                    event_offset +=
+                        notify_information->NextEntryOffset;
                 }
 
-                watcher_result.event_status = EventStatus::HasEvent;
-                continue;
+                watcher_result.event_status =
+                    EventStatus::HasEvent;
+            }
+        }
+        catch (...)
+        {
+            if (has_pending_io)
+            {
+                finish_pending_io(*pending_operation);
+                has_pending_io = false;
             }
 
-            // Completion hợp lệ nhưng không có dữ liệu; tiếp tục chờ.
-            continue;
+            throw;
         }
-
     }
 }

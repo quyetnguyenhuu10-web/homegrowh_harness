@@ -1,99 +1,11 @@
 #include <fsystem>
 #include <atomic>
 #include <chrono>
-#include <cstddef>
-#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <thread>
 #include <system_error>
-
-#if defined(_WIN32)
-#include <Windows.h>
-
-namespace
-{
-    const wchar_t* event_action_name(DWORD action)
-    {
-        switch (action)
-        {
-        case FILE_ACTION_ADDED:
-            return L"ADDED";
-        case FILE_ACTION_REMOVED:
-            return L"REMOVED";
-        case FILE_ACTION_MODIFIED:
-            return L"MODIFIED";
-        case FILE_ACTION_RENAMED_OLD_NAME:
-            return L"RENAMED_OLD_NAME";
-        case FILE_ACTION_RENAMED_NEW_NAME:
-            return L"RENAMED_NEW_NAME";
-        default:
-            return L"UNKNOWN";
-        }
-    }
-
-    bool print_event_buffer(
-        const std::vector<std::byte>& buffer,
-        const wchar_t* group_name,
-        std::size_t buffer_index
-    )
-    {
-        constexpr std::size_t notify_header_size =
-            offsetof(FILE_NOTIFY_INFORMATION, FileName);
-        std::size_t event_offset = 0;
-        bool printed_event = false;
-
-        while (event_offset + notify_header_size <= buffer.size())
-        {
-            const auto* notify_information =
-                reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(
-                    buffer.data() + event_offset
-                );
-
-            const std::size_t file_name_bytes =
-                notify_information->FileNameLength;
-            const std::size_t record_size =
-                notify_information->NextEntryOffset == 0
-                    ? buffer.size() - event_offset
-                    : notify_information->NextEntryOffset;
-
-            if (record_size < notify_header_size ||
-                record_size > buffer.size() - event_offset ||
-                file_name_bytes % sizeof(WCHAR) != 0 ||
-                file_name_bytes > record_size - notify_header_size)
-            {
-                std::wcout << L"[" << group_name << L" #" << buffer_index
-                           << L"] malformed event record\n";
-                return false;
-            }
-
-            const std::wstring file_name(
-                notify_information->FileName,
-                file_name_bytes / sizeof(WCHAR)
-            );
-
-            std::wcout << L"[" << group_name << L" #" << buffer_index << L"] "
-                       << event_action_name(notify_information->Action)
-                       << L" - " << file_name << L"\n";
-            printed_event = true;
-
-            if (notify_information->NextEntryOffset == 0)
-                break;
-
-            event_offset += notify_information->NextEntryOffset;
-        }
-
-        if (!printed_event)
-        {
-            std::wcout << L"[" << group_name << L" #" << buffer_index
-                       << L"] no event record\n";
-        }
-
-        return true;
-    }
-}
-#endif
 
 namespace
 {
@@ -199,19 +111,29 @@ int main()
         return 1;
     }
 
-#if defined(_WIN32)
-    std::wcout << L"\nAll event records:\n";
-    for (std::size_t index = 0; index < result.events.size(); ++index)
+    const auto decoded_result =
+        fsystem::EventWatcher::decode(result);
+
+    if (decoded_result.events.empty() ||
+        decoded_result.file_events.empty())
     {
-        print_event_buffer(result.events[index], L"all", index);
+        std::cerr << "EventWatcher did not decode the watcher result.\n";
+        return 1;
     }
 
-    std::wcout << L"\nMatching file event records:\n";
-    for (std::size_t index = 0; index < result.file_events.size(); ++index)
+    std::cout << "\nDecoded event records:\n";
+    for (const auto& event : decoded_result.events)
     {
-        print_event_buffer(result.file_events[index], L"file", index);
+        std::cout << event.action << " - "
+                  << event.file_name << '\n';
     }
-#endif
+
+    std::cout << "\nDecoded matching file events:\n";
+    for (const auto& event : decoded_result.file_events)
+    {
+        std::cout << event.action << " - "
+                  << event.file_name << '\n';
+    }
 
     return 0;
 }

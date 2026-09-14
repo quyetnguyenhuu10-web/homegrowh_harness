@@ -1,6 +1,6 @@
 #pragma once
 
-#include "fsysteam/edit/edit.h"
+#include "fsystem/edit/edit.h"
 
 namespace fsystem::linux
 {
