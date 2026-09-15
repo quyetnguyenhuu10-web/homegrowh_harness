@@ -6,6 +6,6 @@
 
 
 API: fsystem::watcher(path,timeout)
-RESULT: TRẢ về mảng event xảy ra trong quá trình theo dõi. 
+RESULT: TRẢ về trạng thái có/không có event của chính file được theo dõi.
 
 

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "windows_watcher.h"
@@ -31,6 +32,7 @@ namespace fsystem::windows
         constexpr std::size_t event_buffer_capacity = 64 * 1024;
         constexpr ULONG max_completion_entries = 10;
         constexpr ULONG_PTR completion_key = 1001;
+        constexpr DWORD state_poll_interval = 20;
 
         struct read_operation
         {
@@ -42,14 +44,70 @@ namespace fsystem::windows
             {
             }
         };
+
+        class watcher_state_guard
+        {
+        public:
+            explicit watcher_state_guard(WatcherState* state) noexcept
+                : state_(state)
+            {
+                if (state_ == nullptr)
+                    return;
+
+                state_->ready.store(false, std::memory_order_release);
+                state_->finished.store(false, std::memory_order_release);
+                state_->file_changed.store(
+                    false,
+                    std::memory_order_release
+                );
+            }
+
+            watcher_state_guard(const watcher_state_guard&) = delete;
+            watcher_state_guard& operator=(
+                const watcher_state_guard&
+            ) = delete;
+
+            ~watcher_state_guard() noexcept
+            {
+                if (state_ != nullptr)
+                {
+                    state_->finished.store(
+                        true,
+                        std::memory_order_release
+                    );
+                }
+            }
+
+        private:
+            WatcherState* state_;
+        };
+
+        bool stop_requested(const WatcherState* state) noexcept
+        {
+            return state != nullptr &&
+                state->stop_requested.load(std::memory_order_acquire);
+        }
+
+        void publish_file_changed(WatcherState* state) noexcept
+        {
+            if (state != nullptr)
+            {
+                state->file_changed.store(
+                    true,
+                    std::memory_order_release
+                );
+            }
+        }
     }
 
     WatcherResult watcher_file(
         std::filesystem::path path,
-        int timeout_f
+        int timeout_f,
+        WatcherState* state
     )
     {
         WatcherResult watcher_result{};
+        watcher_state_guard state_guard(state);
 
         if (timeout_f < 0)
         {
@@ -61,10 +119,18 @@ namespace fsystem::windows
             static_cast<std::uint32_t>(timeout_f);
 
         const std::filesystem::path parent_dir =
-            path.parent_path();
+            path.parent_path().empty()
+                ? std::filesystem::path(L".")
+                : path.parent_path();
 
         const std::wstring watched_file_name =
             path.filename().wstring();
+
+        if (watched_file_name.empty())
+        {
+            watcher_result.error = ERROR_INVALID_PARAMETER;
+            return watcher_result;
+        }
 
         HANDLE directory_handle = CreateFileW(
             parent_dir.c_str(),
@@ -109,6 +175,7 @@ namespace fsystem::windows
         read_operation* spare_operation = &second_operation;
 
         bool has_pending_io = false;
+        bool target_file_changed = false;
 
         const auto submit_read =
             [&](read_operation& operation) -> DWORD
@@ -177,6 +244,16 @@ namespace fsystem::windows
             }
         };
 
+        const auto finish_without_error = [&]()
+        {
+            watcher_result.event_status =
+                target_file_changed
+                    ? EventStatus::HasEvent
+                    : EventStatus::NoEvent;
+            watcher_result.error = ERROR_SUCCESS;
+            return watcher_result;
+        };
+
         const DWORD submit_error =
             submit_read(*pending_operation);
 
@@ -187,6 +264,11 @@ namespace fsystem::windows
         }
 
         has_pending_io = true;
+
+        if (state != nullptr)
+        {
+            state->ready.store(true, std::memory_order_release);
+        }
 
         const DWORD wait_timeout =
             static_cast<DWORD>(timeout);
@@ -208,6 +290,14 @@ namespace fsystem::windows
                             wait_timeout - elapsed
                         );
 
+                DWORD wait_slice = remaining_timeout;
+
+                if (state != nullptr &&
+                    wait_slice > state_poll_interval)
+                {
+                    wait_slice = state_poll_interval;
+                }
+
                 std::array<
                     OVERLAPPED_ENTRY,
                     max_completion_entries
@@ -221,7 +311,7 @@ namespace fsystem::windows
                         completions.data(),
                         max_completion_entries,
                         &entries_removed,
-                        remaining_timeout,
+                        wait_slice,
                         FALSE
                     );
 
@@ -231,27 +321,25 @@ namespace fsystem::windows
 
                     if (wait_error == WAIT_TIMEOUT)
                     {
-                        finish_pending_io(*pending_operation);
-                        has_pending_io = false;
+                        if (
+                            stop_requested(state) ||
+                            remaining_timeout == 0
+                        )
+                        {
+                            finish_pending_io(*pending_operation);
+                            has_pending_io = false;
+                            return finish_without_error();
+                        }
 
-                        watcher_result.event_status =
-                            watcher_result.events.empty()
-                                ? EventStatus::NoEvent
-                                : EventStatus::HasEvent;
-
-                        watcher_result.error = ERROR_SUCCESS;
-                    }
-                    else
-                    {
-                        finish_pending_io(*pending_operation);
-                        has_pending_io = false;
-
-                        watcher_result.event_status =
-                            EventStatus::None;
-
-                        watcher_result.error = wait_error;
+                        continue;
                     }
 
+                    finish_pending_io(*pending_operation);
+                    has_pending_io = false;
+
+                    watcher_result.event_status =
+                        EventStatus::None;
+                    watcher_result.error = wait_error;
                     return watcher_result;
                 }
 
@@ -286,16 +374,13 @@ namespace fsystem::windows
                     );
 
                 /*
-                 * I/O cũ đã hoàn tất.
-                 * Buffer của pending_operation không còn bị Windows ghi nữa.
+                 * I/O cũ đã hoàn tất. Buffer của pending_operation không
+                 * còn bị Windows ghi nữa, nên có thể parse trực tiếp.
                  */
                 read_operation* completed_operation =
                     pending_operation;
 
-                /*
-                 * Đăng ký ReadDirectoryChangesW mới ngay lập tức
-                 * bằng buffer và OVERLAPPED khác.
-                 */
+                /* Đăng ký I/O kế tiếp bằng buffer và OVERLAPPED khác. */
                 read_operation* next_operation =
                     spare_operation;
 
@@ -308,10 +393,7 @@ namespace fsystem::windows
                 {
                     watcher_result.event_status =
                         EventStatus::None;
-
-                    watcher_result.error =
-                        rearm_error;
-
+                    watcher_result.error = rearm_error;
                     return watcher_result;
                 }
 
@@ -319,10 +401,6 @@ namespace fsystem::windows
                 spare_operation = completed_operation;
                 has_pending_io = true;
 
-                /*
-                 * Chỉ sau khi I/O mới đã được đăng ký,
-                 * mới xử lý buffer cũ.
-                 */
                 if (bytes_transferred == 0)
                     continue;
 
@@ -333,22 +411,15 @@ namespace fsystem::windows
                 {
                     watcher_result.event_status =
                         EventStatus::None;
-
-                    watcher_result.error =
-                        ERROR_INVALID_DATA;
+                    watcher_result.error = ERROR_INVALID_DATA;
 
                     finish_pending_io(*pending_operation);
                     has_pending_io = false;
-
                     return watcher_result;
                 }
 
                 completed_operation->buffer.resize(
                     bytes_transferred
-                );
-
-                watcher_result.events.push_back(
-                    completed_operation->buffer
                 );
 
                 constexpr std::size_t notify_header_size =
@@ -364,6 +435,10 @@ namespace fsystem::windows
                     completed_operation->buffer.size()
                 )
                 {
+                    const std::size_t remaining_bytes =
+                        completed_operation->buffer.size() -
+                        event_offset;
+
                     const auto* notify_information =
                         reinterpret_cast<
                             const FILE_NOTIFY_INFORMATION*
@@ -371,23 +446,6 @@ namespace fsystem::windows
                             completed_operation->buffer.data() +
                             event_offset
                         );
-
-                    const std::size_t remaining_bytes =
-                        completed_operation->buffer.size() -
-                        event_offset;
-
-                    const std::size_t file_name_bytes =
-                        notify_information->FileNameLength;
-
-                    if (
-                        file_name_bytes % sizeof(WCHAR) != 0 ||
-                        file_name_bytes >
-                            remaining_bytes -
-                            notify_header_size
-                    )
-                    {
-                        break;
-                    }
 
                     const std::size_t record_size =
                         notify_information->NextEntryOffset == 0
@@ -402,36 +460,63 @@ namespace fsystem::windows
                         break;
                     }
 
-                    const std::wstring event_file_name(
-                        notify_information->FileName,
-                        file_name_bytes / sizeof(WCHAR)
-                    );
-
-                    if (event_file_name == watched_file_name)
-                    {
-                        watcher_result.file_events.emplace_back(
-                            completed_operation->buffer.begin() +
-                                event_offset,
-                            completed_operation->buffer.begin() +
-                                event_offset +
-                                record_size
-                        );
-                    }
+                    const std::size_t file_name_bytes =
+                        notify_information->FileNameLength;
 
                     if (
-                        notify_information->NextEntryOffset ==
-                        0
+                        file_name_bytes % sizeof(WCHAR) != 0 ||
+                        file_name_bytes >
+                            record_size - notify_header_size
                     )
                     {
                         break;
                     }
 
+                    const std::size_t file_name_characters =
+                        file_name_bytes / sizeof(WCHAR);
+
+                    const bool is_target_file =
+                        file_name_characters ==
+                            watched_file_name.size() &&
+                        CompareStringOrdinal(
+                            notify_information->FileName,
+                            static_cast<int>(
+                                file_name_characters
+                            ),
+                            watched_file_name.data(),
+                            static_cast<int>(
+                                watched_file_name.size()
+                            ),
+                            TRUE
+                        ) == CSTR_EQUAL;
+
+                    if (is_target_file)
+                    {
+                        target_file_changed = true;
+                        publish_file_changed(state);
+                        break;
+                    }
+
+                    if (notify_information->NextEntryOffset == 0)
+                        break;
+
                     event_offset +=
                         notify_information->NextEntryOffset;
                 }
 
-                watcher_result.event_status =
-                    EventStatus::HasEvent;
+                if (target_file_changed)
+                {
+                    finish_pending_io(*pending_operation);
+                    has_pending_io = false;
+                    return finish_without_error();
+                }
+
+                if (stop_requested(state))
+                {
+                    finish_pending_io(*pending_operation);
+                    has_pending_io = false;
+                    return finish_without_error();
+                }
             }
         }
         catch (...)

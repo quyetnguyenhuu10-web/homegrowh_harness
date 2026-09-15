@@ -1,5 +1,6 @@
 #include "linux_edit.h"
 
+#include <fsystem/edit/edit_detail.h>
 #include <fsystem/read/reader.h>
 
 #include <cerrno>
@@ -75,26 +76,6 @@ namespace fsystem::linux
         };
 
         using unique_fd = std::unique_ptr<int, fd_deleter>;
-
-        EditNote find_old_data(
-            const std::string& content,
-            const std::string& old_data,
-            std::size_t& first_occurrence
-        )
-        {
-            first_occurrence = content.find(old_data);
-
-            if (first_occurrence == std::string::npos)
-                return EditNote::old_data_not_found;
-
-            const std::size_t second_occurrence =
-                content.find(old_data, first_occurrence + 1);
-
-            if (second_occurrence != std::string::npos)
-                return EditNote::old_data_appears_more_than_once;
-
-            return EditNote::none;
-        }
 
         std::string build_new_content(
             const std::string& content,
@@ -227,6 +208,29 @@ namespace fsystem::linux
     {
         EditResult edit_result{};
 
+        fsystem::WatcherState watcher_state;
+        fsystem::WatcherResult watcher_result{};
+        std::exception_ptr watcher_exception;
+
+        fsystem::detail::watcher_thread_guard watcher_thread(
+            path,
+            watcher_state,
+            watcher_result,
+            watcher_exception
+        );
+
+        if (
+            watcher_state.finished.load(std::memory_order_acquire) &&
+            !watcher_state.ready.load(std::memory_order_acquire)
+        )
+        {
+            watcher_thread.stop();
+            edit_result.error = watcher_exception != nullptr
+                ? fsystem::detail::watcher_thread_exception_error
+                : watcher_result.error;
+            return edit_result;
+        }
+
         auto result = fsystem::read(path);
 
         if (result.error != 0)
@@ -239,7 +243,7 @@ namespace fsystem::linux
 
         std::size_t first_occurrence = std::string::npos;
 
-        edit_result.note = find_old_data(
+        edit_result.note = fsystem::detail::find_old_data(
             result.content,
             old_data,
             first_occurrence
@@ -254,6 +258,34 @@ namespace fsystem::linux
             old_data,
             new_data
         );
+
+        /*
+         * Đây là điểm kiểm tra cuối cùng. Các bước đọc, tìm và dựng nội
+         * dung mới vẫn hoàn tất trước khi hỏi watcher về cạnh tranh file.
+         */
+        watcher_thread.stop();
+
+        if (watcher_exception != nullptr)
+        {
+            edit_result.error =
+                fsystem::detail::watcher_thread_exception_error;
+            return edit_result;
+        }
+
+        if (watcher_result.error != 0)
+        {
+            edit_result.error = watcher_result.error;
+            return edit_result;
+        }
+
+        if (
+            watcher_state.file_changed.load(std::memory_order_acquire) ||
+            watcher_result.event_status == EventStatus::HasEvent
+        )
+        {
+            edit_result.note = EditNote::file_changed;
+            return edit_result;
+        }
 
         write_and_replace(
             path,

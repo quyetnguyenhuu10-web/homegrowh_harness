@@ -6,6 +6,7 @@ namespace fsystem::windows
 {
     WatcherResult watcher_file(
         std::filesystem::path path,
-        int timeout_f
+        int timeout_f,
+        WatcherState* state = nullptr
     );
 }

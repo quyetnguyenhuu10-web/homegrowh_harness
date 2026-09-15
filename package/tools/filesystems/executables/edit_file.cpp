@@ -19,6 +19,9 @@ const char* to_string(fsystem::EditNote note)
 
         case fsystem::EditNote::old_data_appears_more_than_once:
             return "old_data_appears_more_than_once";
+
+        case fsystem::EditNote::file_changed:
+            return "file_changed";
     }
 
     return "unknown";

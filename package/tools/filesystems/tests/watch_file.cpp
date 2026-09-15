@@ -53,7 +53,12 @@ int main()
     const std::filesystem::path file_path = temp_directory /
         ("filesystems-watcher-test-" + std::to_string(timestamp) + ".txt");
 
+    const std::filesystem::path unrelated_file_path = temp_directory /
+        ("filesystems-watcher-unrelated-" +
+         std::to_string(timestamp) + ".txt");
+
     temporary_file_guard cleanup{file_path};
+    temporary_file_guard unrelated_cleanup{unrelated_file_path};
 
     if (!write_file(file_path, "before\n"))
     {
@@ -61,17 +66,56 @@ int main()
         return 1;
     }
 
+    if (!write_file(unrelated_file_path, "before\n"))
+    {
+        std::cerr << "Unable to create the unrelated watcher test file.\n";
+        return 1;
+    }
+
     std::atomic_bool writer_succeeded{false};
+
+    fsystem::WatcherState watcher_state;
+    fsystem::WatcherResult result{};
+
+    std::thread watcher_thread([&]()
+    {
+        result = fsystem::watcher(file_path, 5000, watcher_state);
+    });
+
+    while (
+        !watcher_state.ready.load(std::memory_order_acquire) &&
+        !watcher_state.finished.load(std::memory_order_acquire)
+    )
+    {
+        std::this_thread::yield();
+    }
+
+    if (
+        watcher_state.finished.load(std::memory_order_acquire) &&
+        !watcher_state.ready.load(std::memory_order_acquire)
+    )
+    {
+        watcher_thread.join();
+        std::cerr << "Watcher failed to start. Error: "
+                  << result.error << '\n';
+        return 1;
+    }
 
     std::thread writer([&]()
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        writer_succeeded = write_file(file_path, "after\n");
+        const bool unrelated_write =
+            write_file(unrelated_file_path, "unrelated\n");
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        writer_succeeded =
+            unrelated_write &&
+            write_file(file_path, "after\n");
     });
 
-    const auto result = fsystem::watcher(file_path, 5000);
-
     writer.join();
+    watcher_thread.join();
 
     const char* status_name = "NONE";
     switch (result.event_status)
@@ -87,9 +131,7 @@ int main()
     }
 
     std::cout << "status: " << status_name << '\n'
-              << "error: " << result.error << '\n'
-              << "event buffers: " << result.events.size() << '\n'
-              << "file event records: " << result.file_events.size() << '\n';
+              << "error: " << result.error << '\n';
 
     if (!writer_succeeded)
     {
@@ -103,36 +145,13 @@ int main()
         return 1;
     }
 
-    if (result.event_status != fsystem::EventStatus::HasEvent ||
-        result.events.empty() ||
-        result.file_events.empty())
+    if (
+        result.event_status != fsystem::EventStatus::HasEvent ||
+        !watcher_state.file_changed.load(std::memory_order_acquire)
+    )
     {
         std::cerr << "Watcher did not report the modified target file.\n";
         return 1;
-    }
-
-    const auto decoded_result =
-        fsystem::EventWatcher::decode(result);
-
-    if (decoded_result.events.empty() ||
-        decoded_result.file_events.empty())
-    {
-        std::cerr << "EventWatcher did not decode the watcher result.\n";
-        return 1;
-    }
-
-    std::cout << "\nDecoded event records:\n";
-    for (const auto& event : decoded_result.events)
-    {
-        std::cout << event.action << " - "
-                  << event.file_name << '\n';
-    }
-
-    std::cout << "\nDecoded matching file events:\n";
-    for (const auto& event : decoded_result.file_events)
-    {
-        std::cout << event.action << " - "
-                  << event.file_name << '\n';
     }
 
     return 0;

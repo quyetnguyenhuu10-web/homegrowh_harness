@@ -39,7 +39,6 @@ add_library(filesystems
     src/fsystem/read/reader.cpp
     src/fsystem/edit/edit.cpp
     src/fsystem/watcher/watcher.cpp
-    src/fsystem/watcher/event_decoder.cpp
 )
 
 # ---------------------------------------------------------
@@ -53,7 +52,6 @@ if(WIN32)
             src/platform/windows/fsystem/reader/windows_reader.cpp
             src/platform/windows/fsystem/edit/windows_edit.cpp
             src/platform/windows/fsystem/watcher/windows_watcher.cpp
-            src/platform/windows/fsystem/watcher/event_decoder.cpp
     )
 
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -63,7 +61,6 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             src/platform/linux/fsystem/reader/linux_reader.cpp
             src/platform/linux/fsystem/edit/linux_edit.cpp
             src/platform/linux/fsystem/watcher/linux_watcher.cpp
-            src/platform/linux/fsystem/watcher/event_decoder.cpp
     )
 
     target_compile_definitions(filesystems
@@ -88,6 +85,11 @@ target_include_directories(filesystems
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(filesystems
+    PUBLIC
+        Threads::Threads
 )
 
 # ---------------------------------------------------------

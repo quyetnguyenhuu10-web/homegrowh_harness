@@ -149,6 +149,7 @@ namespace fsystem::linux
         constexpr std::uint64_t completion_key = 1001;
         constexpr std::size_t event_buffer_capacity = 64 * 1024;
         constexpr int max_epoll_entries = 10;
+        constexpr int state_poll_interval = 20;
 
         constexpr std::uint32_t watch_mask =
             IN_CREATE |
@@ -163,14 +164,70 @@ namespace fsystem::linux
         {
             return static_cast<std::uint32_t>(errno);
         }
+
+        class watcher_state_guard
+        {
+        public:
+            explicit watcher_state_guard(WatcherState* state) noexcept
+                : state_(state)
+            {
+                if (state_ == nullptr)
+                    return;
+
+                state_->ready.store(false, std::memory_order_release);
+                state_->finished.store(false, std::memory_order_release);
+                state_->file_changed.store(
+                    false,
+                    std::memory_order_release
+                );
+            }
+
+            watcher_state_guard(const watcher_state_guard&) = delete;
+            watcher_state_guard& operator=(
+                const watcher_state_guard&
+            ) = delete;
+
+            ~watcher_state_guard() noexcept
+            {
+                if (state_ != nullptr)
+                {
+                    state_->finished.store(
+                        true,
+                        std::memory_order_release
+                    );
+                }
+            }
+
+        private:
+            WatcherState* state_;
+        };
+
+        bool stop_requested(const WatcherState* state) noexcept
+        {
+            return state != nullptr &&
+                state->stop_requested.load(std::memory_order_acquire);
+        }
+
+        void publish_file_changed(WatcherState* state) noexcept
+        {
+            if (state != nullptr)
+            {
+                state->file_changed.store(
+                    true,
+                    std::memory_order_release
+                );
+            }
+        }
     }
 
     WatcherResult watcher_file(
         std::filesystem::path path,
-        int timeout_f
+        int timeout_f,
+        WatcherState* state
     )
     {
         WatcherResult watcher_result{};
+        watcher_state_guard state_guard(state);
 
         if (timeout_f < 0)
         {
@@ -263,6 +320,11 @@ namespace fsystem::linux
             return watcher_result;
         }
 
+        if (state != nullptr)
+        {
+            state->ready.store(true, std::memory_order_release);
+        }
+
         const auto rearm_epoll = [&]() noexcept
             -> std::uint32_t
         {
@@ -317,13 +379,15 @@ namespace fsystem::linux
             );
         };
 
+        bool target_file_changed = false;
+
         const auto finish_after_timeout = [&]()
             -> WatcherResult
         {
             watcher_result.event_status =
-                watcher_result.events.empty()
-                    ? EventStatus::NoEvent
-                    : EventStatus::HasEvent;
+                target_file_changed
+                    ? EventStatus::HasEvent
+                    : EventStatus::NoEvent;
 
             return watcher_result;
         };
@@ -341,8 +405,14 @@ namespace fsystem::linux
 
         while (true)
         {
-            const int wait_timeout =
+            const int remaining_wait =
                 remaining_timeout();
+
+            const int wait_timeout =
+                state != nullptr &&
+                        remaining_wait > state_poll_interval
+                    ? state_poll_interval
+                    : remaining_wait;
 
             const int events_ready = ::epoll_wait(
                 event_handle.get().get(),
@@ -382,6 +452,9 @@ namespace fsystem::linux
                     queue_overflow
                         ? EOVERFLOW
                         : 0;
+
+                if (stop_requested(state))
+                    watcher_result.error = 0;
 
                 return finish_after_timeout();
             }
@@ -549,12 +622,8 @@ namespace fsystem::linux
                 static_cast<std::size_t>(bytes_read)
             );
 
-            watcher_result.events.push_back(
-                events_temp
-            );
-
             const std::vector<std::byte>& event_buffer =
-                watcher_result.events.back();
+                events_temp;
 
             constexpr std::size_t event_header_size =
                 offsetof(inotify_event, name);
@@ -661,25 +730,19 @@ namespace fsystem::linux
                         ) == watched_file_name
                     )
                     {
-                        watcher_result.file_events.emplace_back(
-                            event_buffer.begin() +
-                                static_cast<std::ptrdiff_t>(
-                                    event_offset
-                                ),
-                            event_buffer.begin() +
-                                static_cast<std::ptrdiff_t>(
-                                    event_offset +
-                                    event_size
-                                )
-                        );
+                        target_file_changed = true;
+                        publish_file_changed(state);
                     }
                 }
 
                 event_offset += event_size;
             }
 
-            watcher_result.event_status =
-                EventStatus::HasEvent;
+            if (target_file_changed)
+                return finish_after_timeout();
+
+            if (stop_requested(state))
+                return finish_after_timeout();
         }
     }
 }

@@ -11,6 +11,7 @@ namespace fsystem
         none,
         old_data_not_found,
         old_data_appears_more_than_once,
+        file_changed,
     };
 
     struct EditResult
