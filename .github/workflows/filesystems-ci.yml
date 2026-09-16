@@ -10,6 +10,15 @@ on:
       - '.github/workflows/filesystems-ci.yml'
       - 'package/tools/filesystems/**'
   workflow_dispatch:
+    inputs:
+      stress_profile:
+        description: 'Stress profile to run'
+        required: true
+        default: standard
+        type: choice
+        options:
+          - standard
+          - extreme
 
 permissions:
   contents: read
@@ -18,11 +27,14 @@ concurrency:
   group: filesystems-ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  STRESS_PROFILE: ${{ inputs.stress_profile || 'standard' }}
+
 jobs:
   build-and-test:
     name: ${{ matrix.os }} / ${{ matrix.build_type }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -41,7 +53,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure
-        run: cmake -S . -B build-ci -DFILESYSTEMS_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        run: >-
+          cmake -S . -B build-ci
+          -DFILESYSTEMS_BUILD_TESTS=ON
+          -DFILESYSTEMS_BUILD_LINUX_STRESS_TESTS=ON
+          -DFILESYSTEMS_BUILD_WINDOWS_STRESS_TESTS=ON
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
 
       - name: Build
         run: cmake --build build-ci --config ${{ matrix.build_type }} --parallel
@@ -62,6 +79,45 @@ jobs:
           --timeout 20
           -R "^(file_reader_test|file_edit_test)$"
 
+      - name: Run shared chunk matcher stress test
+        run: >-
+          ctest --test-dir build-ci
+          -C ${{ matrix.build_type }}
+          --output-on-failure
+          --timeout 120
+          -R "^chunk_matcher_stress_test$"
+
+      - name: Run Linux edit stress suite
+        if: matrix.os == 'ubuntu-latest'
+        run: >-
+          ctest --test-dir build-ci
+          -C ${{ matrix.build_type }}
+          --output-on-failure
+          --timeout 1800
+          -R "^linux_edit_stress_${{ env.STRESS_PROFILE }}_test$"
+
+      - name: Run Windows edit stress suite
+        if: matrix.os == 'windows-latest'
+        run: >-
+          ctest --test-dir build-ci
+          -C ${{ matrix.build_type }}
+          --output-on-failure
+          --timeout 1800
+          -R "^windows_edit_stress_${{ env.STRESS_PROFILE }}_test$"
+
+      - name: Generate Windows edit stress report
+        if: always() && matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $results = "build-ci/windows-edit-stress-${{ env.STRESS_PROFILE }}-results"
+          $csv = "$results/results.csv"
+          $report = "$results/report.html"
+          if (Test-Path $csv) {
+            node tests/platform/windows/fsystem/edit/windows_edit_stress_report.mjs `
+              --input $csv `
+              --output $report
+          }
+
       - name: Upload watcher binary
         if: success() && github.event_name == 'push'
         uses: actions/upload-artifact@v4
@@ -77,3 +133,19 @@ jobs:
           name: file-edit-${{ matrix.os }}
           path: package/tools/filesystems/build-ci/**/file_edit*
           if-no-files-found: error
+
+      - name: Upload Linux edit stress results
+        if: always() && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-edit-stress-${{ env.STRESS_PROFILE }}
+          path: package/tools/filesystems/build-ci/linux-edit-stress-*-results/**
+          if-no-files-found: warn
+
+      - name: Upload Windows edit stress results
+        if: always() && matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-edit-stress-${{ env.STRESS_PROFILE }}
+          path: package/tools/filesystems/build-ci/windows-edit-stress-*-results/**
+          if-no-files-found: warn

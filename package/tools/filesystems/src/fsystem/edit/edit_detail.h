@@ -3,6 +3,7 @@
 #include "fsystem/edit/edit.h"
 #include "fsystem/watcher/watcher.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cstdint>
 #include <exception>
@@ -98,8 +99,26 @@ namespace fsystem::detail
             std::numeric_limits<std::uint64_t>::max();
 
         explicit chunk_matcher(std::string old_data)
-            : pattern_(std::move(old_data))
+            : pattern_(std::move(old_data)),
+              prefix_function_(pattern_.size(), 0)
         {
+            std::size_t matched = 0;
+
+            for (std::size_t index = 1; index < pattern_.size(); ++index)
+            {
+                while (
+                    matched != 0 &&
+                    pattern_[index] != pattern_[matched]
+                )
+                {
+                    matched = prefix_function_[matched - 1];
+                }
+
+                if (pattern_[index] == pattern_[matched])
+                    ++matched;
+
+                prefix_function_[index] = matched;
+            }
         }
 
         chunk_matcher(const chunk_matcher&) = delete;
@@ -121,8 +140,15 @@ namespace fsystem::detail
 
             if (!pattern_.empty())
             {
+                const std::size_t boundary_length = std::min(
+                    chunk.size(),
+                    pattern_.size() - 1
+                );
+
                 std::vector<checkpoint> next_checkpoints;
-                next_checkpoints.reserve(checkpoints_.size() + 1);
+                next_checkpoints.reserve(
+                    checkpoints_.size() + boundary_length
+                );
 
                 for (const checkpoint& candidate : checkpoints_)
                 {
@@ -171,36 +197,44 @@ namespace fsystem::detail
                     );
                 }
 
-                const std::size_t minimum_start =
-                    chunk.size() > pattern_.size()
-                        ? chunk.size() - pattern_.size() + 1
-                        : 0;
-
-                for (
-                    std::size_t start = minimum_start;
-                    start < chunk.size();
-                    ++start
-                )
+                if (boundary_length != 0)
                 {
-                    const std::size_t matched = chunk.size() - start;
+                    const std::size_t boundary_start =
+                        chunk.size() - boundary_length;
+                    std::size_t matched = 0;
 
-                    if (
-                        matched < pattern_.size() &&
-                        chunk.compare(
-                            start,
-                            matched,
-                            pattern_,
-                            0,
-                            matched
-                        ) == 0
+                    for (
+                        std::size_t index = boundary_start;
+                        index < chunk.size();
+                        ++index
                     )
+                    {
+                        while (
+                            matched != 0 &&
+                            pattern_[matched] != chunk[index]
+                        )
+                        {
+                            matched = prefix_function_[matched - 1];
+                        }
+
+                        if (pattern_[matched] == chunk[index])
+                            ++matched;
+                    }
+
+                    // The failure chain enumerates every suffix of the
+                    // boundary that is also a prefix of the pattern. Keep
+                    // all of them so overlapping cross-chunk occurrences
+                    // remain visible to duplicate detection.
+                    while (matched != 0)
                     {
                         next_checkpoints.push_back(
                             checkpoint{
-                                chunk_offset + start,
+                                chunk_offset + chunk.size() - matched,
                                 matched
                             }
                         );
+
+                        matched = prefix_function_[matched - 1];
                     }
                 }
 
@@ -269,11 +303,19 @@ namespace fsystem::detail
             if (first_occurrence_ != start)
             {
                 duplicate_ = true;
-                note_ = EditNote::old_data_appears_more_than_once;
+
+                const std::uint64_t distance = start > first_occurrence_
+                    ? start - first_occurrence_
+                    : first_occurrence_ - start;
+
+                note_ = distance < pattern_.size()
+                    ? EditNote::old_data_occurrences_overlap
+                    : EditNote::old_data_appears_more_than_once;
             }
         }
 
         std::string pattern_;
+        std::vector<std::size_t> prefix_function_;
         std::vector<checkpoint> checkpoints_;
         std::uint64_t next_chunk_offset_ = 0;
         std::uint64_t first_occurrence_ = no_occurrence;

@@ -1,10 +1,10 @@
 #include <fsystem>
 #include <fsystem/edit/edit_detail.h>
+#include <test_support.h>
 
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <initializer_list>
 #include <iostream>
 #include <string>
@@ -13,35 +13,6 @@
 
 namespace
 {
-    struct temporary_file_guard
-    {
-        std::filesystem::path path;
-
-        ~temporary_file_guard() noexcept
-        {
-            std::error_code error;
-            (void)std::filesystem::remove(path, error);
-        }
-    };
-
-    bool write_file(
-        const std::filesystem::path& path,
-        const std::string& content
-    )
-    {
-        std::ofstream output(path, std::ios::binary | std::ios::trunc);
-
-        if (!output)
-            return false;
-
-        output.write(
-            content.data(),
-            static_cast<std::streamsize>(content.size())
-        );
-
-        return output.good();
-    }
-
     bool expect(bool condition, const std::string& message)
     {
         if (condition)
@@ -130,8 +101,15 @@ int main()
             "aaa",
             {"aa", "aa"},
             0,
-            fsystem::EditNote::old_data_appears_more_than_once,
+            fsystem::EditNote::old_data_occurrences_overlap,
             "overlapping cross-boundary matches"
+        ) ||
+        !expect_chunk_matcher(
+            "ABA",
+            {"AB", "ABA"},
+            0,
+            fsystem::EditNote::old_data_occurrences_overlap,
+            "overlapping ABA matches across a chunk boundary"
         ))
     {
         return 1;
@@ -155,7 +133,7 @@ int main()
     const std::filesystem::path test_path = temp_directory /
         ("filesystems-edit-test-" + std::to_string(timestamp) + ".txt");
 
-    temporary_file_guard cleanup{test_path};
+    test_support::temporary_file_guard cleanup{test_path};
 
     const std::string old_data = "old_data=hello";
     const std::string new_data = "old_data=world";
@@ -165,7 +143,7 @@ int main()
         "before\n" + new_data + "\nafter\n";
 
     if (!expect(
-            write_file(test_path, original_content),
+            test_support::write_file(test_path, original_content),
             "Unable to create the edit integration-test file."
         ))
     {
@@ -218,7 +196,7 @@ int main()
         std::string(65535, 'p') + boundary_new_data + "\nboundary-tail";
 
     if (!expect(
-            write_file(test_path, boundary_content),
+            test_support::write_file(test_path, boundary_content),
             "Unable to prepare the chunk-boundary edit case."
         ))
     {
@@ -280,7 +258,7 @@ int main()
         old_data + "\nseparator\n" + old_data + "\n";
 
     if (!expect(
-            write_file(test_path, duplicate_content),
+            test_support::write_file(test_path, duplicate_content),
             "Unable to prepare the duplicate-old-data case."
         ))
     {
@@ -320,8 +298,55 @@ int main()
         return 1;
     }
 
+    const std::string overlapping_content = "ABABA";
+
     if (!expect(
-            write_file(test_path, ""),
+            test_support::write_file(test_path, overlapping_content),
+            "Unable to prepare the overlapping-old-data case."
+        ))
+    {
+        return 1;
+    }
+
+    const fsystem::EditResult overlapping_old_data = fsystem::edit(
+        test_path,
+        "ABA",
+        "replacement"
+    );
+
+    if (!expect(
+            overlapping_old_data.error == 0,
+            "Overlapping-old-data case returned an unexpected error."
+        ) ||
+        !expect(
+            overlapping_old_data.note ==
+                fsystem::EditNote::old_data_occurrences_overlap,
+            "Overlapping-old-data case returned the wrong note."
+        ) ||
+        !expect(
+            !overlapping_old_data.replace_attempted,
+            "Overlapping-old-data case reached replacement unexpectedly."
+        ))
+    {
+        return 1;
+    }
+
+    const fsystem::ReadResult overlapping_file = fsystem::read(test_path);
+
+    if (!expect(
+            overlapping_file.error == 0,
+            "Unable to read the overlapping-case file."
+        ) ||
+        !expect(
+            overlapping_file.content == overlapping_content,
+            "Overlapping-old-data case modified the file unexpectedly."
+        ))
+    {
+        return 1;
+    }
+
+    if (!expect(
+            test_support::write_file(test_path, ""),
             "Unable to prepare the empty-file edit case."
         ))
     {

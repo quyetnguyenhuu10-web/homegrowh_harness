@@ -312,6 +312,7 @@ function buildReport(rows, inputPath) {
         inconclusive: rows.filter((row) => row.outcome === "inconclusive").length,
     };
     const failures = rows.filter((row) => row.outcome !== "pass");
+    const interferenceRows = rows.filter((row) => row.action !== "none");
     const profile = rows[0]?.profile ?? "from CSV";
     const cards = Object.entries(counts).map(([key, value]) =>
         `<div class="stat"><span>${escapeHtml(key)}</span>` +
@@ -325,6 +326,17 @@ function buildReport(rows, inputPath) {
             `<td>${escapeHtml(row.action)}</td>` +
             `<td>${escapeHtml(row.outcome)}</td>` +
             `<td>${escapeHtml(row.actual_note)}</td>` +
+            `<td>${escapeHtml(row.detail)}</td></tr>`
+        ).join("");
+    const interferenceTableRows = interferenceRows.length === 0
+        ? `<tr><td colspan="7">No interference cases.</td></tr>`
+        : interferenceRows.map((row) =>
+            `<tr><td>${escapeHtml(row.id)}</td>` +
+            `<td>${escapeHtml(row.action)}</td>` +
+            `<td>${escapeHtml(row.outcome)}</td>` +
+            `<td>${escapeHtml(row.actual_note)}</td>` +
+            `<td>${escapeHtml(row.interference_in_window)}</td>` +
+            `<td>${escapeHtml(row.lock_at_replace)}</td>` +
             `<td>${escapeHtml(row.detail)}</td></tr>`
         ).join("");
 
@@ -364,6 +376,9 @@ code { color: var(--muted); }
 <section><h2>Outcomes by scenario</h2>${outcomeChart(groups)}</section>
 <section><h2>Latency</h2>${latencyChart(groups)}</section>
 <section><h2>Memory versus input size</h2>${memoryChart(rows)}</section>
+<section><h2>Interference cases (${interferenceRows.length})</h2>
+<table><thead><tr><th>id</th><th>action</th><th>outcome</th><th>note</th><th>in window</th><th>lock at replace</th><th>detail</th></tr></thead>
+<tbody>${interferenceTableRows}</tbody></table></section>
 <section><h2>Failures and inconclusive cases</h2>
 <table><thead><tr><th>id</th><th>scenario</th><th>action</th><th>outcome</th><th>note</th><th>detail</th></tr></thead>
 <tbody>${failureRows}</tbody></table></section>

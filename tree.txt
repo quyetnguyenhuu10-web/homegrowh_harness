@@ -6,7 +6,8 @@ homegrowh_harness/
 │   └── Tiến_Độ.md
 ├── package
 │   ├── compaction
-│   │   └── src
+│   │   ├── src
+│   │   └── tests
 │   └── tools
 │       ├── filesystems
 │       │   ├── executables
@@ -51,6 +52,39 @@ homegrowh_harness/
 │       │   │                   ├── note.md
 │       │   │                   ├── windows_watcher.cpp
 │       │   │                   └── windows_watcher.h
+│       │   ├── tests
+│       │   │   ├── artifacts
+│       │   │   │   ├── windows-edit-stress-results
+│       │   │   │   │   ├── report.html
+│       │   │   │   │   ├── results.csv
+│       │   │   │   │   ├── results.jsonl
+│       │   │   │   │   ├── summary.json
+│       │   │   │   │   └── summary.txt
+│       │   │   │   ├── chunk-matcher-stress-rendered.html
+│       │   │   │   └── chunk-matcher-stress.html
+│       │   │   ├── cross_platform
+│       │   │   │   └── fsystem
+│       │   │   │       ├── edit
+│       │   │   │       │   ├── chunk_matcher_stress.cpp
+│       │   │   │       │   └── edit_test.cpp
+│       │   │   │       ├── read
+│       │   │   │       │   └── reader_test.cpp
+│       │   │   │       └── watcher
+│       │   │   │           └── watcher_test.cpp
+│       │   │   ├── include
+│       │   │   │   └── test_support.h
+│       │   │   └── platform
+│       │   │       ├── linux
+│       │   │       │   └── fsystem
+│       │   │       │       └── edit
+│       │   │       │           ├── linux_edit_stress.cpp
+│       │   │       │           └── LINUX_EDIT_STRESS.md
+│       │   │       └── windows
+│       │   │           └── fsystem
+│       │   │               └── edit
+│       │   │                   ├── windows_edit_stress.cpp
+│       │   │                   ├── WINDOWS_EDIT_STRESS.md
+│       │   │                   └── windows_edit_stress_report.mjs
 │       │   └── CMakeLists.txt
 │       └── CMakeLists.txt
 ├── .gitattributes

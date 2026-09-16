@@ -22,6 +22,9 @@ const char* to_string(fsystem::EditNote note)
 
         case fsystem::EditNote::file_changed:
             return "file_changed";
+
+        case fsystem::EditNote::old_data_occurrences_overlap:
+            return "old_data_occurrences_overlap";
     }
 
     return "unknown";

@@ -1,43 +1,11 @@
 #include <fsystem>
+#include <test_support.h>
 
 #include <chrono>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <string>
 #include <system_error>
-
-namespace
-{
-    struct temporary_file_guard
-    {
-        std::filesystem::path path;
-
-        ~temporary_file_guard() noexcept
-        {
-            std::error_code error;
-            (void)std::filesystem::remove(path, error);
-        }
-    };
-
-    bool write_file(
-        const std::filesystem::path& path,
-        const std::string& content
-    )
-    {
-        std::ofstream output(path, std::ios::binary | std::ios::trunc);
-
-        if (!output)
-            return false;
-
-        output.write(
-            content.data(),
-            static_cast<std::streamsize>(content.size())
-        );
-
-        return output.good();
-    }
-}
 
 int main()
 {
@@ -57,12 +25,12 @@ int main()
     const std::filesystem::path file_path = temp_directory /
         ("filesystems-reader-test-" + std::to_string(timestamp) + ".txt");
 
-    temporary_file_guard cleanup{file_path};
+    test_support::temporary_file_guard cleanup{file_path};
 
     const std::string expected_content =
         "reader integration test content\n";
 
-    if (!write_file(file_path, expected_content))
+    if (!test_support::write_file(file_path, expected_content))
     {
         std::cerr << "Unable to create the reader integration-test file.\n";
         return 1;

@@ -1,40 +1,13 @@
 #include <fsystem>
+#include <test_support.h>
+
 #include <atomic>
 #include <chrono>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <limits>
 #include <thread>
 #include <system_error>
-
-namespace
-{
-    struct temporary_file_guard
-    {
-        std::filesystem::path path;
-
-        ~temporary_file_guard() noexcept
-        {
-            std::error_code error;
-            (void)std::filesystem::remove(path, error);
-        }
-    };
-
-    bool write_file(
-        const std::filesystem::path& path,
-        const char* content
-    )
-    {
-        std::ofstream output(path, std::ios::binary | std::ios::trunc);
-
-        if (!output)
-            return false;
-
-        output << content;
-        return output.good();
-    }
-}
 
 int main()
 {
@@ -58,16 +31,18 @@ int main()
         ("filesystems-watcher-unrelated-" +
          std::to_string(timestamp) + ".txt");
 
-    temporary_file_guard cleanup{file_path};
-    temporary_file_guard unrelated_cleanup{unrelated_file_path};
+    test_support::temporary_file_guard cleanup{file_path};
+    test_support::temporary_file_guard unrelated_cleanup{
+        unrelated_file_path
+    };
 
-    if (!write_file(file_path, "before\n"))
+    if (!test_support::write_file(file_path, "before\n"))
     {
         std::cerr << "Unable to create the watcher integration-test file.\n";
         return 1;
     }
 
-    if (!write_file(unrelated_file_path, "before\n"))
+    if (!test_support::write_file(unrelated_file_path, "before\n"))
     {
         std::cerr << "Unable to create the unrelated watcher test file.\n";
         return 1;
@@ -106,13 +81,16 @@ int main()
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
         const bool unrelated_write =
-            write_file(unrelated_file_path, "unrelated\n");
+            test_support::write_file(
+                unrelated_file_path,
+                "unrelated\n"
+            );
 
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
         writer_succeeded =
             unrelated_write &&
-            write_file(file_path, "after\n");
+            test_support::write_file(file_path, "after\n");
     });
 
     writer.join();

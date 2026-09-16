@@ -1,9 +1,9 @@
-profile=extreme
-seed=39731843029300
-large_size_bytes=4294967296
-short_count=500
-long_count=50
-total=556
-passed=555
+profile=smoke
+seed=20260916
+large_size_bytes=67108864
+short_count=20
+long_count=3
+total=37
+passed=36
 failed=0
 inconclusive=1

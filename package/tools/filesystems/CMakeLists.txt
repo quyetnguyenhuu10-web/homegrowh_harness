@@ -121,36 +121,76 @@ option(FILESYSTEMS_BUILD_WINDOWS_STRESS_TESTS
     OFF
 )
 
+option(FILESYSTEMS_BUILD_LINUX_STRESS_TESTS
+    "Build the Linux edit stress harness"
+    OFF
+)
+
 if(FILESYSTEMS_BUILD_TESTS)
 
     enable_testing()
 
+    set(FILESYSTEMS_TEST_INCLUDE_DIR
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/include
+    )
+
     add_executable(file_reader
-        tests/main_test.cpp
+        tests/cross_platform/fsystem/read/reader_test.cpp
     )
 
     add_executable(file_edit
-        tests/edit_file.cpp
+        tests/cross_platform/fsystem/edit/edit_test.cpp
     )
 
     add_executable(watch_file
-        tests/watch_file.cpp
+        tests/cross_platform/fsystem/watcher/watcher_test.cpp
     )
 
     add_executable(chunk_matcher_stress
-        tests/chunk_matcher_stress.cpp
+        tests/cross_platform/fsystem/edit/chunk_matcher_stress.cpp
+    )
+
+    target_include_directories(file_reader
+        PRIVATE
+            ${FILESYSTEMS_TEST_INCLUDE_DIR}
+    )
+
+    target_include_directories(file_edit
+        PRIVATE
+            ${FILESYSTEMS_TEST_INCLUDE_DIR}
+    )
+
+    target_include_directories(watch_file
+        PRIVATE
+            ${FILESYSTEMS_TEST_INCLUDE_DIR}
     )
 
     if(WIN32 AND FILESYSTEMS_BUILD_WINDOWS_STRESS_TESTS)
 
         add_executable(windows_edit_stress
-            tests/windows_edit_stress.cpp
+            tests/platform/windows/fsystem/edit/windows_edit_stress.cpp
         )
 
         target_link_libraries(windows_edit_stress
             PRIVATE
                 filesystems
                 Psapi
+        )
+
+    endif()
+
+    if(
+        CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+        FILESYSTEMS_BUILD_LINUX_STRESS_TESTS
+    )
+
+        add_executable(linux_edit_stress
+            tests/platform/linux/fsystem/edit/linux_edit_stress.cpp
+        )
+
+        target_link_libraries(linux_edit_stress
+            PRIVATE
+                filesystems
         )
 
     endif()
@@ -204,6 +244,53 @@ if(FILESYSTEMS_BUILD_TESTS)
                 --profile smoke
                 --output
                 ${CMAKE_CURRENT_BINARY_DIR}/windows-edit-stress-results
+        )
+
+        add_test(
+            NAME windows_edit_stress_standard_test
+            COMMAND windows_edit_stress
+                --profile standard
+                --output
+                ${CMAKE_CURRENT_BINARY_DIR}/windows-edit-stress-standard-results
+        )
+
+        add_test(
+            NAME windows_edit_stress_extreme_test
+            COMMAND windows_edit_stress
+                --profile extreme
+                --output
+                ${CMAKE_CURRENT_BINARY_DIR}/windows-edit-stress-extreme-results
+        )
+
+    endif()
+
+    if(
+        CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
+        FILESYSTEMS_BUILD_LINUX_STRESS_TESTS
+    )
+
+        add_test(
+            NAME linux_edit_stress_smoke_test
+            COMMAND linux_edit_stress
+                --profile smoke
+                --output
+                ${CMAKE_CURRENT_BINARY_DIR}/linux-edit-stress-results
+        )
+
+        add_test(
+            NAME linux_edit_stress_standard_test
+            COMMAND linux_edit_stress
+                --profile standard
+                --output
+                ${CMAKE_CURRENT_BINARY_DIR}/linux-edit-stress-standard-results
+        )
+
+        add_test(
+            NAME linux_edit_stress_extreme_test
+            COMMAND linux_edit_stress
+                --profile extreme
+                --output
+                ${CMAKE_CURRENT_BINARY_DIR}/linux-edit-stress-extreme-results
         )
 
     endif()

@@ -12,6 +12,7 @@
 
 namespace
 {
+
     constexpr std::uint64_t random_seed = 0x4D41544348455231ULL;
     constexpr std::size_t random_case_count = 8000;
     constexpr std::size_t maximum_random_file_size = 16 * 1024;
@@ -58,8 +59,9 @@ namespace
 
         if (second != std::string_view::npos)
         {
-            result.note =
-                fsystem::EditNote::old_data_appears_more_than_once;
+            result.note = second - first < pattern.size()
+                ? fsystem::EditNote::old_data_occurrences_overlap
+                : fsystem::EditNote::old_data_appears_more_than_once;
         }
 
         return result;
@@ -76,6 +78,7 @@ namespace
         {
             const std::size_t current =
                 std::min(file_size, chunk_size);
+
             chunks.push_back(current);
             file_size -= current;
         }
@@ -89,11 +92,13 @@ namespace
     )
     {
         std::vector<std::size_t> chunks;
+
         std::size_t remaining = file_size;
 
         while (remaining != 0)
         {
             const std::uint64_t mode = generator() % 8;
+
             std::size_t requested = 1;
 
             switch (mode)
@@ -101,21 +106,27 @@ namespace
             case 0:
                 requested = 1;
                 break;
+
             case 1:
                 requested = 2;
                 break;
+
             case 2:
                 requested = 63;
                 break;
+
             case 3:
                 requested = 64 * 1024 - 1;
                 break;
+
             case 4:
                 requested = 64 * 1024;
                 break;
+
             case 5:
                 requested = 64 * 1024 + 1;
                 break;
+
             default:
                 requested = 1 + static_cast<std::size_t>(
                     generator() % std::min<std::size_t>(
@@ -127,6 +138,7 @@ namespace
             }
 
             requested = std::min(requested, remaining);
+
             chunks.push_back(requested);
             remaining -= requested;
         }
@@ -179,10 +191,12 @@ namespace
             const std::size_t start = static_cast<std::size_t>(
                 generator() % file.size()
             );
+
             const std::size_t maximum = std::min(
                 maximum_random_pattern_size,
                 file.size() - start
             );
+
             const std::size_t size = 1 + static_cast<std::size_t>(
                 generator() % maximum
             );
@@ -207,6 +221,7 @@ namespace
     )
     {
         const expected_match expected = oracle(file, pattern);
+
         fsystem::detail::chunk_matcher matcher{
             std::string(pattern)
         };
@@ -223,7 +238,9 @@ namespace
             {
                 std::cerr
                     << "Invalid chunk partition in case "
-                    << case_number << " (" << case_name << ")\n";
+                    << case_number
+                    << " (" << case_name << ")\n";
+
                 return false;
             }
 
@@ -231,6 +248,7 @@ namespace
                 offset,
                 file.substr(offset, chunk_size)
             );
+
             offset += chunk_size;
 
             if (!consumed)
@@ -239,7 +257,9 @@ namespace
                 {
                     std::cerr
                         << "Matcher stopped without duplicate in case "
-                        << case_number << " (" << case_name << ")\n";
+                        << case_number
+                        << " (" << case_name << ")\n";
+
                     return false;
                 }
 
@@ -252,7 +272,9 @@ namespace
         {
             std::cerr
                 << "Chunk partition did not cover file in case "
-                << case_number << " (" << case_name << ")\n";
+                << case_number
+                << " (" << case_name << ")\n";
+
             return false;
         }
 
@@ -264,17 +286,21 @@ namespace
         )
         {
             std::cerr
-                << "Matcher mismatch in case " << case_number
+                << "Matcher mismatch in case "
+                << case_number
                 << " (" << case_name << ")"
                 << " file_size=" << file.size()
                 << " pattern_size=" << pattern.size()
-                << " expected_occurrence=" << expected.first_occurrence
-                << " actual_occurrence=" << matcher.first_occurrence()
+                << " expected_occurrence="
+                << expected.first_occurrence
+                << " actual_occurrence="
+                << matcher.first_occurrence()
                 << " expected_note="
                 << static_cast<int>(expected.note)
                 << " actual_note="
                 << static_cast<int>(matcher.note())
                 << '\n';
+
             return false;
         }
 
@@ -299,17 +325,73 @@ namespace
             );
         };
 
-        if (!run("", "", {}, "empty file and empty pattern"))
+        if (!run(
+                "",
+                "",
+                {},
+                "empty file and empty pattern"
+            ))
+        {
             return false;
+        }
 
-        if (!run("", "a", {}, "empty file and non-empty pattern"))
+        if (!run(
+                "",
+                "a",
+                {},
+                "empty file and non-empty pattern"
+            ))
+        {
             return false;
+        }
 
         if (!run(
                 "aaaaaaaaaaaa",
                 "aaa",
                 fixed_chunks(12, 1),
                 "overlap with one-byte chunks"
+            ))
+        {
+            return false;
+        }
+
+        if (!run(
+                "aaaa",
+                "aaa",
+                {2, 2},
+                "overlapping matches across one chunk boundary"
+            ))
+        {
+            return false;
+        }
+
+        if (!run(
+                "aab",
+                "aab",
+                {2, 1},
+                "only one of multiple boundary checkpoints completes"
+            ))
+        {
+            return false;
+        }
+
+        // Explicit single-byte pattern + single-byte chunks.
+        if (!run(
+                "abc",
+                "a",
+                fixed_chunks(3, 1),
+                "single-byte pattern with one-byte chunks"
+            ))
+        {
+            return false;
+        }
+
+        // Two matches, each spanning ten one-byte chunks.
+        if (!run(
+                "XXXXXXXXXXABCDEFGHIJYYYYYYYYYYABCDEFGHIJZZZZZZZZZZ",
+                "ABCDEFGHIJ",
+                fixed_chunks(50, 1),
+                "two matches spanning ten one-byte chunks"
             ))
         {
             return false;
@@ -323,7 +405,10 @@ namespace
         if (!run(
                 boundary_file,
                 "needle",
-                fixed_chunks(boundary_file.size(), 64 * 1024),
+                fixed_chunks(
+                    boundary_file.size(),
+                    64 * 1024
+                ),
                 "match across the 64 KiB boundary"
             ))
         {
@@ -339,7 +424,10 @@ namespace
         if (!run(
                 duplicate_boundary_file,
                 "needle",
-                fixed_chunks(duplicate_boundary_file.size(), 64 * 1024),
+                fixed_chunks(
+                    duplicate_boundary_file.size(),
+                    64 * 1024
+                ),
                 "duplicate across the 64 KiB boundary"
             ))
         {
@@ -351,7 +439,10 @@ namespace
         if (!run(
                 long_pattern_file,
                 long_pattern_file,
-                fixed_chunks(long_pattern_file.size(), 1),
+                fixed_chunks(
+                    long_pattern_file.size(),
+                    1
+                ),
                 "pattern longer than every chunk"
             ))
         {
@@ -359,7 +450,12 @@ namespace
         }
 
         const std::string binary_file{
-            'a', '\0', 'b', 'a', '\0', 'b'
+            'a',
+            '\0',
+            'b',
+            'a',
+            '\0',
+            'b'
         };
 
         if (!run(
@@ -379,29 +475,38 @@ namespace
             "checkpoint discarded after mismatch"
         );
     }
+
 }
 
 int main()
 {
     std::mt19937_64 generator(random_seed);
+
     std::size_t case_number = 0;
 
     if (!check_targeted_cases(case_number))
         return 1;
 
-    for (std::size_t iteration = 0;
-         iteration < random_case_count;
-         ++iteration)
+    for (
+        std::size_t iteration = 0;
+        iteration < random_case_count;
+        ++iteration
+    )
     {
-        const std::size_t file_size = static_cast<std::size_t>(
-            generator() % (maximum_random_file_size + 1)
-        );
-        const std::string file = random_file(file_size, generator);
-        const std::string pattern = random_pattern(file, generator);
-        const std::vector<std::size_t> chunks = random_chunks(
-            file.size(),
-            generator
-        );
+        const std::size_t file_size =
+            static_cast<std::size_t>(
+                generator() %
+                (maximum_random_file_size + 1)
+            );
+
+        const std::string file =
+            random_file(file_size, generator);
+
+        const std::string pattern =
+            random_pattern(file, generator);
+
+        const std::vector<std::size_t> chunks =
+            random_chunks(file.size(), generator);
 
         if (!check_case(
                 file,
@@ -413,13 +518,19 @@ int main()
         {
             std::cerr
                 << "seed=" << random_seed
-                << " iteration=" << iteration << '\n';
+                << " iteration=" << iteration
+                << '\n';
+
             return 1;
         }
     }
 
     std::cout
-        << "Chunk matcher stress passed. cases=" << case_number
-        << " seed=" << random_seed << '\n';
+        << "Chunk matcher stress passed. cases="
+        << case_number
+        << " seed="
+        << random_seed
+        << '\n';
+
     return 0;
 }

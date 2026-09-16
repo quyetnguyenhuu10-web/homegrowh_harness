@@ -1,19 +1,12 @@
-#ifndef _WIN32
-#error "windows_edit_stress is a Windows-only stress harness"
-#endif
-
-#ifndef NOMINMAX
-#define NOMINMAX
+#ifndef __linux__
+#error "linux_edit_stress is a Linux-only edit stress harness"
 #endif
 
 #include <fsystem>
 
-#include <Windows.h>
-#include <psapi.h>
-
 #include <algorithm>
-#include <array>
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -23,17 +16,17 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
-#include <memory>
 #include <random>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <sys/resource.h>
+#include <sys/statvfs.h>
 #include <thread>
+#include <unistd.h>
+#include <fcntl.h>
 #include <utility>
 #include <vector>
-
-#pragma comment(lib, "Psapi.lib")
 
 namespace
 {
@@ -43,7 +36,6 @@ namespace
     constexpr std::uint64_t mebibyte = 1024 * kibibyte;
     constexpr std::uint64_t gibibyte = 1024 * mebibyte;
     constexpr std::size_t io_buffer_capacity = 1 * 1024 * 1024;
-    constexpr DWORD lock_hold_milliseconds = 5000;
     constexpr std::uint64_t fnv_offset_basis =
         14695981039346656037ull;
     constexpr std::uint64_t fnv_prime = 1099511628211ull;
@@ -54,7 +46,6 @@ namespace
         modify,
         delete_file,
         rename_file,
-        lock,
         unrelated,
     };
 
@@ -67,7 +58,7 @@ namespace
         std::size_t short_count = 20;
         std::size_t long_count = 3;
         std::uint64_t seed = 0;
-        std::uint32_t interference_wait_ms = 120000;
+        std::uint32_t interference_wait_ms = 5000;
         bool keep_files = false;
     };
 
@@ -127,11 +118,10 @@ namespace
         std::uint64_t disk_free_before_bytes = 0;
         std::uint64_t disk_free_after_bytes = 0;
         std::uint64_t interference_attempts = 0;
-        std::uint32_t error_code = 0;
         std::uint32_t interference_first_error = 0;
+        std::uint32_t error_code = 0;
         bool interference_succeeded = false;
         bool interference_in_window = false;
-        bool lock_at_replace = false;
         bool content_ok = false;
     };
 
@@ -142,21 +132,6 @@ namespace
         std::size_t failed = 0;
         std::size_t inconclusive = 0;
     };
-
-    struct handle_deleter
-    {
-        using pointer = HANDLE;
-
-        void operator()(pointer handle) const noexcept
-        {
-            if (handle == nullptr || handle == INVALID_HANDLE_VALUE)
-                return;
-
-            (void)CloseHandle(handle);
-        }
-    };
-
-    using unique_handle = std::unique_ptr<void, handle_deleter>;
 
     std::string action_name(interference_action action)
     {
@@ -170,8 +145,6 @@ namespace
             return "delete";
         case interference_action::rename_file:
             return "rename";
-        case interference_action::lock:
-            return "lock";
         case interference_action::unrelated:
             return "unrelated";
         }
@@ -191,9 +164,16 @@ namespace
             return "old_data_appears_more_than_once";
         case fsystem::EditNote::file_changed:
             return "file_changed";
+        case fsystem::EditNote::old_data_occurrences_overlap:
+            return "old_data_occurrences_overlap";
         }
 
         return "unknown";
+    }
+
+    std::uint32_t current_errno() noexcept
+    {
+        return static_cast<std::uint32_t>(errno);
     }
 
     std::uint64_t parse_uint64(
@@ -256,7 +236,7 @@ namespace
     void print_usage()
     {
         std::cout
-            << "windows_edit_stress options:\n"
+            << "linux_edit_stress options:\n"
             << "  --profile smoke|standard|extreme\n"
             << "  --root <directory>\n"
             << "  --output <directory>\n"
@@ -328,9 +308,11 @@ namespace
                     argument
                 );
 
-                if (gigabytes >
+                if (
+                    gigabytes >
                     std::numeric_limits<std::uint64_t>::max() /
-                        gibibyte)
+                        gibibyte
+                )
                 {
                     throw std::runtime_error(
                         "--large-size-gb is too large"
@@ -395,7 +377,7 @@ namespace
                     .count();
 
             result.root = std::filesystem::temp_directory_path() /
-                ("fsystem-windows-stress-" +
+                ("fsystem-linux-edit-stress-" +
                  std::to_string(timestamp));
         }
 
@@ -410,42 +392,48 @@ namespace
         return result;
     }
 
+    memory_snapshot current_memory() noexcept
+    {
+        memory_snapshot result;
+
+        std::ifstream statm("/proc/self/statm");
+        std::uint64_t total_pages = 0;
+        std::uint64_t resident_pages = 0;
+        const long page_size = ::sysconf(_SC_PAGESIZE);
+
+        if (
+            statm &&
+            page_size > 0 &&
+            (statm >> total_pages >> resident_pages)
+        )
+        {
+            result.working_set_bytes = resident_pages *
+                static_cast<std::uint64_t>(page_size);
+        }
+
+        struct rusage usage{};
+
+        if (::getrusage(RUSAGE_SELF, &usage) == 0 && usage.ru_maxrss > 0)
+        {
+            result.peak_working_set_bytes = static_cast<std::uint64_t>(
+                usage.ru_maxrss
+            ) * kibibyte;
+        }
+
+        return result;
+    }
+
     std::uint64_t disk_free_bytes(
         const std::filesystem::path& path
     ) noexcept
     {
-        ULARGE_INTEGER free_bytes{};
+        struct statvfs status{};
 
-        if (!GetDiskFreeSpaceExW(
-                path.c_str(),
-                &free_bytes,
-                nullptr,
-                nullptr
-            ))
-        {
+        if (::statvfs(path.c_str(), &status) != 0)
             return 0;
-        }
 
-        return free_bytes.QuadPart;
-    }
-
-    memory_snapshot current_memory() noexcept
-    {
-        PROCESS_MEMORY_COUNTERS counters{};
-
-        if (!GetProcessMemoryInfo(
-                GetCurrentProcess(),
-                &counters,
-                sizeof(counters)
-            ))
-        {
-            return {};
-        }
-
-        return memory_snapshot{
-            static_cast<std::uint64_t>(counters.WorkingSetSize),
-            static_cast<std::uint64_t>(counters.PeakWorkingSetSize),
-        };
+        return static_cast<std::uint64_t>(status.f_bavail) *
+            static_cast<std::uint64_t>(status.f_frsize);
     }
 
     bool write_repeated(
@@ -454,10 +442,7 @@ namespace
         std::uint64_t count
     )
     {
-        const std::vector<char> buffer(
-            io_buffer_capacity,
-            value
-        );
+        const std::vector<char> buffer(io_buffer_capacity, value);
 
         while (count != 0)
         {
@@ -497,8 +482,7 @@ namespace
 
         std::ofstream output(
             path,
-            std::ios::binary |
-            std::ios::trunc
+            std::ios::binary | std::ios::trunc
         );
 
         if (!output)
@@ -547,10 +531,7 @@ namespace
         std::uint64_t count
     )
     {
-        const std::vector<char> buffer(
-            io_buffer_capacity,
-            value
-        );
+        const std::vector<char> buffer(io_buffer_capacity, value);
 
         while (count != 0)
         {
@@ -574,81 +555,55 @@ namespace
     ) noexcept
     {
         fingerprint result;
+        std::ifstream input(path, std::ios::binary);
 
-        HANDLE raw_handle = CreateFileW(
-            path.c_str(),
-            GENERIC_READ,
-            FILE_SHARE_READ |
-            FILE_SHARE_WRITE |
-            FILE_SHARE_DELETE,
-            nullptr,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL |
-            FILE_FLAG_SEQUENTIAL_SCAN,
-            nullptr
-        );
-
-        if (raw_handle == INVALID_HANDLE_VALUE)
+        if (!input)
         {
-            result.error = GetLastError();
-            return result;
-        }
-
-        unique_handle handle(raw_handle);
-        LARGE_INTEGER file_size{};
-
-        if (!GetFileSizeEx(handle.get(), &file_size) ||
-            file_size.QuadPart < 0)
-        {
-            result.error = GetLastError();
+            result.error = current_errno();
+            if (result.error == 0)
+                result.error = ENOENT;
             return result;
         }
 
         std::vector<char> buffer(io_buffer_capacity);
-        std::uint64_t remaining =
-            static_cast<std::uint64_t>(file_size.QuadPart);
         std::uint64_t hash = fnv_offset_basis;
 
-        while (remaining != 0)
+        while (true)
         {
-            const DWORD bytes_to_read = static_cast<DWORD>(
-                std::min<std::uint64_t>(
-                    remaining,
-                    buffer.size()
-                )
-            );
-
-            DWORD bytes_read = 0;
-
-            if (!ReadFile(
-                    handle.get(),
-                    buffer.data(),
-                    bytes_to_read,
-                    &bytes_read,
-                    nullptr
-                ))
-            {
-                result.error = GetLastError();
-                return result;
-            }
-
-            if (bytes_read == 0 || bytes_read > bytes_to_read)
-            {
-                result.error = ERROR_HANDLE_EOF;
-                return result;
-            }
-
-            hash_bytes(
-                hash,
+            input.read(
                 buffer.data(),
-                bytes_read
+                static_cast<std::streamsize>(buffer.size())
             );
 
-            remaining -= bytes_read;
+            const std::streamsize bytes_read = input.gcount();
+
+            if (bytes_read > 0)
+            {
+                hash_bytes(
+                    hash,
+                    buffer.data(),
+                    static_cast<std::size_t>(bytes_read)
+                );
+                result.size += static_cast<std::uint64_t>(bytes_read);
+            }
+
+            if (input.bad())
+            {
+                result.error = EIO;
+                return result;
+            }
+
+            if (input.eof())
+                break;
+
+            if (bytes_read == 0)
+            {
+                result.error = EIO;
+                return result;
+            }
         }
 
         result.ok = true;
-        result.size = static_cast<std::uint64_t>(file_size.QuadPart);
         result.hash = hash;
         return result;
     }
@@ -703,7 +658,7 @@ namespace
             )
         )
         {
-            error = ERROR_INVALID_DATA;
+            error = EINVAL;
             return false;
         }
 
@@ -822,8 +777,7 @@ namespace
                 << "peak_working_set_bytes,disk_free_before_bytes,"
                 << "disk_free_after_bytes,interference_attempts,"
                 << "interference_first_error,error_code,"
-                << "interference_succeeded,"
-                << "interference_in_window,lock_at_replace,"
+                << "interference_succeeded,interference_in_window,"
                 << "content_ok,detail\n";
         }
 
@@ -849,7 +803,6 @@ namespace
                 << result.error_code << ','
                 << (result.interference_succeeded ? 1 : 0) << ','
                 << (result.interference_in_window ? 1 : 0) << ','
-                << (result.lock_at_replace ? 1 : 0) << ','
                 << (result.content_ok ? 1 : 0) << ','
                 << csv_escape(result.detail) << '\n';
 
@@ -891,8 +844,6 @@ namespace
                 << (result.interference_succeeded ? "true" : "false")
                 << ",\"interference_in_window\":"
                 << (result.interference_in_window ? "true" : "false")
-                << ",\"lock_at_replace\":"
-                << (result.lock_at_replace ? "true" : "false")
                 << ",\"content_ok\":"
                 << (result.content_ok ? "true" : "false")
                 << ",\"detail\":\""
@@ -913,66 +864,59 @@ namespace
         std::uint32_t& error
     )
     {
-        HANDLE raw_handle = CreateFileW(
+        const int file_descriptor = ::open(
             spec.path.c_str(),
-            GENERIC_WRITE,
-            FILE_SHARE_READ |
-            FILE_SHARE_WRITE |
-            FILE_SHARE_DELETE,
-            nullptr,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL |
-            FILE_FLAG_WRITE_THROUGH,
-            nullptr
+            O_WRONLY | O_CLOEXEC
         );
 
-        if (raw_handle == INVALID_HANDLE_VALUE)
+        if (file_descriptor < 0)
         {
-            error = GetLastError();
+            error = current_errno();
             return false;
         }
 
-        unique_handle handle(raw_handle);
         const std::string marker = "INTERFERENCE";
-        LARGE_INTEGER offset{};
-        offset.QuadPart = static_cast<LONGLONG>(
-            spec.interference_offset
-        );
+        std::size_t position = 0;
 
-        if (!SetFilePointerEx(
-                handle.get(),
-                offset,
-                nullptr,
-                FILE_BEGIN
-            ))
+        while (position < marker.size())
         {
-            error = GetLastError();
+            const ssize_t bytes_written = ::pwrite(
+                file_descriptor,
+                marker.data() + position,
+                marker.size() - position,
+                static_cast<off_t>(spec.interference_offset + position)
+            );
+
+            if (bytes_written < 0)
+            {
+                if (errno == EINTR)
+                    continue;
+
+                error = current_errno();
+                (void)::close(file_descriptor);
+                return false;
+            }
+
+            if (bytes_written == 0)
+            {
+                error = EIO;
+                (void)::close(file_descriptor);
+                return false;
+            }
+
+            position += static_cast<std::size_t>(bytes_written);
+        }
+
+        if (::fsync(file_descriptor) < 0)
+        {
+            error = current_errno();
+            (void)::close(file_descriptor);
             return false;
         }
 
-        DWORD bytes_written = 0;
-
-        if (!WriteFile(
-                handle.get(),
-                marker.data(),
-                static_cast<DWORD>(marker.size()),
-                &bytes_written,
-                nullptr
-            ))
+        if (::close(file_descriptor) < 0)
         {
-            error = GetLastError();
-            return false;
-        }
-
-        if (bytes_written != marker.size())
-        {
-            error = ERROR_WRITE_FAULT;
-            return false;
-        }
-
-        if (!FlushFileBuffers(handle.get()))
-        {
-            error = GetLastError();
+            error = current_errno();
             return false;
         }
 
@@ -984,10 +928,10 @@ namespace
         std::uint32_t& error
     )
     {
-        if (DeleteFileW(spec.path.c_str()))
+        if (::unlink(spec.path.c_str()) == 0)
             return true;
 
-        error = GetLastError();
+        error = current_errno();
         return false;
     }
 
@@ -998,47 +942,18 @@ namespace
     )
     {
         result.renamed_path = spec.path;
-        result.renamed_path += L".interference-renamed";
+        result.renamed_path += ".interference-renamed";
 
-        if (MoveFileExW(
+        if (::rename(
                 spec.path.c_str(),
-                result.renamed_path.c_str(),
-                MOVEFILE_REPLACE_EXISTING |
-                MOVEFILE_WRITE_THROUGH
-            ))
+                result.renamed_path.c_str()
+            ) == 0)
         {
             return true;
         }
 
-        error = GetLastError();
+        error = current_errno();
         return false;
-    }
-
-    bool try_lock(
-        const case_spec& spec,
-        unique_handle& lock_handle,
-        std::uint32_t& error
-    )
-    {
-        HANDLE raw_handle = CreateFileW(
-            spec.path.c_str(),
-            GENERIC_READ |
-            GENERIC_WRITE,
-            0,
-            nullptr,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
-            nullptr
-        );
-
-        if (raw_handle == INVALID_HANDLE_VALUE)
-        {
-            error = GetLastError();
-            return false;
-        }
-
-        lock_handle.reset(raw_handle);
-        return true;
     }
 
     bool try_unrelated(
@@ -1047,17 +962,16 @@ namespace
     )
     {
         std::filesystem::path unrelated = spec.path;
-        unrelated += L".unrelated";
+        unrelated += ".unrelated";
 
         std::ofstream output(
             unrelated,
-            std::ios::binary |
-            std::ios::trunc
+            std::ios::binary | std::ios::trunc
         );
 
         if (!output)
         {
-            error = ERROR_ACCESS_DENIED;
+            error = EACCES;
             return false;
         }
 
@@ -1066,7 +980,7 @@ namespace
 
         if (!output)
         {
-            error = ERROR_WRITE_FAULT;
+            error = EIO;
             return false;
         }
 
@@ -1081,7 +995,7 @@ namespace
     )
     {
         std::this_thread::sleep_for(
-            std::chrono::milliseconds(25)
+            std::chrono::milliseconds(5)
         );
 
         const auto deadline =
@@ -1089,8 +1003,6 @@ namespace
             std::chrono::milliseconds(
                 value.interference_wait_ms
             );
-
-        unique_handle lock_handle;
 
         while (
             !stop_requested.load(std::memory_order_acquire) &&
@@ -1113,9 +1025,6 @@ namespace
             case interference_action::rename_file:
                 success = try_rename(spec, result, error);
                 break;
-            case interference_action::lock:
-                success = try_lock(spec, lock_handle, error);
-                break;
             case interference_action::unrelated:
                 success = try_unrelated(spec, error);
                 break;
@@ -1127,20 +1036,15 @@ namespace
             {
                 result.succeeded = true;
                 result.success_time = clock_type::now();
-
-                if (spec.action == interference_action::lock)
-                {
-                    Sleep(lock_hold_milliseconds);
-                    lock_handle.reset();
-                }
-
                 return;
             }
 
             if (result.first_error == 0)
                 result.first_error = error;
 
-            Sleep(2);
+            std::this_thread::sleep_for(
+                std::chrono::milliseconds(2)
+            );
         }
     }
 
@@ -1159,7 +1063,7 @@ namespace
             );
 
         std::filesystem::path unrelated = spec.path;
-        unrelated += L".unrelated";
+        unrelated += ".unrelated";
         (void)std::filesystem::remove(unrelated, error);
     }
 
@@ -1176,15 +1080,13 @@ namespace
         result.file_size_bytes = spec.original_size;
         result.old_size_bytes = spec.old_data.size();
         result.new_size_bytes = spec.new_data.size();
-        result.disk_free_before_bytes =
-            disk_free_bytes(value.root);
+        result.disk_free_before_bytes = disk_free_bytes(value.root);
 
         const auto started = clock_type::now();
         const memory_snapshot memory_before = current_memory();
         interference_result interference;
         std::atomic_bool stop_interference{false};
         std::thread interference_thread;
-        bool edit_completed = false;
         clock_type::time_point edit_finished_at = started;
 
         try
@@ -1203,6 +1105,7 @@ namespace
                     marker
                 ))
             {
+                result.error_code = EIO;
                 result.outcome = "fail";
                 result.detail = "unable to create input file";
             }
@@ -1229,8 +1132,8 @@ namespace
                     spec.new_data
                 );
 
-                edit_completed = true;
                 edit_finished_at = clock_type::now();
+
                 stop_interference.store(
                     true,
                     std::memory_order_release
@@ -1248,11 +1151,6 @@ namespace
                 result.interference_in_window =
                     interference.succeeded &&
                     interference.success_time <= edit_finished_at;
-                result.lock_at_replace =
-                    spec.action == interference_action::lock &&
-                    interference.succeeded &&
-                    edit_result.replace_attempted &&
-                    edit_result.error == ERROR_SHARING_VIOLATION;
 
                 std::uint32_t verification_error = 0;
 
@@ -1277,13 +1175,6 @@ namespace
                         result.content_ok
                             ? "pass"
                             : "fail";
-
-                    if (!result.content_ok)
-                    {
-                        result.detail =
-                            "verification_error=" +
-                            std::to_string(verification_error);
-                    }
                 }
                 else if (spec.expected == "not_found")
                 {
@@ -1322,33 +1213,8 @@ namespace
                         edit_result.error == 0 &&
                         edit_result.note == fsystem::EditNote::none &&
                         result.content_ok
-                        ? "pass"
-                        : "fail";
-                }
-                else if (spec.action == interference_action::lock)
-                {
-                    if (!interference.succeeded)
-                    {
-                        result.outcome = "inconclusive";
-                        result.detail =
-                            "exclusive lock was not acquired";
-                    }
-                    else if (!edit_result.replace_attempted)
-                    {
-                        result.outcome = "fail";
-                        result.detail =
-                            "ReplaceFileW was not attempted";
-                    }
-                    else if (!result.lock_at_replace)
-                    {
-                        result.outcome = "inconclusive";
-                        result.detail =
-                            "exclusive lock did not block ReplaceFileW";
-                    }
-                    else
-                    {
-                        result.outcome = "pass";
-                    }
+                            ? "pass"
+                            : "fail";
                 }
                 else if (
                     !interference.succeeded ||
@@ -1361,11 +1227,30 @@ namespace
                 }
                 else
                 {
-                    result.outcome =
+                    const bool edit_observed_interference =
                         edit_result.error != 0 ||
-                        edit_result.note == fsystem::EditNote::file_changed
+                        edit_result.note == fsystem::EditNote::file_changed ||
+                        edit_result.note ==
+                            fsystem::EditNote::old_data_not_found;
+
+                    result.outcome =
+                        edit_observed_interference
                             ? "pass"
                             : "fail";
+
+                    if (!edit_observed_interference)
+                    {
+                        result.detail =
+                            "edit completed without observing "
+                            "in-window interference";
+                    }
+                }
+
+                if (result.outcome == "fail" && result.detail.empty())
+                {
+                    result.detail =
+                        "verification_error=" +
+                        std::to_string(verification_error);
                 }
             }
         }
@@ -1384,30 +1269,25 @@ namespace
                 std::string("exception=") + exception.what();
         }
 
-        if (!edit_completed)
-        {
-            stop_interference.store(
-                true,
-                std::memory_order_release
-            );
+        stop_interference.store(
+            true,
+            std::memory_order_release
+        );
 
-            if (interference_thread.joinable())
-                interference_thread.join();
-        }
+        if (interference_thread.joinable())
+            interference_thread.join();
 
         result.interference_attempts = interference.attempts;
         result.interference_first_error = interference.first_error;
         result.interference_succeeded = interference.succeeded;
-        result.disk_free_after_bytes =
-            disk_free_bytes(value.root);
+        result.disk_free_after_bytes = disk_free_bytes(value.root);
 
         const memory_snapshot memory_after = current_memory();
         result.working_set_bytes = memory_after.working_set_bytes;
-        result.peak_working_set_bytes =
-            std::max(
-                memory_before.peak_working_set_bytes,
-                memory_after.peak_working_set_bytes
-            );
+        result.peak_working_set_bytes = std::max(
+            memory_before.peak_working_set_bytes,
+            memory_after.peak_working_set_bytes
+        );
 
         result.duration_ms = static_cast<std::uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -1464,7 +1344,7 @@ namespace
                 ++totals.inconclusive;
 
             std::cout
-                << std::left << std::setw(28) << result.id
+                << std::left << std::setw(32) << result.id
                 << " " << std::setw(13) << result.outcome
                 << " " << std::setw(8) << result.duration_ms
                 << " ms error=" << result.error_code
@@ -1475,8 +1355,7 @@ namespace
         for (std::size_t index = 0; index < value.short_count; ++index)
         {
             const bool missing = index % 17 == 0;
-            const std::size_t old_length =
-                3 + (index % 43);
+            const std::size_t old_length = 3 + (index % 43);
             const std::string old_data = make_token(
                 "SHORT_OLD",
                 index,
@@ -1526,7 +1405,7 @@ namespace
                 16 + (index % 31)
             );
             const std::size_t new_length =
-                (index % 4 == 0)
+                index % 4 == 0
                     ? 0
                     : 4096 * (1 + (index % 16));
             const std::string new_data = make_payload(
@@ -1538,8 +1417,6 @@ namespace
                 1 * mebibyte,
                 maximum_long_size
             );
-            const std::uint64_t marker_offset =
-                file_size / 2;
 
             case_spec spec;
             spec.id = "long-" + std::to_string(index);
@@ -1547,16 +1424,11 @@ namespace
             spec.path = cases_directory / (spec.id + ".bin");
             spec.expected = "success";
             spec.original_size = file_size;
-            spec.marker_offset = marker_offset;
+            spec.marker_offset = file_size / 2;
             spec.old_data = old_data;
             spec.new_data = new_data;
             run(std::move(spec));
         }
-
-        const std::uint64_t large_marker_offset = std::min(
-            256 * mebibyte,
-            value.large_size / 2
-        );
 
         {
             case_spec spec;
@@ -1566,7 +1438,10 @@ namespace
             spec.action = interference_action::modify;
             spec.expected = "interference";
             spec.original_size = value.large_size;
-            spec.marker_offset = large_marker_offset;
+            spec.marker_offset = std::min(
+                256 * mebibyte,
+                value.large_size / 2
+            );
             spec.interference_offset = value.large_size / 4;
             spec.old_data = "LARGE_OLD_MARKER";
             spec.new_data = make_payload(8192, value.seed);
@@ -1577,24 +1452,26 @@ namespace
             128 * mebibyte,
             value.large_size
         );
-        const std::array<interference_action, 4> actions{
-            interference_action::modify,
-            interference_action::lock,
-            interference_action::delete_file,
-            interference_action::rename_file,
-        };
+        const std::uint64_t middle_marker = matrix_size / 2;
+        const std::uint64_t end_marker = matrix_size - 128;
 
-        for (std::size_t index = 0; index < actions.size(); ++index)
+        const auto run_interference_case =
+            [&](std::string_view id,
+                interference_action action,
+                std::uint64_t marker_offset,
+                std::uint64_t interference_offset,
+                std::size_t index,
+                std::string_view expected = "interference")
         {
             case_spec spec;
-            spec.id = "interference-" + std::to_string(index);
+            spec.id = std::string(id);
             spec.scenario = "interference_matrix";
             spec.path = cases_directory / (spec.id + ".bin");
-            spec.action = actions[index];
-            spec.expected = "interference";
+            spec.action = action;
+            spec.expected = std::string(expected);
             spec.original_size = matrix_size;
-            spec.marker_offset = matrix_size / 2;
-            spec.interference_offset = matrix_size / 4;
+            spec.marker_offset = marker_offset;
+            spec.interference_offset = interference_offset;
             spec.old_data = make_token(
                 "MATRIX_OLD",
                 index,
@@ -1605,22 +1482,66 @@ namespace
                 value.seed + index + 4000
             );
             run(std::move(spec));
-        }
+        };
 
-        {
-            case_spec spec;
-            spec.id = "interference-unrelated";
-            spec.scenario = "interference_matrix";
-            spec.path = cases_directory / "interference-unrelated.bin";
-            spec.action = interference_action::unrelated;
-            spec.expected = "success";
-            spec.original_size = matrix_size;
-            spec.marker_offset = matrix_size / 2;
-            spec.interference_offset = matrix_size / 4;
-            spec.old_data = "UNRELATED_OLD_MARKER";
-            spec.new_data = make_payload(32768, value.seed + 5000);
-            run(std::move(spec));
-        }
+        run_interference_case(
+            "interference-modify-prefix",
+            interference_action::modify,
+            middle_marker,
+            0,
+            0
+        );
+        run_interference_case(
+            "interference-modify-inside-marker",
+            interference_action::modify,
+            middle_marker,
+            middle_marker + 16,
+            1
+        );
+        run_interference_case(
+            "interference-modify-suffix",
+            interference_action::modify,
+            middle_marker,
+            middle_marker + 96,
+            2
+        );
+        run_interference_case(
+            "interference-modify-end-marker",
+            interference_action::modify,
+            end_marker,
+            matrix_size - 64,
+            3
+        );
+        run_interference_case(
+            "interference-delete-middle",
+            interference_action::delete_file,
+            middle_marker,
+            matrix_size / 4,
+            4
+        );
+        run_interference_case(
+            "interference-rename-end",
+            interference_action::rename_file,
+            end_marker,
+            matrix_size / 4,
+            5
+        );
+        run_interference_case(
+            "interference-unrelated-middle",
+            interference_action::unrelated,
+            middle_marker,
+            matrix_size / 4,
+            6,
+            "success"
+        );
+        run_interference_case(
+            "interference-unrelated-end",
+            interference_action::unrelated,
+            end_marker,
+            matrix_size / 4,
+            7,
+            "success"
+        );
 
         std::ofstream summary(value.output / "summary.txt");
         summary << "profile=" << value.profile << '\n'
@@ -1667,7 +1588,7 @@ int main(int argc, char** argv)
         std::filesystem::create_directories(value.output);
 
         std::cout
-            << "Windows edit stress profile=" << value.profile
+            << "Linux edit stress profile=" << value.profile
             << " large_size_bytes=" << value.large_size
             << " short_count=" << value.short_count
             << " long_count=" << value.long_count
@@ -1682,8 +1603,10 @@ int main(int argc, char** argv)
     }
     catch (const std::exception& exception)
     {
-        std::cerr << "windows_edit_stress failed: "
-                  << exception.what() << '\n';
+        std::cerr
+            << "linux_edit_stress failed: "
+            << exception.what()
+            << '\n';
         return 1;
     }
 }
