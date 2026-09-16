@@ -1,6 +1,0 @@
-windows_edit_stress_smoke_test 8 1.00318
-file_reader_test 6 0.00780193
-file_edit_test 6 0.0141316
-watch_file_test 6 0.113396
-chunk_matcher_stress_test 3 0.311139
----
