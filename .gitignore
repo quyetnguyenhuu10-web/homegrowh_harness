@@ -2,4 +2,4 @@
 **/build/
 **/build-ci/
 **/.cmake-build-filesystems/
-**build-windows/
+/build-windows/

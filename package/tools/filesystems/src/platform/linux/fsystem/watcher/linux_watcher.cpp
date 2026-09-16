@@ -13,6 +13,8 @@
 #include <fcntl.h>
 #include <limits>
 #include <memory>
+#include <mutex>
+#include <sys/eventfd.h>
 #include <string>
 #include <string_view>
 #include <sys/epoll.h>
@@ -146,10 +148,10 @@ namespace fsystem::linux
             int watch_descriptor_;
         };
 
-        constexpr std::uint64_t completion_key = 1001;
+        constexpr std::uint64_t directory_completion_key = 1001;
+        constexpr std::uint64_t cancellation_completion_key = 1002;
         constexpr std::size_t event_buffer_capacity = 64 * 1024;
         constexpr int max_epoll_entries = 10;
-        constexpr int state_poll_interval = 20;
 
         constexpr std::uint32_t watch_mask =
             IN_CREATE |
@@ -218,6 +220,86 @@ namespace fsystem::linux
                 );
             }
         }
+
+        struct cancellation_signal_context
+        {
+            int file_descriptor;
+        };
+
+        void post_cancellation_event(void* context) noexcept
+        {
+            const auto* cancellation =
+                static_cast<const cancellation_signal_context*>(context);
+
+            if (cancellation == nullptr || cancellation->file_descriptor < 0)
+                return;
+
+            const std::uint64_t signal = 1;
+
+            while (
+                ::write(
+                    cancellation->file_descriptor,
+                    &signal,
+                    sizeof(signal)
+                ) < 0 &&
+                errno == EINTR
+            )
+            {
+            }
+        }
+
+        class watcher_stop_signal_guard
+        {
+        public:
+            watcher_stop_signal_guard(
+                WatcherState* state,
+                cancellation_signal_context* context
+            ) noexcept
+                : state_(state)
+            {
+                if (state_ == nullptr)
+                    return;
+
+                std::lock_guard<std::mutex> lock(
+                    state_->stop_signal_mutex
+                );
+
+                state_->stop_signal_context = context;
+                state_->stop_signal = &post_cancellation_event;
+
+                if (state_->stop_requested.load(
+                        std::memory_order_acquire
+                    ))
+                {
+                    state_->stop_signal(
+                        state_->stop_signal_context
+                    );
+                }
+            }
+
+            watcher_stop_signal_guard(
+                const watcher_stop_signal_guard&
+            ) = delete;
+            watcher_stop_signal_guard& operator=(
+                const watcher_stop_signal_guard&
+            ) = delete;
+
+            ~watcher_stop_signal_guard() noexcept
+            {
+                if (state_ == nullptr)
+                    return;
+
+                std::lock_guard<std::mutex> lock(
+                    state_->stop_signal_mutex
+                );
+
+                state_->stop_signal = nullptr;
+                state_->stop_signal_context = nullptr;
+            }
+
+        private:
+            WatcherState* state_;
+        };
     }
 
     WatcherResult watcher_file(
@@ -303,22 +385,74 @@ namespace fsystem::linux
             return watcher_result;
         }
 
-        epoll_event registration{};
-        registration.events =
+        unique_fd cancellation_handle{fd_handle{}};
+
+        if (state != nullptr)
+        {
+            cancellation_handle.reset(fd_handle{
+                ::eventfd(
+                    0,
+                    EFD_NONBLOCK |
+                    EFD_CLOEXEC
+                )
+            });
+
+            if (!cancellation_handle)
+            {
+                watcher_result.error = current_errno();
+                return watcher_result;
+            }
+        }
+
+        epoll_event directory_registration{};
+        directory_registration.events =
             EPOLLIN |
             EPOLLONESHOT;
-        registration.data.u64 = completion_key;
+        directory_registration.data.u64 =
+            directory_completion_key;
 
         if (::epoll_ctl(
                 event_handle.get().get(),
                 EPOLL_CTL_ADD,
                 inotify_handle.get().get(),
-                &registration
+                &directory_registration
             ) < 0)
         {
             watcher_result.error = current_errno();
             return watcher_result;
         }
+
+        if (state != nullptr)
+        {
+            epoll_event cancellation_registration{};
+            cancellation_registration.events = EPOLLIN;
+            cancellation_registration.data.u64 =
+                cancellation_completion_key;
+
+            if (::epoll_ctl(
+                    event_handle.get().get(),
+                    EPOLL_CTL_ADD,
+                    cancellation_handle.get().get(),
+                    &cancellation_registration
+                ) < 0)
+            {
+                watcher_result.error = current_errno();
+                return watcher_result;
+            }
+        }
+
+        cancellation_signal_context cancellation_context{
+            state != nullptr
+                ? cancellation_handle.get().get()
+                : -1
+        };
+
+        watcher_stop_signal_guard stop_signal_guard(
+            state,
+            state != nullptr
+                ? &cancellation_context
+                : nullptr
+        );
 
         if (state != nullptr)
         {
@@ -332,7 +466,7 @@ namespace fsystem::linux
                     event_handle.get().get(),
                     EPOLL_CTL_MOD,
                     inotify_handle.get().get(),
-                    &registration
+                    &directory_registration
                 ) < 0)
             {
                 return current_errno();
@@ -405,14 +539,7 @@ namespace fsystem::linux
 
         while (true)
         {
-            const int remaining_wait =
-                remaining_timeout();
-
-            const int wait_timeout =
-                state != nullptr &&
-                        remaining_wait > state_poll_interval
-                    ? state_poll_interval
-                    : remaining_wait;
+            const int wait_timeout = remaining_timeout();
 
             const int events_ready = ::epoll_wait(
                 event_handle.get().get(),
@@ -459,7 +586,8 @@ namespace fsystem::linux
                 return finish_after_timeout();
             }
 
-            int completion_index = -1;
+            int directory_index = -1;
+            int cancellation_index = -1;
 
             for (
                 int index = 0;
@@ -467,19 +595,71 @@ namespace fsystem::linux
                 ++index
             )
             {
-                if (
+                const std::uint64_t completion_key =
                     events_overlap[
                         static_cast<std::size_t>(index)
-                    ].data.u64 == completion_key
+                    ].data.u64;
+
+                if (
+                    completion_key ==
+                    directory_completion_key &&
+                    directory_index < 0
                 )
                 {
-                    completion_index = index;
-                    break;
+                    directory_index = index;
+                }
+
+                if (
+                    completion_key ==
+                    cancellation_completion_key &&
+                    cancellation_index < 0
+                )
+                {
+                    cancellation_index = index;
                 }
             }
 
-            if (completion_index < 0)
+            const auto consume_cancellation_event = [&]() noexcept
             {
+                if (!cancellation_handle)
+                    return;
+
+                std::uint64_t signal = 0;
+
+                while (
+                    ::read(
+                        cancellation_handle.get().get(),
+                        &signal,
+                        sizeof(signal)
+                    ) < 0 &&
+                    errno == EINTR
+                )
+                {
+                }
+            };
+
+            if (
+                cancellation_index >= 0 &&
+                (
+                    directory_index < 0 ||
+                    cancellation_index < directory_index
+                )
+            )
+            {
+                consume_cancellation_event();
+                watcher_result.error = 0;
+                return finish_after_timeout();
+            }
+
+            if (directory_index < 0)
+            {
+                if (cancellation_index >= 0)
+                {
+                    consume_cancellation_event();
+                    watcher_result.error = 0;
+                    return finish_after_timeout();
+                }
+
                 const std::uint32_t rearm_error =
                     rearm_epoll();
 
@@ -500,7 +680,7 @@ namespace fsystem::linux
             const epoll_event& completion =
                 events_overlap[
                     static_cast<std::size_t>(
-                        completion_index
+                        directory_index
                     )
                 ];
 
@@ -741,8 +921,18 @@ namespace fsystem::linux
             if (target_file_changed)
                 return finish_after_timeout();
 
-            if (stop_requested(state))
+            if (cancellation_index >= 0)
+            {
+                consume_cancellation_event();
+                watcher_result.error = 0;
                 return finish_after_timeout();
+            }
+
+            if (stop_requested(state))
+            {
+                watcher_result.error = 0;
+                return finish_after_timeout();
+            }
         }
     }
 }
