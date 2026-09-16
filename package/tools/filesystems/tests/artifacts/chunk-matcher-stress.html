@@ -1,0 +1,169 @@
+<div id="chunk-matcher-stress-visual">
+  <style>
+    #chunk-matcher-stress-visual {
+      --viz-series-1: var(--blue);
+      --viz-series-2: var(--purple);
+      --viz-series-3: var(--green);
+      --viz-series-4: var(--yellow);
+      --viz-series-5: var(--red);
+      color: var(--foreground);
+      font-family: var(--font-family, system-ui, sans-serif);
+      font-size: var(--font-size-base, 14px);
+      line-height: 1.45;
+      max-width: 920px;
+      margin: 0 auto;
+    }
+
+    #chunk-matcher-stress-visual h2,
+    #chunk-matcher-stress-visual h3 {
+      font-weight: 500;
+      margin: 0;
+    }
+
+    #chunk-matcher-stress-visual h2 {
+      font-size: 1.35rem;
+      margin-bottom: 0.25rem;
+    }
+
+    #chunk-matcher-stress-visual h3 {
+      font-size: 1rem;
+      margin-bottom: 0.8rem;
+    }
+
+    #chunk-matcher-stress-visual .subtitle,
+    #chunk-matcher-stress-visual .caption {
+      color: var(--muted-foreground);
+    }
+
+    #chunk-matcher-stress-visual .subtitle {
+      margin: 0 0 1.2rem;
+    }
+
+    #chunk-matcher-stress-visual .metric-grid {
+      margin-bottom: 1.35rem;
+    }
+
+    #chunk-matcher-stress-visual .stat-label {
+      color: var(--muted-foreground);
+      display: block;
+      font-size: 0.82rem;
+      margin-bottom: 0.25rem;
+    }
+
+    #chunk-matcher-stress-visual .stat-value {
+      display: block;
+      font-size: 1.35rem;
+      font-variant-numeric: tabular-nums;
+    }
+
+    #chunk-matcher-stress-visual .chart-grid {
+      margin-top: 0.25rem;
+    }
+
+    #chunk-matcher-stress-visual .chart {
+      min-width: 0;
+    }
+
+    #chunk-matcher-stress-visual .bar-row {
+      align-items: center;
+      display: grid;
+      gap: 0.6rem;
+      grid-template-columns: minmax(7.5rem, 10rem) minmax(0, 1fr) 4.5rem;
+      margin: 0.72rem 0;
+    }
+
+    #chunk-matcher-stress-visual .bar-label,
+    #chunk-matcher-stress-visual .bar-value {
+      font-size: 0.88rem;
+    }
+
+    #chunk-matcher-stress-visual .bar-value {
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    #chunk-matcher-stress-visual .bar-track {
+      background: color-mix(in srgb, var(--border) 55%, transparent);
+      border-radius: 0.2rem;
+      height: 0.8rem;
+      overflow: hidden;
+    }
+
+    #chunk-matcher-stress-visual .bar {
+      background: var(--bar-color);
+      border-radius: inherit;
+      height: 100%;
+      width: var(--bar-width);
+    }
+
+    #chunk-matcher-stress-visual .caption {
+      font-size: 0.82rem;
+      margin: 1rem 0 0;
+    }
+
+    @media (max-width: 680px) {
+      #chunk-matcher-stress-visual .bar-row {
+        grid-template-columns: minmax(6.5rem, 8rem) minmax(0, 1fr) 4rem;
+      }
+    }
+  </style>
+
+  <h2>Chunk matcher stress</h2>
+  <p class="subtitle">Checkpoint matching against an overlapping <code>std::string::find</code> oracle</p>
+
+  <div class="viz-grid metric-grid" aria-label="Matcher stress summary">
+    <div class="card">
+      <span class="stat-label">Matcher cases</span>
+      <span class="stat-value">8,008</span>
+    </div>
+    <div class="card">
+      <span class="stat-label">CTest suite</span>
+      <span class="stat-value">5 / 5 passed</span>
+    </div>
+    <div class="card">
+      <span class="stat-label">Reproduction seed</span>
+      <span class="stat-value">5566823262358688305</span>
+    </div>
+  </div>
+
+  <div class="viz-grid chart-grid">
+    <section class="chart" aria-labelledby="case-mix-title">
+      <h3 id="case-mix-title">Matcher case mix</h3>
+      <div role="img" aria-label="8,000 deterministic random partition cases and 8 targeted boundary cases">
+        <div class="bar-row">
+          <span class="bar-label">Random partitions</span>
+          <span class="bar-track"><span class="bar" style="--bar-width: 100%; --bar-color: var(--viz-series-1);"></span></span>
+          <span class="bar-value">8,000</span>
+        </div>
+        <div class="bar-row">
+          <span class="bar-label">Targeted edge cases</span>
+          <span class="bar-track"><span class="bar" style="--bar-width: 0.1%; --bar-color: var(--viz-series-2);"></span></span>
+          <span class="bar-value">8</span>
+        </div>
+      </div>
+      <p class="caption">Targeted cases cover empty input, overlap, binary data, mismatch checkpoints, long patterns, and 64 KiB boundaries.</p>
+    </section>
+
+    <section class="chart" aria-labelledby="verification-title">
+      <h3 id="verification-title">Full harness outcome</h3>
+      <div role="img" aria-label="555 passed, 0 failed, and 1 inconclusive out of 556 full stress cases">
+        <div class="bar-row">
+          <span class="bar-label">Passed</span>
+          <span class="bar-track"><span class="bar" style="--bar-width: 99.82%; --bar-color: var(--viz-series-3);"></span></span>
+          <span class="bar-value">555</span>
+        </div>
+        <div class="bar-row">
+          <span class="bar-label">Inconclusive</span>
+          <span class="bar-track"><span class="bar" style="--bar-width: 0.18%; --bar-color: var(--viz-series-4);"></span></span>
+          <span class="bar-value">1</span>
+        </div>
+        <div class="bar-row">
+          <span class="bar-label">Failed</span>
+          <span class="bar-track"><span class="bar" style="--bar-width: 0%; --bar-color: var(--viz-series-5);"></span></span>
+          <span class="bar-value">0</span>
+        </div>
+      </div>
+      <p class="caption">The single inconclusive lock case acquired its handle outside the final replace window; it was not classified as a failure.</p>
+    </section>
+  </div>
+</div>

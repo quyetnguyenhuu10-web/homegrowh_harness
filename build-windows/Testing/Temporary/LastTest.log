@@ -1,0 +1,119 @@
+Start testing: Sep 16 17:11 SE Asia Standard Time
+----------------------------------------------------------
+1/5 Testing: file_reader_test
+1/5 Test: file_reader_test
+Command: "D:/homegrowh_harness/build-windows/Release/file_reader.exe"
+Directory: D:/homegrowh_harness/build-windows
+"file_reader_test" start time: Sep 16 17:11 SE Asia Standard Time
+Output:
+----------------------------------------------------------
+Read integration test passed.
+<end of output>
+Test time =   0.05 sec
+----------------------------------------------------------
+Test Passed.
+"file_reader_test" end time: Sep 16 17:11 SE Asia Standard Time
+"file_reader_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+2/5 Testing: file_edit_test
+2/5 Test: file_edit_test
+Command: "D:/homegrowh_harness/build-windows/Release/file_edit.exe"
+Directory: D:/homegrowh_harness/build-windows
+"file_edit_test" start time: Sep 16 17:11 SE Asia Standard Time
+Output:
+----------------------------------------------------------
+Edit integration test passed.
+<end of output>
+Test time =   0.08 sec
+----------------------------------------------------------
+Test Passed.
+"file_edit_test" end time: Sep 16 17:11 SE Asia Standard Time
+"file_edit_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+3/5 Testing: watch_file_test
+3/5 Test: watch_file_test
+Command: "D:/homegrowh_harness/build-windows/Release/watch_file.exe"
+Directory: D:/homegrowh_harness/build-windows
+"watch_file_test" start time: Sep 16 17:11 SE Asia Standard Time
+Output:
+----------------------------------------------------------
+status: HAS_EVENT
+error: 0
+<end of output>
+Test time =   0.68 sec
+----------------------------------------------------------
+Test Passed.
+"watch_file_test" end time: Sep 16 17:11 SE Asia Standard Time
+"watch_file_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+4/5 Testing: chunk_matcher_stress_test
+4/5 Test: chunk_matcher_stress_test
+Command: "D:/homegrowh_harness/build-windows/Release/chunk_matcher_stress.exe"
+Directory: D:/homegrowh_harness/build-windows
+"chunk_matcher_stress_test" start time: Sep 16 17:11 SE Asia Standard Time
+Output:
+----------------------------------------------------------
+Chunk matcher stress passed. cases=8008 seed=5566823262358688305
+<end of output>
+Test time =   0.93 sec
+----------------------------------------------------------
+Test Passed.
+"chunk_matcher_stress_test" end time: Sep 16 17:11 SE Asia Standard Time
+"chunk_matcher_stress_test" time elapsed: 00:00:00
+----------------------------------------------------------
+
+5/5 Testing: windows_edit_stress_smoke_test
+5/5 Test: windows_edit_stress_smoke_test
+Command: "D:/homegrowh_harness/build-windows/Release/windows_edit_stress.exe" "--profile" "smoke" "--output" "D:/homegrowh_harness/build-windows/windows-edit-stress-results"
+Directory: D:/homegrowh_harness/build-windows
+"windows_edit_stress_smoke_test" start time: Sep 16 17:11 SE Asia Standard Time
+Output:
+----------------------------------------------------------
+Windows edit stress profile=smoke large_size_bytes=67108864 short_count=20 long_count=3 seed=40569788049300
+Root: "C:\\Users\\HP\\AppData\\Local\\Temp\\fsystem-windows-stress-17895534794399243"
+Output: "D:/homegrowh_harness/build-windows/windows-edit-stress-results"
+
+short-0                      pass          11       ms error=0 note=old_data_not_found
+short-1                      pass          25       ms error=0 note=none
+short-2                      pass          25       ms error=0 note=none
+short-3                      pass          21       ms error=0 note=none
+short-4                      pass          23       ms error=0 note=none
+short-5                      pass          21       ms error=0 note=none
+short-6                      pass          19       ms error=0 note=none
+short-7                      pass          22       ms error=0 note=none
+short-8                      pass          23       ms error=0 note=none
+short-9                      pass          20       ms error=0 note=none
+short-10                     pass          18       ms error=0 note=none
+short-11                     pass          19       ms error=0 note=none
+short-12                     pass          19       ms error=0 note=none
+short-13                     pass          19       ms error=0 note=none
+short-14                     pass          18       ms error=0 note=none
+short-15                     pass          19       ms error=0 note=none
+short-16                     pass          22       ms error=0 note=none
+short-17                     pass          7        ms error=0 note=old_data_not_found
+short-18                     pass          23       ms error=0 note=none
+short-19                     pass          23       ms error=0 note=none
+long-0                       pass          125      ms error=0 note=none
+long-1                       pass          146      ms error=0 note=none
+long-2                       pass          125      ms error=0 note=none
+large-modify-after-progress  pass          268      ms error=0 note=file_changed
+interference-0               pass          249      ms error=0 note=file_changed
+interference-1               inconclusive  5280     ms error=0 note=none
+interference-2               pass          250      ms error=0 note=file_changed
+interference-3               pass          244      ms error=0 note=file_changed
+interference-unrelated       pass          803      ms error=0 note=none
+
+Summary: total=29 passed=28 failed=0 inconclusive=1
+Results: "D:/homegrowh_harness/build-windows/windows-edit-stress-results\\results.csv"
+<end of output>
+Test time =   8.03 sec
+----------------------------------------------------------
+Test Passed.
+"windows_edit_stress_smoke_test" end time: Sep 16 17:11 SE Asia Standard Time
+"windows_edit_stress_smoke_test" time elapsed: 00:00:08
+----------------------------------------------------------
+
+End testing: Sep 16 17:11 SE Asia Standard Time

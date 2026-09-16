@@ -9,7 +9,10 @@
 #include <filesystem>
 #include <limits>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <utility>
+#include <vector>
 
 namespace fsystem::detail
 {
@@ -77,10 +80,7 @@ namespace fsystem::detail
 
         void stop() noexcept
         {
-            state_.stop_requested.store(
-                true,
-                std::memory_order_release
-            );
+            fsystem::request_watcher_stop(state_);
 
             if (thread_.joinable())
                 thread_.join();
@@ -91,23 +91,194 @@ namespace fsystem::detail
         std::thread thread_;
     };
 
-    inline EditNote find_old_data(
-        const std::string& content,
-        const std::string& old_data,
-        std::size_t& first_occurrence
-    )
+    class chunk_matcher
     {
-        first_occurrence = content.find(old_data);
+    public:
+        static constexpr std::uint64_t no_occurrence =
+            std::numeric_limits<std::uint64_t>::max();
 
-        if (first_occurrence == std::string::npos)
-            return EditNote::old_data_not_found;
+        explicit chunk_matcher(std::string old_data)
+            : pattern_(std::move(old_data))
+        {
+        }
 
-        const std::size_t second_occurrence =
-            content.find(old_data, first_occurrence + 1);
+        chunk_matcher(const chunk_matcher&) = delete;
+        chunk_matcher& operator=(const chunk_matcher&) = delete;
 
-        if (second_occurrence != std::string::npos)
-            return EditNote::old_data_appears_more_than_once;
+        bool consume(
+            std::uint64_t chunk_offset,
+            std::string_view chunk
+        )
+        {
+            if (invalid_ || duplicate_)
+                return false;
 
-        return EditNote::none;
-    }
+            if (chunk_offset != next_chunk_offset_)
+            {
+                invalid_ = true;
+                return false;
+            }
+
+            if (!pattern_.empty())
+            {
+                std::vector<checkpoint> next_checkpoints;
+                next_checkpoints.reserve(checkpoints_.size() + 1);
+
+                for (const checkpoint& candidate : checkpoints_)
+                {
+                    std::size_t consumed = 0;
+
+                    while (
+                        candidate.matched + consumed < pattern_.size() &&
+                        consumed < chunk.size() &&
+                        pattern_[candidate.matched + consumed] ==
+                            chunk[consumed]
+                    )
+                    {
+                        ++consumed;
+                    }
+
+                    if (candidate.matched + consumed == pattern_.size())
+                    {
+                        record(candidate.start);
+
+                        if (duplicate_)
+                            return false;
+                    }
+                    else if (consumed == chunk.size())
+                    {
+                        next_checkpoints.push_back(
+                            checkpoint{
+                                candidate.start,
+                                candidate.matched + consumed
+                            }
+                        );
+                    }
+                }
+
+                std::size_t occurrence = chunk.find(pattern_);
+
+                while (occurrence != std::string_view::npos)
+                {
+                    record(chunk_offset + occurrence);
+
+                    if (duplicate_)
+                        return false;
+
+                    occurrence = chunk.find(
+                        pattern_,
+                        occurrence + 1
+                    );
+                }
+
+                const std::size_t minimum_start =
+                    chunk.size() > pattern_.size()
+                        ? chunk.size() - pattern_.size() + 1
+                        : 0;
+
+                for (
+                    std::size_t start = minimum_start;
+                    start < chunk.size();
+                    ++start
+                )
+                {
+                    const std::size_t matched = chunk.size() - start;
+
+                    if (
+                        matched < pattern_.size() &&
+                        chunk.compare(
+                            start,
+                            matched,
+                            pattern_,
+                            0,
+                            matched
+                        ) == 0
+                    )
+                    {
+                        next_checkpoints.push_back(
+                            checkpoint{
+                                chunk_offset + start,
+                                matched
+                            }
+                        );
+                    }
+                }
+
+                checkpoints_ = std::move(next_checkpoints);
+            }
+
+            next_chunk_offset_ = chunk_offset + chunk.size();
+            return true;
+        }
+
+        void finish(std::uint64_t file_size)
+        {
+            if (invalid_ || duplicate_)
+                return;
+
+            if (pattern_.empty())
+            {
+                first_occurrence_ = 0;
+                duplicate_ = file_size != 0;
+                note_ = duplicate_
+                    ? EditNote::old_data_appears_more_than_once
+                    : EditNote::none;
+                return;
+            }
+
+            note_ = first_occurrence_ == no_occurrence
+                ? EditNote::old_data_not_found
+                : EditNote::none;
+        }
+
+        bool invalid() const noexcept
+        {
+            return invalid_;
+        }
+
+        bool duplicate() const noexcept
+        {
+            return duplicate_;
+        }
+
+        EditNote note() const noexcept
+        {
+            return note_;
+        }
+
+        std::uint64_t first_occurrence() const noexcept
+        {
+            return first_occurrence_;
+        }
+
+    private:
+        struct checkpoint
+        {
+            std::uint64_t start;
+            std::size_t matched;
+        };
+
+        void record(std::uint64_t start) noexcept
+        {
+            if (first_occurrence_ == no_occurrence)
+            {
+                first_occurrence_ = start;
+                return;
+            }
+
+            if (first_occurrence_ != start)
+            {
+                duplicate_ = true;
+                note_ = EditNote::old_data_appears_more_than_once;
+            }
+        }
+
+        std::string pattern_;
+        std::vector<checkpoint> checkpoints_;
+        std::uint64_t next_chunk_offset_ = 0;
+        std::uint64_t first_occurrence_ = no_occurrence;
+        EditNote note_ = EditNote::none;
+        bool invalid_ = false;
+        bool duplicate_ = false;
+    };
 }

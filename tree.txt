@@ -1,0 +1,58 @@
+homegrowh_harness/
+├── .github
+│   └── workflows
+│       └── filesystems-ci.yml
+├── docs
+│   └── Tiến_Độ.md
+├── package
+│   ├── compaction
+│   │   └── src
+│   └── tools
+│       ├── filesystems
+│       │   ├── executables
+│       │   │   └── edit_file.cpp
+│       │   ├── include
+│       │   │   └── fsystem
+│       │   ├── src
+│       │   │   ├── config
+│       │   │   │   └── reader_config.h
+│       │   │   ├── fsystem
+│       │   │   │   ├── edit
+│       │   │   │   │   ├── edit.cpp
+│       │   │   │   │   ├── edit.h
+│       │   │   │   │   └── edit_detail.h
+│       │   │   │   ├── read
+│       │   │   │   │   ├── reader.cpp
+│       │   │   │   │   └── reader.h
+│       │   │   │   └── watcher
+│       │   │   │       ├── watcher.cpp
+│       │   │   │       └── watcher.h
+│       │   │   └── platform
+│       │   │       ├── linux
+│       │   │       │   └── fsystem
+│       │   │       │       ├── edit
+│       │   │       │       │   ├── linux_edit.cpp
+│       │   │       │       │   └── linux_edit.h
+│       │   │       │       ├── reader
+│       │   │       │       │   ├── linux_reader.cpp
+│       │   │       │       │   └── linux_reader.h
+│       │   │       │       └── watcher
+│       │   │       │           ├── linux_watcher.cpp
+│       │   │       │           └── linux_watcher.h
+│       │   │       └── windows
+│       │   │           └── fsystem
+│       │   │               ├── edit
+│       │   │               │   ├── window_edit.h
+│       │   │               │   └── windows_edit.cpp
+│       │   │               ├── reader
+│       │   │               │   ├── windows_reader.cpp
+│       │   │               │   └── windows_reader.h
+│       │   │               └── watcher
+│       │   │                   ├── note.md
+│       │   │                   ├── windows_watcher.cpp
+│       │   │                   └── windows_watcher.h
+│       │   └── CMakeLists.txt
+│       └── CMakeLists.txt
+├── .gitattributes
+├── .gitignore
+└── tree.txt

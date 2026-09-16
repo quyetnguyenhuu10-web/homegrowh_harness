@@ -1,7 +1,6 @@
 #include "window_edit.h"
 
 #include <fsystem/edit/edit_detail.h>
-#include <fsystem/read/reader.h>
 
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -9,7 +8,12 @@
 
 #include <Windows.h>
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
+#include <string>
+#include <string_view>
 
 namespace fsystem::windows
 {
@@ -30,35 +34,207 @@ namespace fsystem::windows
 
         using unique_handle = std::unique_ptr<void, handle_deleter>;
 
-        std::string build_new_content(
-            const std::string& content,
-            std::size_t first_occurrence,
-            const std::string& old_data,
-            const std::string& new_data
+        constexpr std::size_t stream_chunk_capacity = 64 * 1024;
+
+        bool write_bytes(
+            HANDLE file_handle,
+            std::string_view data,
+            std::uint32_t& error
         )
         {
-            std::string block_before =
-                content.substr(0, first_occurrence);
+            std::size_t position = 0;
 
-            std::string block_old_data =
-                content.substr(first_occurrence, old_data.size());
+            while (position < data.size())
+            {
+                const std::size_t remaining = data.size() - position;
+                const DWORD bytes_to_write = static_cast<DWORD>(
+                    std::min(
+                        remaining,
+                        static_cast<std::size_t>(MAXDWORD)
+                    )
+                );
 
-            std::string block_after =
-                content.substr(first_occurrence + old_data.size());
+                DWORD bytes_written = 0;
 
-            std::string new_content =
-                block_before + new_data + block_after;
+                if (!WriteFile(
+                        file_handle,
+                        data.data() + position,
+                        bytes_to_write,
+                        &bytes_written,
+                        nullptr
+                    ))
+                {
+                    error = GetLastError();
+                    return false;
+                }
 
-            block_before.clear();
-            block_old_data.clear();
-            block_after.clear();
+                if (
+                    bytes_written == 0 ||
+                    bytes_written > bytes_to_write
+                )
+                {
+                    error = ERROR_WRITE_FAULT;
+                    return false;
+                }
 
-            return new_content;
+                position += bytes_written;
+            }
+
+            return true;
         }
+
+        class source_file
+        {
+        public:
+            bool open(
+                const std::filesystem::path& path,
+                std::uint32_t& error
+            )
+            {
+                handle_.reset();
+
+                HANDLE raw_handle = CreateFileW(
+                    path.c_str(),
+                    GENERIC_READ,
+                    FILE_SHARE_READ |
+                    FILE_SHARE_WRITE |
+                    FILE_SHARE_DELETE,
+                    nullptr,
+                    OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL |
+                    FILE_FLAG_SEQUENTIAL_SCAN,
+                    nullptr
+                );
+
+                if (raw_handle == INVALID_HANDLE_VALUE)
+                {
+                    error = GetLastError();
+                    return false;
+                }
+
+                handle_.reset(raw_handle);
+
+                LARGE_INTEGER file_size{};
+
+                if (!GetFileSizeEx(handle_.get(), &file_size))
+                {
+                    error = GetLastError();
+                    handle_.reset();
+                    return false;
+                }
+
+                if (file_size.QuadPart < 0)
+                {
+                    error = ERROR_INVALID_DATA;
+                    handle_.reset();
+                    return false;
+                }
+
+                size_ = static_cast<std::uint64_t>(
+                    file_size.QuadPart
+                );
+                return true;
+            }
+
+            void reset() noexcept
+            {
+                handle_.reset();
+                size_ = 0;
+            }
+
+            std::uint64_t size() const noexcept
+            {
+                return size_;
+            }
+
+            template<typename callback_type>
+            bool for_each_chunk(
+                callback_type&& callback,
+                std::uint32_t& error
+            )
+            {
+                LARGE_INTEGER origin{};
+
+                if (!SetFilePointerEx(
+                        handle_.get(),
+                        origin,
+                        nullptr,
+                        FILE_BEGIN
+                    ))
+                {
+                    error = GetLastError();
+                    return false;
+                }
+
+                std::string chunk(stream_chunk_capacity, '\0');
+                std::uint64_t position = 0;
+
+                while (position < size_)
+                {
+                    const std::uint64_t remaining = size_ - position;
+                    const DWORD requested = static_cast<DWORD>(
+                        std::min(
+                            remaining,
+                            static_cast<std::uint64_t>(
+                                stream_chunk_capacity
+                            )
+                        )
+                    );
+
+                    DWORD filled = 0;
+
+                    while (filled < requested)
+                    {
+                        DWORD bytes_read = 0;
+
+                        if (!ReadFile(
+                                handle_.get(),
+                                chunk.data() + filled,
+                                requested - filled,
+                                &bytes_read,
+                                nullptr
+                            ))
+                        {
+                            error = GetLastError();
+                            return false;
+                        }
+
+                        if (bytes_read == 0)
+                        {
+                            error = ERROR_HANDLE_EOF;
+                            return false;
+                        }
+
+                        filled += bytes_read;
+                    }
+
+                    if (!callback(
+                            position,
+                            std::string_view(chunk.data(), filled)
+                        ))
+                    {
+                        return true;
+                    }
+
+                    position += filled;
+                }
+
+                return true;
+            }
+
+        private:
+            unique_handle handle_{nullptr};
+            std::uint64_t size_ = 0;
+        };
 
         bool write_and_replace(
             const std::filesystem::path& path,
-            const std::string& new_content,
+            source_file& source,
+            std::uint64_t first_occurrence,
+            std::size_t old_data_size,
+            const std::string& new_data,
+            fsystem::WatcherState& watcher_state,
+            bool& replace_attempted,
             std::uint32_t& error
         )
         {
@@ -100,55 +276,151 @@ namespace fsystem::windows
             }
 
             unique_handle handle(raw_handle);
-            HANDLE hFile = handle.get();
 
-            std::size_t position = 0;
-
-            while (position < new_content.size())
+            const auto fail = [&](std::uint32_t failure) noexcept
+                -> bool
             {
-                const std::size_t remaining = new_content.size() - position;
+                error = failure;
+                handle.reset();
+                (void)DeleteFileW(temp_path.c_str());
+                return false;
+            };
 
-                const DWORD bytes_to_write =
-                    remaining > static_cast<std::size_t>(MAXDWORD)
-                        ? MAXDWORD
-                        : static_cast<DWORD>(remaining);
+            const std::uint64_t replacement_end =
+                first_occurrence + old_data_size;
+            bool replacement_written = false;
+            bool callback_failed = false;
 
-                DWORD bytes_written = 0;
-
-                if (!WriteFile(
-                        hFile,
-                        new_content.data() + position,
-                        bytes_to_write,
-                        &bytes_written,
-                        nullptr
-                    ))
+            const auto write_source_chunk =
+                [&](std::uint64_t offset, std::string_view chunk)
                 {
-                    error = GetLastError();
-                    handle.reset();
-                    (void)DeleteFileW(temp_path.c_str());
-                    return false;
-                }
+                    const std::uint64_t chunk_end =
+                        offset + chunk.size();
 
-                if (bytes_written == 0 || bytes_written > bytes_to_write)
-                {
-                    handle.reset();
-                    (void)DeleteFileW(temp_path.c_str());
-                    error = ERROR_WRITE_FAULT;
-                    return false;
-                }
+                    if (!replacement_written)
+                    {
+                        if (offset < first_occurrence)
+                        {
+                            const std::uint64_t prefix_end =
+                                std::min(first_occurrence, chunk_end);
 
-                position += bytes_written;
+                            if (!write_bytes(
+                                    handle.get(),
+                                    chunk.substr(
+                                        0,
+                                        static_cast<std::size_t>(
+                                            prefix_end - offset
+                                        )
+                                    ),
+                                    error
+                                ))
+                            {
+                                callback_failed = true;
+                                return false;
+                            }
+                        }
+
+                        if (chunk_end >= first_occurrence)
+                        {
+                            if (!write_bytes(
+                                    handle.get(),
+                                    new_data,
+                                    error
+                                ))
+                            {
+                                callback_failed = true;
+                                return false;
+                            }
+
+                            replacement_written = true;
+
+                            if (chunk_end > replacement_end)
+                            {
+                                const std::uint64_t suffix_start =
+                                    std::max(offset, replacement_end);
+
+                                if (!write_bytes(
+                                        handle.get(),
+                                        chunk.substr(
+                                            static_cast<std::size_t>(
+                                                suffix_start - offset
+                                            )
+                                        ),
+                                        error
+                                    ))
+                                {
+                                    callback_failed = true;
+                                    return false;
+                                }
+                            }
+                        }
+                    }
+                    else if (chunk_end > replacement_end)
+                    {
+                        const std::uint64_t suffix_start =
+                            std::max(offset, replacement_end);
+
+                        if (!write_bytes(
+                                handle.get(),
+                                chunk.substr(
+                                    static_cast<std::size_t>(
+                                        suffix_start - offset
+                                    )
+                                ),
+                                error
+                            ))
+                        {
+                            callback_failed = true;
+                            return false;
+                        }
+                    }
+
+                    return true;
+                };
+
+            if (!source.for_each_chunk(write_source_chunk, error))
+                return fail(error);
+
+            if (
+                source.size() == 0 &&
+                first_occurrence == 0 &&
+                old_data_size == 0
+            )
+            {
+                if (!write_bytes(handle.get(), new_data, error))
+                    return fail(error);
+
+                replacement_written = true;
             }
 
-            if (!FlushFileBuffers(hFile))
+            if (callback_failed || !replacement_written)
             {
-                error = GetLastError();
+                return fail(
+                    callback_failed
+                        ? error
+                        : ERROR_INVALID_DATA
+                );
+            }
+
+            if (!FlushFileBuffers(handle.get()))
+                return fail(GetLastError());
+
+            if (
+                watcher_state.file_changed.load(
+                    std::memory_order_acquire
+                )
+            )
+            {
                 handle.reset();
                 (void)DeleteFileW(temp_path.c_str());
                 return false;
             }
 
             handle.reset();
+
+            /* The source must be closed before the final replacement. */
+            source.reset();
+            replace_attempted = true;
 
             if (!ReplaceFileW(
                     path.c_str(),
@@ -193,44 +465,69 @@ namespace fsystem::windows
         )
         {
             watcher_thread.stop();
+
             edit_result.error = watcher_exception != nullptr
                 ? fsystem::detail::watcher_thread_exception_error
                 : watcher_result.error;
+
             return edit_result;
         }
 
-        auto result = fsystem::read(path);
+        source_file source;
 
-        if (result.error != 0)
+        if (std::uint32_t error = 0;
+            !source.open(path, error))
         {
-            edit_result.error = result.error;
+            watcher_thread.stop();
+            edit_result.error = error;
             return edit_result;
         }
 
-        edit_result.old_content = result.content;
+        fsystem::detail::chunk_matcher matcher(old_data);
 
-        std::size_t first_occurrence = std::string::npos;
+        if (!source.for_each_chunk(
+                [&](std::uint64_t offset, std::string_view chunk)
+                {
+                    return matcher.consume(offset, chunk);
+                },
+                edit_result.error
+            ))
+        {
+            watcher_thread.stop();
+            return edit_result;
+        }
 
-        edit_result.note = fsystem::detail::find_old_data(
-            result.content,
-            old_data,
-            first_occurrence
-        );
+        matcher.finish(source.size());
+
+        if (matcher.invalid())
+        {
+            watcher_thread.stop();
+            edit_result.error = ERROR_INVALID_DATA;
+            return edit_result;
+        }
+
+        edit_result.note = matcher.note();
 
         if (edit_result.note != EditNote::none)
+        {
+            watcher_thread.stop();
             return edit_result;
+        }
 
-        edit_result.new_content = build_new_content(
-            result.content,
-            first_occurrence,
-            old_data,
-            new_data
+        edit_result.old_content = old_data;
+        edit_result.new_content = new_data;
+
+        const bool replaced = write_and_replace(
+            path,
+            source,
+            matcher.first_occurrence(),
+            old_data.size(),
+            new_data,
+            watcher_state,
+            edit_result.replace_attempted,
+            edit_result.error
         );
 
-        /*
-         * Đây là điểm kiểm tra cuối cùng. Các bước đọc, tìm và dựng nội
-         * dung mới vẫn hoàn tất trước khi hỏi watcher về cạnh tranh file.
-         */
         watcher_thread.stop();
 
         if (watcher_exception != nullptr)
@@ -246,20 +543,20 @@ namespace fsystem::windows
             return edit_result;
         }
 
-        if (
-            watcher_state.file_changed.load(std::memory_order_acquire) ||
-            watcher_result.event_status == EventStatus::HasEvent
-        )
+        if (!replaced)
         {
-            edit_result.note = EditNote::file_changed;
+            if (
+                watcher_state.file_changed.load(
+                    std::memory_order_acquire
+                ) ||
+                watcher_result.event_status == EventStatus::HasEvent
+            )
+            {
+                edit_result.note = EditNote::file_changed;
+            }
+
             return edit_result;
         }
-
-        write_and_replace(
-            path,
-            edit_result.new_content,
-            edit_result.error
-        );
 
         return edit_result;
     }

@@ -116,6 +116,11 @@ option(FILESYSTEMS_BUILD_TESTS
     ON
 )
 
+option(FILESYSTEMS_BUILD_WINDOWS_STRESS_TESTS
+    "Build the Windows edit stress harness"
+    OFF
+)
+
 if(FILESYSTEMS_BUILD_TESTS)
 
     enable_testing()
@@ -131,6 +136,24 @@ if(FILESYSTEMS_BUILD_TESTS)
     add_executable(watch_file
         tests/watch_file.cpp
     )
+
+    add_executable(chunk_matcher_stress
+        tests/chunk_matcher_stress.cpp
+    )
+
+    if(WIN32 AND FILESYSTEMS_BUILD_WINDOWS_STRESS_TESTS)
+
+        add_executable(windows_edit_stress
+            tests/windows_edit_stress.cpp
+        )
+
+        target_link_libraries(windows_edit_stress
+            PRIVATE
+                filesystems
+                Psapi
+        )
+
+    endif()
 
     target_link_libraries(file_reader
         PRIVATE
@@ -148,6 +171,11 @@ if(FILESYSTEMS_BUILD_TESTS)
             Threads::Threads
     )
 
+    target_link_libraries(chunk_matcher_stress
+        PRIVATE
+            filesystems
+    )
+
     add_test(
         NAME file_reader_test
         COMMAND file_reader
@@ -162,5 +190,22 @@ if(FILESYSTEMS_BUILD_TESTS)
         NAME watch_file_test
         COMMAND watch_file
     )
+
+    add_test(
+        NAME chunk_matcher_stress_test
+        COMMAND chunk_matcher_stress
+    )
+
+    if(WIN32 AND FILESYSTEMS_BUILD_WINDOWS_STRESS_TESTS)
+
+        add_test(
+            NAME windows_edit_stress_smoke_test
+            COMMAND windows_edit_stress
+                --profile smoke
+                --output
+                ${CMAKE_CURRENT_BINARY_DIR}/windows-edit-stress-results
+        )
+
+    endif()
 
 endif()

@@ -1,0 +1,8 @@
+{
+  "input": "D:\\homegrowh_harness\\windows-edit-stress-results\\results.csv",
+  "output": "D:\\homegrowh_harness\\windows-edit-stress-results\\report.html",
+  "total": 556,
+  "pass": 555,
+  "fail": 0,
+  "inconclusive": 1
+}

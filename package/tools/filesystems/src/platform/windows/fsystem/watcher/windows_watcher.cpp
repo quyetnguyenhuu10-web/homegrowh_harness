@@ -31,8 +31,8 @@ namespace fsystem::windows
 
         constexpr std::size_t event_buffer_capacity = 64 * 1024;
         constexpr ULONG max_completion_entries = 10;
-        constexpr ULONG_PTR completion_key = 1001;
-        constexpr DWORD state_poll_interval = 20;
+        constexpr ULONG_PTR directory_completion_key = 1001;
+        constexpr ULONG_PTR cancellation_completion_key = 1002;
 
         struct read_operation
         {
@@ -98,6 +98,75 @@ namespace fsystem::windows
                 );
             }
         }
+
+        void post_cancellation_completion(void* context) noexcept
+        {
+            const HANDLE io_completion_port =
+                static_cast<HANDLE>(context);
+
+            if (io_completion_port == nullptr)
+                return;
+
+            (void)PostQueuedCompletionStatus(
+                io_completion_port,
+                0,
+                cancellation_completion_key,
+                nullptr
+            );
+        }
+
+        class watcher_stop_signal_guard
+        {
+        public:
+            watcher_stop_signal_guard(
+                WatcherState* state,
+                HANDLE io_completion_port
+            ) noexcept
+                : state_(state)
+            {
+                if (state_ == nullptr)
+                    return;
+
+                std::lock_guard<std::mutex> lock(
+                    state_->stop_signal_mutex
+                );
+
+                state_->stop_signal_context = io_completion_port;
+                state_->stop_signal = &post_cancellation_completion;
+
+                if (state_->stop_requested.load(
+                        std::memory_order_acquire
+                    ))
+                {
+                    state_->stop_signal(
+                        state_->stop_signal_context
+                    );
+                }
+            }
+
+            watcher_stop_signal_guard(
+                const watcher_stop_signal_guard&)
+                = delete;
+            watcher_stop_signal_guard& operator=(
+                const watcher_stop_signal_guard&)
+                = delete;
+
+            ~watcher_stop_signal_guard() noexcept
+            {
+                if (state_ == nullptr)
+                    return;
+
+                std::lock_guard<std::mutex> lock(
+                    state_->stop_signal_mutex
+                );
+
+                state_->stop_signal = nullptr;
+                state_->stop_signal_context = nullptr;
+            }
+
+        private:
+            WatcherState* state_;
+        };
     }
 
     WatcherResult watcher_file(
@@ -157,7 +226,7 @@ namespace fsystem::windows
             CreateIoCompletionPort(
                 directory_handle,
                 nullptr,
-                completion_key,
+                directory_completion_key,
                 0
             )
         );
@@ -167,6 +236,11 @@ namespace fsystem::windows
             watcher_result.error = GetLastError();
             return watcher_result;
         }
+
+        watcher_stop_signal_guard stop_signal_guard(
+            state,
+            io_completion_port.get()
+        );
 
         read_operation first_operation(event_buffer_capacity);
         read_operation second_operation(event_buffer_capacity);
@@ -290,14 +364,6 @@ namespace fsystem::windows
                             wait_timeout - elapsed
                         );
 
-                DWORD wait_slice = remaining_timeout;
-
-                if (state != nullptr &&
-                    wait_slice > state_poll_interval)
-                {
-                    wait_slice = state_poll_interval;
-                }
-
                 std::array<
                     OVERLAPPED_ENTRY,
                     max_completion_entries
@@ -311,7 +377,7 @@ namespace fsystem::windows
                         completions.data(),
                         max_completion_entries,
                         &entries_removed,
-                        wait_slice,
+                        remaining_timeout,
                         FALSE
                     );
 
@@ -321,17 +387,9 @@ namespace fsystem::windows
 
                     if (wait_error == WAIT_TIMEOUT)
                     {
-                        if (
-                            stop_requested(state) ||
-                            remaining_timeout == 0
-                        )
-                        {
-                            finish_pending_io(*pending_operation);
-                            has_pending_io = false;
-                            return finish_without_error();
-                        }
-
-                        continue;
+                        finish_pending_io(*pending_operation);
+                        has_pending_io = false;
+                        return finish_without_error();
                     }
 
                     finish_pending_io(*pending_operation);
@@ -343,7 +401,12 @@ namespace fsystem::windows
                     return watcher_result;
                 }
 
+                if (entries_removed == 0)
+                    continue;
+
                 std::size_t completion_index =
+                    entries_removed;
+                std::size_t cancellation_index =
                     entries_removed;
 
                 for (
@@ -354,18 +417,46 @@ namespace fsystem::windows
                 {
                     if (
                         completions[index].lpCompletionKey ==
-                            completion_key &&
+                            cancellation_completion_key &&
+                        completions[index].lpOverlapped == nullptr
+                    )
+                    {
+                        if (cancellation_index == entries_removed)
+                            cancellation_index = index;
+                    }
+
+                    if (
+                        completions[index].lpCompletionKey ==
+                            directory_completion_key &&
                         completions[index].lpOverlapped ==
                             &pending_operation->overlapped
                     )
                     {
-                        completion_index = index;
-                        break;
+                        if (completion_index == entries_removed)
+                            completion_index = index;
                     }
                 }
 
+                if (
+                    cancellation_index < completion_index
+                )
+                {
+                    finish_pending_io(*pending_operation);
+                    has_pending_io = false;
+                    return finish_without_error();
+                }
+
                 if (completion_index == entries_removed)
+                {
+                    if (cancellation_index != entries_removed)
+                    {
+                        finish_pending_io(*pending_operation);
+                        has_pending_io = false;
+                        return finish_without_error();
+                    }
+
                     continue;
+                }
 
                 const DWORD bytes_transferred =
                     static_cast<DWORD>(
@@ -505,6 +596,13 @@ namespace fsystem::windows
                 }
 
                 if (target_file_changed)
+                {
+                    finish_pending_io(*pending_operation);
+                    has_pending_io = false;
+                    return finish_without_error();
+                }
+
+                if (cancellation_index != entries_removed)
                 {
                     finish_pending_io(*pending_operation);
                     has_pending_io = false;

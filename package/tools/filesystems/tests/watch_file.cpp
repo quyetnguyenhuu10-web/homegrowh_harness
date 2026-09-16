@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <thread>
 #include <system_error>
 
@@ -151,6 +152,50 @@ int main()
     )
     {
         std::cerr << "Watcher did not report the modified target file.\n";
+        return 1;
+    }
+
+    fsystem::WatcherState cancellation_state;
+    fsystem::WatcherResult cancellation_result{};
+
+    std::thread cancellation_thread([&]()
+    {
+        cancellation_result = fsystem::watcher(
+            unrelated_file_path,
+            std::numeric_limits<int>::max(),
+            cancellation_state
+        );
+    });
+
+    while (
+        !cancellation_state.ready.load(std::memory_order_acquire) &&
+        !cancellation_state.finished.load(std::memory_order_acquire)
+    )
+    {
+        std::this_thread::yield();
+    }
+
+    if (
+        cancellation_state.finished.load(std::memory_order_acquire) &&
+        !cancellation_state.ready.load(std::memory_order_acquire)
+    )
+    {
+        cancellation_thread.join();
+        std::cerr << "Cancellation watcher failed to start. Error: "
+                  << cancellation_result.error << '\n';
+        return 1;
+    }
+
+    fsystem::request_watcher_stop(cancellation_state);
+    cancellation_thread.join();
+
+    if (
+        cancellation_result.error != 0 ||
+        cancellation_result.event_status != fsystem::EventStatus::NoEvent
+    )
+    {
+        std::cerr << "Watcher cancellation returned an unexpected result. "
+                  << "Error: " << cancellation_result.error << '\n';
         return 1;
     }
 

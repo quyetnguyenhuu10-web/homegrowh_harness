@@ -1,0 +1,9 @@
+profile=smoke
+seed=40569788049300
+large_size_bytes=67108864
+short_count=20
+long_count=3
+total=29
+passed=28
+failed=0
+inconclusive=1

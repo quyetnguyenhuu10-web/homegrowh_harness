@@ -16,6 +16,23 @@
 
 namespace fsystem
 {
+    void request_watcher_stop(WatcherState& state) noexcept
+    {
+        state.stop_requested.store(
+            true,
+            std::memory_order_release
+        );
+
+        std::lock_guard<std::mutex> lock(
+            state.stop_signal_mutex
+        );
+
+        if (state.stop_signal != nullptr)
+        {
+            state.stop_signal(state.stop_signal_context);
+        }
+    }
+
     WatcherResult watcher(
         std::filesystem::path path,
         int timeout_f
