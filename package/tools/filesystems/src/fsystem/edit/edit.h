@@ -18,8 +18,6 @@ namespace fsystem
 
     struct EditResult
     {
-        std::string new_content;
-        std::string old_content;
         std::uint32_t error;
         EditNote note{EditNote::none};
 
@@ -27,5 +25,9 @@ namespace fsystem
         bool replace_attempted = false;
     };
 
-    EditResult edit(std::filesystem::path path, std::string old_data, std::string new_data);
+    EditResult edit(
+        const std::filesystem::path& path,
+        const std::string& old_data,
+        const std::string& new_data
+    );
 }

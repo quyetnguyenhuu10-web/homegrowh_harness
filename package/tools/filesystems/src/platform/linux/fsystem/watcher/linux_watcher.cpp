@@ -182,6 +182,17 @@ namespace fsystem::linux
                     false,
                     std::memory_order_release
                 );
+
+                /*
+                 * A WatcherState may be reused by the caller.
+                 *
+                 * cancel_requested belongs to the current watcher
+                 * lifetime, so it must start in the non-cancelled state.
+                 */
+                state_->cancel_requested.store(
+                    false,
+                    std::memory_order_release
+                );
             }
 
             watcher_state_guard(const watcher_state_guard&) = delete;
@@ -214,7 +225,16 @@ namespace fsystem::linux
         {
             if (state != nullptr)
             {
+                /*
+                 * Publish the observable result before the active
+                 * cancellation signal, matching the Windows watcher.
+                 */
                 state->file_changed.store(
+                    true,
+                    std::memory_order_release
+                );
+
+                state->cancel_requested.store(
                     true,
                     std::memory_order_release
                 );

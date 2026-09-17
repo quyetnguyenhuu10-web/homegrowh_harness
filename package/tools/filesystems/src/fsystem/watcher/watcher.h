@@ -33,6 +33,7 @@ namespace fsystem
         std::atomic_bool file_changed{false};
         std::atomic_bool ready{false};
         std::atomic_bool finished{false};
+        std::atomic_bool cancel_requested{false};
 
         /*
          * Platform implementations may register a native wake-up target

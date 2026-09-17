@@ -5,8 +5,8 @@
 namespace fsystem::linux
 {
     EditResult edit_file(
-        std::filesystem::path path,
-        std::string old_data,
-        std::string new_data
+        const std::filesystem::path& path,
+        const std::string& old_data,
+        const std::string& new_data
     );
 }

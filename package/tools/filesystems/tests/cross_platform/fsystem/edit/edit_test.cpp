@@ -164,10 +164,6 @@ int main()
         !expect(
             successful_edit.note == fsystem::EditNote::none,
             "Successful edit returned an unexpected note."
-        ) ||
-        !expect(
-            successful_edit.new_content == new_data,
-            "Edit returned unexpected replacement content."
         ))
     {
         return 1;

@@ -7,9 +7,9 @@
 namespace fsystem
 {
     EditResult edit(
-        std::filesystem::path path,
-        std::string old_data,
-        std::string new_data
+        const std::filesystem::path& path,
+        const std::string& old_data,
+        const std::string& new_data
     )
     {
         return windows::edit_file(
@@ -27,9 +27,9 @@ namespace fsystem
 namespace fsystem
 {
     EditResult edit(
-        std::filesystem::path path,
-        std::string old_data,
-        std::string new_data
+        const std::filesystem::path& path,
+        const std::string& old_data,
+        const std::string& new_data
     )
     {
         return linux::edit_file(

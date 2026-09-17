@@ -54,9 +54,28 @@ namespace fsystem::windows
                 if (state_ == nullptr)
                     return;
 
-                state_->ready.store(false, std::memory_order_release);
-                state_->finished.store(false, std::memory_order_release);
+                state_->ready.store(
+                    false,
+                    std::memory_order_release
+                );
+
+                state_->finished.store(
+                    false,
+                    std::memory_order_release
+                );
+
                 state_->file_changed.store(
+                    false,
+                    std::memory_order_release
+                );
+
+                /*
+                 * A WatcherState may be reused by the caller.
+                 *
+                 * cancel_requested belongs to the current watcher
+                 * lifetime, so it must start in the non-cancelled state.
+                 */
+                state_->cancel_requested.store(
                     false,
                     std::memory_order_release
                 );
@@ -85,14 +104,32 @@ namespace fsystem::windows
         bool stop_requested(const WatcherState* state) noexcept
         {
             return state != nullptr &&
-                state->stop_requested.load(std::memory_order_acquire);
+                state->stop_requested.load(
+                    std::memory_order_acquire
+                );
         }
 
         void publish_file_changed(WatcherState* state) noexcept
         {
             if (state != nullptr)
             {
+                /*
+                 * file_changed is the observable watcher result.
+                 *
+                 * cancel_requested is the active cancellation signal
+                 * consumed by the edit operation.
+                 *
+                 * Publish the result first, then publish cancellation.
+                 * Both use release ordering so the edit side cannot
+                 * observe cancellation without the corresponding
+                 * file_changed state having been published.
+                 */
                 state->file_changed.store(
+                    true,
+                    std::memory_order_release
+                );
+
+                state->cancel_requested.store(
                     true,
                     std::memory_order_release
                 );
@@ -147,6 +184,7 @@ namespace fsystem::windows
             watcher_stop_signal_guard(
                 const watcher_stop_signal_guard&)
                 = delete;
+
             watcher_stop_signal_guard& operator=(
                 const watcher_stop_signal_guard&)
                 = delete;
@@ -296,13 +334,13 @@ namespace fsystem::windows
                 ULONG entries_removed = 0;
 
                 if (!GetQueuedCompletionStatusEx(
-                    io_completion_port.get(),
-                    &completion,
-                    1,
-                    &entries_removed,
-                    INFINITE,
-                    FALSE
-                ))
+                        io_completion_port.get(),
+                        &completion,
+                        1,
+                        &entries_removed,
+                        INFINITE,
+                        FALSE
+                    ))
                 {
                     return;
                 }
@@ -324,6 +362,7 @@ namespace fsystem::windows
                 target_file_changed
                     ? EventStatus::HasEvent
                     : EventStatus::NoEvent;
+
             watcher_result.error = ERROR_SUCCESS;
             return watcher_result;
         };
@@ -341,7 +380,10 @@ namespace fsystem::windows
 
         if (state != nullptr)
         {
-            state->ready.store(true, std::memory_order_release);
+            state->ready.store(
+                true,
+                std::memory_order_release
+            );
         }
 
         const DWORD wait_timeout =
@@ -397,6 +439,7 @@ namespace fsystem::windows
 
                     watcher_result.event_status =
                         EventStatus::None;
+
                     watcher_result.error = wait_error;
                     return watcher_result;
                 }
@@ -406,6 +449,7 @@ namespace fsystem::windows
 
                 std::size_t completion_index =
                     entries_removed;
+
                 std::size_t cancellation_index =
                     entries_removed;
 
@@ -484,6 +528,7 @@ namespace fsystem::windows
                 {
                     watcher_result.event_status =
                         EventStatus::None;
+
                     watcher_result.error = rearm_error;
                     return watcher_result;
                 }
@@ -502,7 +547,9 @@ namespace fsystem::windows
                 {
                     watcher_result.event_status =
                         EventStatus::None;
-                    watcher_result.error = ERROR_INVALID_DATA;
+
+                    watcher_result.error =
+                        ERROR_INVALID_DATA;
 
                     finish_pending_io(*pending_operation);
                     has_pending_io = false;
@@ -583,6 +630,15 @@ namespace fsystem::windows
 
                     if (is_target_file)
                     {
+                        /*
+                         * This is the point where watcher becomes the
+                         * cancellation producer.
+                         *
+                         * Do not merely remember the event. Publish an
+                         * active cancellation request so the edit side
+                         * can terminate its current work as soon as its
+                         * next cancellation point is reached.
+                         */
                         target_file_changed = true;
                         publish_file_changed(state);
                         break;

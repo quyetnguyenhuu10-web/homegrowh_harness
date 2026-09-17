@@ -3,3 +3,11 @@
 **/build-ci/
 **/.cmake-build-filesystems/
 /build-windows/
+
+# Generated Windows edit stress reports
+/package/tools/filesystems/tests/platform/windows/fsystem/edit/windows_edit_stress/index.html
+/package/tools/filesystems/tests/platform/windows/fsystem/edit/windows_edit_stress/**/report.html
+/package/tools/filesystems/tests/platform/windows/fsystem/edit/windows_edit_stress/**/results/
+/package/tools/filesystems/tests/platform/linux/fsystem/edit/linux_edit_stress/index.html
+/package/tools/filesystems/tests/platform/linux/fsystem/edit/linux_edit_stress/**/report.html
+/package/tools/filesystems/tests/platform/linux/fsystem/edit/linux_edit_stress/**/results/

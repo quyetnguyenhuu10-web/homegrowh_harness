@@ -47,14 +47,6 @@ int main(int argc, char* argv[])
 
     auto edit_result = fsystem::edit(edit_path, old_content, new_content);
 
-    std::cout << "=================OLD CONTENT====================\n";
-    std::cout << edit_result.old_content << '\n';
-    std::cout << "================================================\n";
-
-    std::cout << "=================NEW CONTENT====================\n";
-    std::cout << edit_result.new_content << '\n';
-    std::cout << "================================================\n";
-
     std::cout << "Mã lỗi: " << edit_result.error << '\n';
     std::cout << "Ghi chú: " << to_string(edit_result.note) << '\n';
     return 0;

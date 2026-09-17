@@ -107,19 +107,6 @@ jobs:
           --timeout 1800
           -R "^windows_edit_stress_${{ env.STRESS_PROFILE }}_test$"
 
-      - name: Generate Windows edit stress report
-        if: always() && matrix.os == 'windows-latest'
-        shell: pwsh
-        run: |
-          $results = "build-ci/windows-edit-stress-${{ env.STRESS_PROFILE }}-results"
-          $csv = "$results/results.csv"
-          $report = "$results/report.html"
-          if (Test-Path $csv) {
-            node tests/platform/windows/fsystem/edit/windows_edit_stress_report.mjs `
-              --input $csv `
-              --output $report
-          }
-
       - name: Upload watcher binary
         if: success() && github.event_name == 'push'
         uses: actions/upload-artifact@v4
@@ -141,7 +128,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-edit-stress-${{ env.STRESS_PROFILE }}
-          path: package/tools/filesystems/build-ci/linux-edit-stress-*-results/**
+          path: |
+            package/tools/filesystems/tests/platform/linux/fsystem/edit/linux_edit_stress/index.html
+            package/tools/filesystems/tests/platform/linux/fsystem/edit/linux_edit_stress/**/report.html
+            package/tools/filesystems/tests/platform/linux/fsystem/edit/linux_edit_stress/**/results/**
           if-no-files-found: warn
 
       - name: Upload Windows edit stress results
@@ -149,5 +139,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-edit-stress-${{ env.STRESS_PROFILE }}
-          path: package/tools/filesystems/build-ci/windows-edit-stress-*-results/**
+          path: |
+            package/tools/filesystems/tests/platform/windows/fsystem/edit/windows_edit_stress/index.html
+            package/tools/filesystems/tests/platform/windows/fsystem/edit/windows_edit_stress/**/report.html
+            package/tools/filesystems/tests/platform/windows/fsystem/edit/windows_edit_stress/**/results/**
           if-no-files-found: warn

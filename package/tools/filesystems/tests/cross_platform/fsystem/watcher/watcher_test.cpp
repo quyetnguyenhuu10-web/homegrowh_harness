@@ -133,6 +133,12 @@ int main()
         return 1;
     }
 
+    if (!watcher_state.cancel_requested.load(std::memory_order_acquire))
+    {
+        std::cerr << "Watcher did not publish the edit cancellation signal.\n";
+        return 1;
+    }
+
     fsystem::WatcherState cancellation_state;
     fsystem::WatcherResult cancellation_result{};
 
