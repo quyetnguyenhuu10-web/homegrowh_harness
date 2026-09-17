@@ -36,6 +36,8 @@ FetchContent_MakeAvailable(
 # ---------------------------------------------------------
 
 add_library(filesystems
+    src/config/edit_config.h
+    src/config/reader_config.h
     src/fsystem/read/reader.cpp
     src/fsystem/edit/edit.cpp
     src/fsystem/watcher/watcher.cpp
@@ -85,6 +87,52 @@ target_include_directories(filesystems
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+set(FILESYSTEMS_READER_BLOCK_SIZE
+    4096
+    CACHE STRING "Reader block size in bytes"
+)
+
+if(NOT "${FILESYSTEMS_READER_BLOCK_SIZE}" MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR
+        "FILESYSTEMS_READER_BLOCK_SIZE must be a positive integer"
+    )
+endif()
+
+if(
+    FILESYSTEMS_READER_BLOCK_SIZE LESS 1 OR
+    FILESYSTEMS_READER_BLOCK_SIZE GREATER 4294967295
+)
+    message(FATAL_ERROR
+        "FILESYSTEMS_READER_BLOCK_SIZE must fit in a uint32_t"
+    )
+endif()
+
+set(FILESYSTEMS_EDIT_STREAM_CHUNK_SIZE
+    65536
+    CACHE STRING "Edit stream chunk size in bytes"
+)
+
+if(NOT "${FILESYSTEMS_EDIT_STREAM_CHUNK_SIZE}" MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR
+        "FILESYSTEMS_EDIT_STREAM_CHUNK_SIZE must be a positive integer"
+    )
+endif()
+
+if(
+    FILESYSTEMS_EDIT_STREAM_CHUNK_SIZE LESS 1 OR
+    FILESYSTEMS_EDIT_STREAM_CHUNK_SIZE GREATER 4294967295
+)
+    message(FATAL_ERROR
+        "FILESYSTEMS_EDIT_STREAM_CHUNK_SIZE must fit in a DWORD"
+    )
+endif()
+
+target_compile_definitions(filesystems
+    PRIVATE
+        FILESYSTEMS_READER_BLOCK_SIZE=${FILESYSTEMS_READER_BLOCK_SIZE}
+        FILESYSTEMS_EDIT_STREAM_CHUNK_SIZE=${FILESYSTEMS_EDIT_STREAM_CHUNK_SIZE}
 )
 
 target_link_libraries(filesystems

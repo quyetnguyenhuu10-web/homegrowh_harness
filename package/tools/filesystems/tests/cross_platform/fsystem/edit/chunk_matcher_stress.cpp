@@ -433,6 +433,23 @@ namespace
         {
             return false;
         }
+        // Pattern spans multiple exact 4 KiB chunks.
+        // The pattern begins 2 bytes before the first 4 KiB boundary
+        // and therefore continues into the next 4 KiB chunk.
+        const std::string multi_4k_file =
+            std::string(4094, 'x') +
+            "ABCDEFGHIJ" +
+            std::string(8192, 'y');
+
+        if (!run(
+            multi_4k_file,
+            "ABCDEFGHIJ",
+            fixed_chunks(multi_4k_file.size(), 4 * 1024),
+            "pattern spanning multiple 4 KiB chunks"
+        ))
+        {
+            return false;
+        }
 
         const std::string long_pattern_file = "ABCDEFGH";
 

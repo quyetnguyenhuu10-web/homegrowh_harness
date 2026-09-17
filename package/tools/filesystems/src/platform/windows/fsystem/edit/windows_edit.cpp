@@ -1,5 +1,6 @@
 #include "window_edit.h"
 
+#include <config/edit_config.h>
 #include <fsystem/edit/edit_detail.h>
 
 #ifndef NOMINMAX
@@ -34,7 +35,8 @@ namespace fsystem::windows
 
         using unique_handle = std::unique_ptr<void, handle_deleter>;
 
-        constexpr std::size_t stream_chunk_capacity = 64 * 1024;
+        constexpr std::size_t stream_chunk_capacity =
+            fsystem::config::edit_stream_chunk_capacity;
 
         bool write_bytes(
             HANDLE file_handle,

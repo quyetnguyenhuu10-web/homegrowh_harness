@@ -1,5 +1,6 @@
 #include "linux_edit.h"
 
+#include <config/edit_config.h>
 #include <fsystem/edit/edit_detail.h>
 
 #include <algorithm>
@@ -96,7 +97,8 @@ namespace fsystem::linux
 
         using unique_fd = std::unique_ptr<int, fd_deleter>;
 
-        constexpr std::size_t stream_chunk_capacity = 64 * 1024;
+        constexpr std::size_t stream_chunk_capacity =
+            fsystem::config::edit_stream_chunk_capacity;
 
         bool write_bytes(
             int file_descriptor,

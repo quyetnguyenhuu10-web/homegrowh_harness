@@ -1,0 +1,44 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="D:\homegrowh_harness\package\tools\filesystems\build-config-check\_deps\cli11-subbuild\CMakeFiles\14575c942c05e2eb1e4841d7ea09ecfc\cli11-populate-mkdir.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\homegrowh_harness\package\tools\filesystems\build-config-check\_deps\cli11-subbuild\CMakeFiles\14575c942c05e2eb1e4841d7ea09ecfc\cli11-populate-download.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\homegrowh_harness\package\tools\filesystems\build-config-check\_deps\cli11-subbuild\CMakeFiles\14575c942c05e2eb1e4841d7ea09ecfc\cli11-populate-update.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\homegrowh_harness\package\tools\filesystems\build-config-check\_deps\cli11-subbuild\CMakeFiles\14575c942c05e2eb1e4841d7ea09ecfc\cli11-populate-patch.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\homegrowh_harness\package\tools\filesystems\build-config-check\_deps\cli11-subbuild\CMakeFiles\14575c942c05e2eb1e4841d7ea09ecfc\cli11-populate-configure.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\homegrowh_harness\package\tools\filesystems\build-config-check\_deps\cli11-subbuild\CMakeFiles\14575c942c05e2eb1e4841d7ea09ecfc\cli11-populate-build.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\homegrowh_harness\package\tools\filesystems\build-config-check\_deps\cli11-subbuild\CMakeFiles\14575c942c05e2eb1e4841d7ea09ecfc\cli11-populate-install.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\homegrowh_harness\package\tools\filesystems\build-config-check\_deps\cli11-subbuild\CMakeFiles\14575c942c05e2eb1e4841d7ea09ecfc\cli11-populate-test.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\homegrowh_harness\package\tools\filesystems\build-config-check\_deps\cli11-subbuild\CMakeFiles\949be626256ea2a3a545f3f50352ab75\cli11-populate-complete.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\homegrowh_harness\package\tools\filesystems\build-config-check\_deps\cli11-subbuild\CMakeFiles\7ada2c0a84656df4b0691d91c7ec39c9\cli11-populate.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="D:\homegrowh_harness\package\tools\filesystems\build-config-check\_deps\cli11-subbuild\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="D:\homegrowh_harness\package\tools\filesystems\build-config-check\_deps\cli11-subbuild\CMakeFiles\cli11-populate" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{B6BADE74-300A-354B-8B90-2D53869FB088}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

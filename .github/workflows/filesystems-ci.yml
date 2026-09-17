@@ -56,6 +56,8 @@ jobs:
         run: >-
           cmake -S . -B build-ci
           -DFILESYSTEMS_BUILD_TESTS=ON
+          -DFILESYSTEMS_READER_BLOCK_SIZE=4096
+          -DFILESYSTEMS_EDIT_STREAM_CHUNK_SIZE=65536
           -DFILESYSTEMS_BUILD_LINUX_STRESS_TESTS=ON
           -DFILESYSTEMS_BUILD_WINDOWS_STRESS_TESTS=ON
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
