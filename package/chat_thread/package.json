@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@homegrowh/provider": "file:../provider",
+    "@homegrowh/session-conversation": "file:../session_conversation",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   }

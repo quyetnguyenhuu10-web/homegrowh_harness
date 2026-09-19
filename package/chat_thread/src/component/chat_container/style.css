@@ -1,46 +1,50 @@
-/* Chat container styles. Tiền tố ct- để không đụng CSS host.
-   Inline vào JS bằng `?inline` nên bundle nhúng vẫn 1 file (xem ChatContainer.tsx).
-   Hình học (top/height) do TSX tính inline; file này chỉ lo nhìn. */
+/* ChatContainer owns only viewport/paging geometry. Message geometry lives in ViewHistory. */
+
 .ct-chat {
   position: absolute;
   inset: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior: contain;
+  overflow-anchor: auto;
+  scrollbar-gutter: stable;
+
+  box-sizing: border-box;
+  padding:
+    18px
+    calc(max(20px, 4%) + 61px)
+    0;
+
+  scrollbar-width: thin;
+  scrollbar-color: #d7dbe0 transparent;
+}
+
+.ct-chat::-webkit-scrollbar {
+  width: 7px;
+}
+
+.ct-chat::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ct-chat::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #d7dbe0;
+  background-clip: padding-box;
 }
 
 .ct-chat__total {
   position: relative;
   width: 100%;
-}
-
-.ct-chat__panel {
-  position: absolute;
-  left: 0;
-  right: 0;
-  display: flex;
-  flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
   box-sizing: border-box;
 }
 
-.ct-chat__msg {
-  flex-shrink: 0;
-  display: flex;
-  box-sizing: border-box;
-}
-
-.ct-chat__msg--user {
-  justify-content: flex-end;
-}
-
-.ct-chat__msg--assistant {
-  justify-content: flex-start;
-}
-
-.ct-chat__bubble {
-  border-radius: 12px;
-  background: #f3f4f6;
-}
-
-.ct-chat__msg--user .ct-chat__bubble {
-  background: #dbeafe;
+@media (max-width: 760px) {
+  .ct-chat {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
 }

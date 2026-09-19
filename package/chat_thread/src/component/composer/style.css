@@ -1,47 +1,217 @@
-/* Composer styles. Tiền tố ct- để không đụng CSS host.
-   File này được inline vào JS bằng `?inline` nên bundle nhúng
-   vẫn 1 file duy nhất (xem Composer.tsx). */
+/*
+ * Geometry ported from D:\md_ai ChatComposer.
+ * This package currently uses the composer as a visual shell only.
+ */
+
 .ct-composer {
   position: absolute;
-  left: 50%;
-  bottom: 16px;
-  transform: translateX(-50%);
-  width: min(640px, calc(100% - 32px));
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 8px 8px 16px;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 999px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
-  box-sizing: border-box;
+  right: calc(max(20px, 4%) + 61px);
+  bottom: 14px;
+  left: calc(max(20px, 4%) + 61px);
   z-index: 10;
+
+  display: flex;
+  flex-direction: column;
+  min-height: 100px;
+  box-sizing: border-box;
+  padding: 12px 12px 10px;
+
+  border: 1px solid #e4e7eb;
+  border-radius: 16px;
+  color: #202124;
+  background: #ffffff;
+  box-shadow:
+    0 10px 28px rgba(18, 24, 40, 0.1),
+    0 1px 2px rgba(18, 24, 40, 0.04);
+}
+
+.ct-composer:focus-within {
+  border-color: #d6dae0;
+  box-shadow:
+    0 12px 30px rgba(18, 24, 40, 0.12),
+    0 1px 2px rgba(18, 24, 40, 0.04);
 }
 
 .ct-composer__input {
-  flex: 1;
-  min-width: 0;
-  border: none;
-  outline: none;
-  font-size: 14px;
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  max-height: 192px;
+  box-sizing: border-box;
+  resize: none;
+  padding: 1px 4px;
+  overflow-y: auto;
+
+  border: 0;
+  outline: 0;
+  color: #202124;
   background: transparent;
-  color: #111827;
+  caret-color: #202124;
+  font: 14px/1.5 "Segoe WPC", "Segoe UI", sans-serif;
+  letter-spacing: -0.006em;
+  scrollbar-width: thin;
+  scrollbar-color: #d7dbe0 transparent;
+}
+
+.ct-composer__input::placeholder {
+  color: #8c939d;
+}
+
+.ct-composer__input::-webkit-scrollbar {
+  width: 7px;
+}
+
+.ct-composer__input::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ct-composer__input::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #d7dbe0;
+  background-clip: padding-box;
+}
+
+.ct-composer__footer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.ct-composer__add,
+.ct-composer__send {
+  font-family: "Segoe WPC", "Segoe UI", sans-serif;
+}
+
+.ct-composer__add {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  padding: 0;
+
+  border: 0;
+  border-radius: 50%;
+  color: #666d76;
+  background: transparent;
+  cursor: default;
+}
+
+.ct-composer__add > svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.8;
+}
+
+.ct-composer__model-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  height: 34px;
+  max-width: min(62%, 280px);
+  box-sizing: border-box;
+  padding: 0 5px 0 2px;
+  margin-left: auto;
+
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+}
+
+.ct-composer__context-meter {
+  --context-progress: 24;
+
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  color: #7a828c;
+  opacity: 0.9;
+}
+
+.ct-composer__context-meter svg {
+  display: block;
+  width: 17px;
+  height: 17px;
+  overflow: visible;
+}
+
+.ct-composer__context-meter-track,
+.ct-composer__context-meter-value {
+  fill: none;
+  stroke-width: 2.2;
+}
+
+.ct-composer__context-meter-track {
+  stroke: #e1e4e8;
+}
+
+.ct-composer__context-meter-value {
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: calc(100 - var(--context-progress));
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
 }
 
 .ct-composer__send {
-  flex-shrink: 0;
-  border: none;
-  border-radius: 999px;
-  padding: 8px 18px;
-  font-size: 14px;
-  font-weight: 600;
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  flex: 0 0 auto;
+  padding: 0;
+
+  border: 0;
+  border-radius: 50%;
   color: #ffffff;
-  background: #2563eb;
-  cursor: pointer;
+  background: #202124;
+  box-shadow: 0 3px 8px rgba(18, 24, 40, 0.16);
+  cursor: default;
 }
 
-.ct-composer__send:disabled {
-  background: #9ca3af;
-  cursor: default;
+.ct-composer__send > svg {
+  display: block;
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+@media (hover: hover) {
+  .ct-composer__add:hover {
+    background: #f3f5f7;
+  }
+
+  .ct-composer__send:hover {
+    background: #303236;
+  }
+}
+
+@media (max-width: 760px) {
+  .ct-composer {
+    right: 16px;
+    bottom: 10px;
+    left: 16px;
+    padding: 10px 10px 9px;
+    border-radius: 14px;
+  }
+
+  .ct-composer__model-cluster {
+    max-width: calc(100% - 48px);
+    flex: 1 1 auto;
+  }
 }

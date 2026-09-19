@@ -1,0 +1,94 @@
+/*
+ * Geometry ported from md_ai ChatThread.css / ChatRow.tsx.
+ * Light palette only; runtime behavior is intentionally absent.
+ */
+
+.ct-view-history {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  box-sizing: border-box;
+}
+
+.ct-view-history__row {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding-bottom: 34px;
+  box-sizing: border-box;
+}
+
+.ct-view-history__message {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.ct-view-history__message--user {
+  justify-content: flex-end;
+}
+
+.ct-view-history__message--assistant {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+}
+
+.ct-view-history__user-cluster {
+  position: relative;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.ct-view-history__user-content {
+  max-width: 100%;
+  padding: 10px 12px;
+  box-sizing: border-box;
+
+  border: 0;
+  border-radius: 8px;
+  color: #202124;
+  background: #f0f2f4;
+  box-shadow: none;
+
+  font-family: "Segoe WPC", "Segoe UI", sans-serif;
+  font-size: 14.5px;
+  font-weight: 400;
+  line-height: 1.62;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.ct-view-history__assistant-content {
+  display: block;
+  width: auto;
+  max-width: 100%;
+  padding: 0;
+
+  border: 0;
+  border-radius: 0;
+  color: #202124;
+  background: transparent;
+  box-shadow: none;
+
+  font-family: "Segoe WPC", "Segoe UI", sans-serif;
+  font-size: 14.5px;
+  font-weight: 400;
+  line-height: 1.68;
+  letter-spacing: 0.0075em;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 760px) {
+  .ct-view-history__row {
+    padding-bottom: 30px;
+  }
+}

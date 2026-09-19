@@ -7,19 +7,42 @@ import {
 } from "react";
 
 import { acquireStyleTag, releaseStyleTag } from "../style_tag";
+import ViewHistory, {
+  type ViewHistoryMessage,
+} from "../view_history";
 
 import cssText from "./style.css?inline";
 
-/** Tin nhắn khung (text demo để test render, sau nối nội dung thật). */
-export interface PanelMessage {
-  id: string;
-  role: "user" | "assistant";
-  text?: string;
+export type PanelMessage = ViewHistoryMessage;
+
+export type ChatContainerBoundary = "top" | "bottom";
+export type ChatContainerScrollDirection = "up" | "down";
+
+export interface ChatContainerBoundaryLoadEvent {
+  /** Biên viewport vừa chạm. */
+  edge: ChatContainerBoundary;
+
+  /** Hướng scroll tương ứng với biên. */
+  direction: ChatContainerScrollDirection;
+
+  /** Range resident hiện tại, end là exclusive. */
+  residentStart: number;
+  residentEnd: number;
+
+  /** Tổng số panel logic hiện có. */
+  totalPanels: number;
+
+  /** Resident start mà container sẽ chuyển tới nếu callback cho phép load. */
+  nextResidentStart: number;
 }
+
+export type ChatContainerBoundaryLoadCallback = (
+  event: ChatContainerBoundaryLoadEvent,
+) => void | boolean | Promise<void | boolean>;
 
 export interface ChatContainerProps {
   /** Danh sách tin nhắn theo thứ tự thời gian. */
-  messages?: PanelMessage[];
+  messages?: readonly PanelMessage[];
 
   /** Số tin nhắn trong 1 panel con. */
   messagesPerPanel?: number;
@@ -29,20 +52,26 @@ export interface ChatContainerProps {
 
   /** Khoảng trống cuối để composer overlay không che tin nhắn. */
   bottomPad?: number;
+
+  /**
+   * Hook minh bạch trước mỗi lần resident page load khi chạm biên.
+   *
+   * - Có thể sync hoặc async.
+   * - Promise chưa xong thì container khóa load biên để tránh spam/jank.
+   * - Trả `false` để hủy resident transition lần đó.
+   * - Không truyền callback thì container load page nội bộ như trước.
+   */
+  onBoundaryLoad?: ChatContainerBoundaryLoadCallback;
 }
 
 const STYLE_KEY = "chat-container";
 
-const ROW_H = 64;
-const ROW_GAP = 32;
-const PANEL_PAD = 12;
+/** Sai số 1px cho scrollTop/scrollHeight có giá trị lẻ theo device scale. */
+const EDGE_EPSILON = 1;
 
-/** Chỉ đổi resident page khi viewport thật sự chạm biên page đang sống. */
-const EDGE_THRESHOLD = 8;
+type ScrollDirection = ChatContainerScrollDirection;
 
-type ScrollDirection = "up" | "down";
-
-function chunk<T>(arr: T[], size: number): T[][] {
+function chunk<T>(arr: readonly T[], size: number): T[][] {
   const out: T[][] = [];
 
   for (let i = 0; i < arr.length; i += size) {
@@ -50,15 +79,6 @@ function chunk<T>(arr: T[], size: number): T[][] {
   }
 
   return out;
-}
-
-function getPanelHeight(rowCount: number): number {
-  if (rowCount <= 0) return 0;
-
-  return (
-    rowCount * ROW_H +
-    Math.max(0, rowCount - 1) * ROW_GAP
-  );
 }
 
 function createRangeIds(start: number, end: number): Set<number> {
@@ -76,8 +96,9 @@ export default function ChatContainer({
   messagesPerPanel = 5,
   maxPanelsInRam = 10,
   bottomPad = 96,
+  onBoundaryLoad,
 }: ChatContainerProps) {
-  useEffect(() => {
+  useLayoutEffect(() => {
     acquireStyleTag(STYLE_KEY, cssText);
 
     return () => releaseStyleTag(STYLE_KEY);
@@ -118,7 +139,14 @@ export default function ChatContainer({
     useState<Set<number> | null>(null);
 
   const pendingResidentStartRef = useRef<number | null>(null);
-  const edgeLockRef = useRef<ScrollDirection | null>(null);
+  const topPrependAnchorRef = useRef<{
+    panelIndex: number;
+    top: number;
+  } | null>(null);
+  const boundaryLoadInFlightRef = useRef<ScrollDirection | null>(null);
+  const boundaryLoadRequestRef = useRef(0);
+  const [boundaryLoading, setBoundaryLoading] =
+    useState<ChatContainerBoundary | null>(null);
 
   const residentIds = useMemo(
     () =>
@@ -130,6 +158,20 @@ export default function ChatContainer({
   const beginPageTransition = (nextStart: number): void => {
     if (nextStart === residentStart) return;
     if (pendingResidentStartRef.current !== null) return;
+
+    if (nextStart < residentStart) {
+      const viewport = scrollRef.current;
+      const anchor = viewport?.querySelector<HTMLElement>(
+        `[data-panel-index="${residentStart}"]`,
+      );
+
+      if (anchor) {
+        topPrependAnchorRef.current = {
+          panelIndex: residentStart,
+          top: anchor.getBoundingClientRect().top,
+        };
+      }
+    }
 
     const nextEnd = Math.min(panels.length, nextStart + keep);
     const union = createRangeIds(residentStart, residentEnd);
@@ -143,19 +185,106 @@ export default function ChatContainer({
   };
 
   /**
+   * Khi prepend panel cũ ở trần resident DOM, giữ nguyên vị trí thật của panel
+   * đầu resident hiện tại. Nếu browser đã native-anchor đúng thì delta = 0;
+   * nếu không, bù đúng phần DOM vừa được chèn phía trên.
+   */
+  useLayoutEffect(() => {
+    if (transitionResidentIds === null) return;
+
+    const viewport = scrollRef.current;
+    const savedAnchor = topPrependAnchorRef.current;
+    if (!viewport || !savedAnchor) return;
+
+    const anchor = viewport.querySelector<HTMLElement>(
+      `[data-panel-index="${savedAnchor.panelIndex}"]`,
+    );
+    if (!anchor) {
+      topPrependAnchorRef.current = null;
+      return;
+    }
+
+    const delta = anchor.getBoundingClientRect().top - savedAnchor.top;
+    if (Math.abs(delta) > 0.5) {
+      viewport.scrollTop += delta;
+      previousScrollTopRef.current = viewport.scrollTop;
+    }
+
+    topPrependAnchorRef.current = null;
+  }, [transitionResidentIds]);
+
+  const requestBoundaryLoad = (
+    direction: ScrollDirection,
+    nextResidentStart: number,
+  ): void => {
+    if (nextResidentStart === residentStart) return;
+    if (pendingResidentStartRef.current !== null) return;
+    if (boundaryLoadInFlightRef.current !== null) return;
+
+    const edge: ChatContainerBoundary =
+      direction === "up" ? "top" : "bottom";
+
+    if (!onBoundaryLoad) {
+      beginPageTransition(nextResidentStart);
+      return;
+    }
+
+    const requestId = ++boundaryLoadRequestRef.current;
+    boundaryLoadInFlightRef.current = direction;
+    setBoundaryLoading(edge);
+
+    const event: ChatContainerBoundaryLoadEvent = {
+      edge,
+      direction,
+      residentStart,
+      residentEnd,
+      totalPanels: panels.length,
+      nextResidentStart,
+    };
+
+    void Promise.resolve()
+      .then(() => onBoundaryLoad(event))
+      .then((result) => {
+        if (boundaryLoadRequestRef.current !== requestId) return;
+        if (result === false) return;
+
+        beginPageTransition(nextResidentStart);
+      })
+      .catch((error: unknown) => {
+        console.error("[ChatContainer] onBoundaryLoad failed", error);
+      })
+      .finally(() => {
+        if (boundaryLoadRequestRef.current !== requestId) return;
+
+        boundaryLoadInFlightRef.current = null;
+        setBoundaryLoading(null);
+      });
+  };
+
+  /**
    * Sau khi union page cũ + page mới đã commit thật vào DOM,
    * chuyển ownership sang page mới rồi bỏ content page cũ.
    */
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (transitionResidentIds === null) return;
 
     const nextStart = pendingResidentStartRef.current;
     if (nextStart === null) return;
 
-    pendingResidentStartRef.current = null;
     setResidentStart(nextStart);
     setTransitionResidentIds(null);
   }, [transitionResidentIds]);
+
+  /**
+   * Chỉ mở khóa paging sau khi page mới đã commit xong và page cũ đã rời DOM.
+   * Vì vậy scroll event do chính DOM transition sinh ra không thể chain-load.
+   */
+  useLayoutEffect(() => {
+    if (transitionResidentIds !== null) return;
+    if (pendingResidentStartRef.current !== residentStart) return;
+
+    pendingResidentStartRef.current = null;
+  }, [residentStart, transitionResidentIds]);
 
   /**
    * Khi đổi dữ liệu/config, chỉ clamp resident window về range hợp lệ.
@@ -165,8 +294,11 @@ export default function ChatContainer({
 
     setResidentStart((current) => Math.min(current, maxStart));
     pendingResidentStartRef.current = null;
+    topPrependAnchorRef.current = null;
     setTransitionResidentIds(null);
-    edgeLockRef.current = null;
+    boundaryLoadInFlightRef.current = null;
+    boundaryLoadRequestRef.current += 1;
+    setBoundaryLoading(null);
   }, [keep, panels.length]);
 
   /**
@@ -189,11 +321,13 @@ export default function ChatContainer({
   const onScroll = () => {
     const viewport = scrollRef.current;
     if (!viewport || panels.length === 0) return;
-    if (pendingResidentStartRef.current !== null) return;
 
     const nextScrollTop = viewport.scrollTop;
     const previousScrollTop = previousScrollTopRef.current;
     previousScrollTopRef.current = nextScrollTop;
+
+    if (pendingResidentStartRef.current !== null) return;
+    if (boundaryLoadInFlightRef.current !== null) return;
 
     const direction: ScrollDirection | null =
       nextScrollTop < previousScrollTop
@@ -204,35 +338,30 @@ export default function ChatContainer({
 
     if (direction === null) return;
 
-    const distanceFromTop = nextScrollTop;
-    const distanceFromBottom =
-      viewport.scrollHeight - nextScrollTop - viewport.clientHeight;
+    /*
+     * Không có geometry lịch sử giả: scrollHeight hiện tại chỉ gồm panel đang
+     * resident trong RAM. Vì vậy 0 và maxScrollTop chính là trần/sàn vật lý của
+     * resident DOM, không cần wheel intent, timer hay anchor bookkeeping.
+     */
+    const maxScrollTop = Math.max(
+      0,
+      viewport.scrollHeight - viewport.clientHeight,
+    );
+    const hitTop = nextScrollTop <= EDGE_EPSILON;
+    const hitBottom = nextScrollTop >= maxScrollTop - EDGE_EPSILON;
 
-    const nearTop = distanceFromTop <= EDGE_THRESHOLD;
-    const nearBottom = distanceFromBottom <= EDGE_THRESHOLD;
-
-    const lockedDirection = edgeLockRef.current;
-    if (lockedDirection !== null) {
-      const leftLockedEdge =
-        lockedDirection === "up" ? !nearTop : !nearBottom;
-
-      if (leftLockedEdge) {
-        edgeLockRef.current = null;
-      } else {
-        return;
-      }
-    }
-
-    if (direction === "up" && nearTop && residentStart > 0) {
-        edgeLockRef.current = "up";
-        beginPageTransition(Math.max(0, residentStart - residentStep));
+    if (direction === "up" && hitTop && residentStart > 0) {
+      requestBoundaryLoad(
+        "up",
+        Math.max(0, residentStart - residentStep),
+      );
       return;
     }
 
-    if (direction === "down" && nearBottom && residentEnd < panels.length) {
+    if (direction === "down" && hitBottom && residentEnd < panels.length) {
       const maxStart = Math.max(0, panels.length - keep);
-      edgeLockRef.current = "down";
-      beginPageTransition(
+      requestBoundaryLoad(
+        "down",
         Math.min(maxStart, residentStart + residentStep),
       );
     }
@@ -255,6 +384,7 @@ export default function ChatContainer({
       data-live-from={residentStart}
       data-live-count={residentEnd - residentStart}
       data-mounted-count={residentIds.size}
+      data-boundary-loading={boundaryLoading ?? "none"}
     >
       <div
         className="ct-chat__total"
@@ -263,65 +393,17 @@ export default function ChatContainer({
           minHeight: 0,
         }}
       >
-        {renderedPanelIndices.map((panelIndex, localIndex) => {
+        {renderedPanelIndices.map((panelIndex) => {
           const rows = panels[panelIndex];
           if (!rows) return null;
 
-          const shellHeight = getPanelHeight(rows.length);
-          const isLastRenderedPanel =
-            localIndex === renderedPanelIndices.length - 1;
-
           return (
-            <section
+            <ViewHistory
               key={`panel-${panelIndex}`}
-              className="ct-chat__panel"
-              data-panel-index={panelIndex}
-              data-panel-mounted="true"
-              style={{
-                position: "relative",
-                display: "flex",
-                flexDirection: "column",
-                width: "100%",
-                height: shellHeight,
-                minHeight: shellHeight,
-                boxSizing: "border-box",
-                padding: `0 ${PANEL_PAD}px`,
-                gap: ROW_GAP,
-                marginBottom: !isLastRenderedPanel ? ROW_GAP : 0,
-                overflow: "hidden",
-              }}
-            >
-              {rows.map((m) => (
-                <div
-                  key={m.id}
-                  className={`ct-chat__msg ct-chat__msg--${m.role}`}
-                  data-msg-id={m.id}
-                  style={{
-                    height: ROW_H,
-                    minHeight: ROW_H,
-                    flexShrink: 0,
-                  }}
-                >
-                  <div
-                    className="ct-chat__bubble"
-                    style={{
-                      width: m.role === "user" ? "55%" : "70%",
-                      height: "100%",
-                      boxSizing: "border-box",
-                      padding: "10px 14px",
-                      overflow: "hidden",
-                      fontSize: 13,
-                      lineHeight: "20px",
-                      color: "#111827",
-                      whiteSpace: "nowrap",
-                      textOverflow: "ellipsis",
-                    }}
-                  >
-                    {m.text ?? ""}
-                  </div>
-                </div>
-              ))}
-            </section>
+              panelIndex={panelIndex}
+              messages={rows}
+              isLastPanel={panelIndex === panels.length - 1}
+            />
           );
         })}
 

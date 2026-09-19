@@ -1,69 +1,162 @@
-/* Dropup chọn model. Tiền tố ct- để không đụng CSS host.
-   Inline vào JS bằng `?inline` nên bundle nhúng vẫn 1 file (xem PickerModel.tsx).
-   Panel mở ngược lên trên vì composer neo đáy màn hình. */
 .ct-modelpick {
   position: relative;
-  flex-shrink: 0;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
-.ct-modelpick__btn {
-  max-width: 148px;
-  border: 1px solid #e5e7eb;
-  border-radius: 999px;
-  padding: 6px 10px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #374151;
-  background: #f9fafb;
-  outline: none;
+.ct-modelpick__trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-width: 0;
+  height: 32px;
+  padding: 0 6px;
+
+  border: 0;
+  border-radius: 8px;
+  color: #535a63;
+  background: transparent;
+  box-shadow: none;
+  font: 12.5px/1.2 "Segoe WPC", "Segoe UI", sans-serif;
+  letter-spacing: -0.005em;
   cursor: pointer;
-  white-space: nowrap;
+}
+
+.ct-modelpick__trigger:hover,
+.ct-modelpick__trigger[aria-expanded="true"] {
+  background: #f3f5f7;
+  color: #202124;
+}
+
+.ct-modelpick__trigger:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.ct-modelpick__trigger-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.ct-modelpick__btn:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-
-.ct-modelpick__panel {
-  position: absolute;
-  bottom: calc(100% + 8px);
-  left: 0;
-  min-width: 180px;
-  max-height: 240px;
-  overflow-y: auto;
-  margin: 0;
-  padding: 4px;
-  list-style: none;
-  background: #ffffff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
-  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.12);
-  z-index: 20;
-}
-
-.ct-modelpick__item {
+.ct-modelpick__chevron {
   display: block;
-  width: 100%;
-  border: none;
-  border-radius: 8px;
-  padding: 8px 12px;
-  font-size: 13px;
-  text-align: left;
-  color: #111827;
-  background: transparent;
-  cursor: pointer;
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+  opacity: 0.82;
+  transition: transform 120ms ease;
+}
+
+.ct-modelpick__chevron--open {
+  transform: rotate(180deg);
+}
+
+.ct-modelpick__dropup {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 12px);
+  z-index: 30;
+
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(440px, calc(100vh - 180px));
+  overflow-y: auto;
   box-sizing: border-box;
+  padding: 6px;
+
+  border: 1px solid #dfe3e8;
+  border-radius: 13px;
+  color: #202124;
+  background: #ffffff;
+  box-shadow:
+    0 24px 60px rgba(18, 24, 40, 0.14),
+    0 4px 14px rgba(18, 24, 40, 0.08);
+  scrollbar-width: thin;
+  scrollbar-color: #d7dbe0 transparent;
 }
 
-.ct-modelpick__item:hover {
-  background: #f3f4f6;
+.ct-modelpick__dropup::-webkit-scrollbar-button {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
-.ct-modelpick__item--active {
-  font-weight: 700;
-  color: #2563eb;
-  background: #eff6ff;
+.ct-modelpick__group + .ct-modelpick__group {
+  margin-top: 5px;
+  padding-top: 5px;
+  border-top: 1px solid #edf0f2;
+}
+
+.ct-modelpick__group-label {
+  padding: 5px 9px 4px;
+  color: #8a919b;
+  font: 600 11px/1.2 "Segoe WPC", "Segoe UI", sans-serif;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.ct-modelpick__option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 9px;
+
+  border: 0;
+  border-radius: 9px;
+  color: #202124;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ct-modelpick__option:hover {
+  background: #f4f6f8;
+}
+
+.ct-modelpick__option--active {
+  background: #f0f3f6;
+}
+
+.ct-modelpick__option-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+
+.ct-modelpick__option-label {
+  overflow: hidden;
+  color: #24272b;
+  font: 500 13px/1.3 "Segoe WPC", "Segoe UI", sans-serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ct-modelpick__check {
+  width: 16px;
+  flex: 0 0 16px;
+  color: #202124;
+  font: 600 13px/1 "Segoe UI", sans-serif;
+  text-align: center;
+  opacity: 0;
+}
+
+.ct-modelpick__option--active .ct-modelpick__check {
+  opacity: 1;
+}
+
+@media (max-width: 760px) {
+  .ct-modelpick__dropup {
+    right: -38px;
+    width: min(340px, calc(100vw - 24px));
+  }
 }
