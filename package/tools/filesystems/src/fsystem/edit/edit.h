@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <string>
 #include <cstdint>
+#include <vector>
 
 namespace fsystem
 {
@@ -14,16 +15,32 @@ namespace fsystem
         file_changed,
         /* Multiple old-data occurrences share bytes. */
         old_data_occurrences_overlap,
+        /* Edit timeout won before the final commit completed. */
+        timeout,
     };
+
+    struct EditRequest
+    {
+        std::filesystem::path path;
+        std::string old_content;
+        std::string new_content;
+    };
+
+    using EditRequests = std::vector<EditRequest>;
 
     struct EditResult
     {
-        std::uint32_t error;
+        std::filesystem::path path;
+        std::uint32_t error = 0;
         EditNote note{EditNote::none};
 
         /* True when the platform edit reached its final replace operation. */
         bool replace_attempted = false;
     };
+
+    using EditResults = std::vector<EditResult>;
+
+    EditResults edit(const EditRequests& requests);
 
     EditResult edit(
         const std::filesystem::path& path,

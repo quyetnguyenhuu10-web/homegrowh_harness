@@ -1,17 +1,48 @@
 #pragma once
 
-#include <fsystem/watcher/watcher.h>
+#include "../../watcher/windows_watcher.h"
 
 #include <atomic>
 
 namespace fsystem::windows::detail
 {
+    using watcher_state =
+        fsystem::windows::watcher_common::WatcherState;
+
     inline bool cancellation_requested(
-        const fsystem::WatcherState& watcher_state
+        const watcher_state& state
     ) noexcept
     {
-        return watcher_state.cancel_requested.load(
+        return state.cancel_requested.load(
             std::memory_order_acquire
         );
+    }
+
+    inline bool timeout_requested(
+        const watcher_state& state
+    ) noexcept
+    {
+        return state.timeout_requested.load(
+            std::memory_order_acquire
+        );
+    }
+
+    inline bool begin_commit(watcher_state& state) noexcept
+    {
+        return fsystem::windows::watcher_common::begin_edit_commit(
+            state
+        );
+    }
+
+    inline void mark_committed(watcher_state& state) noexcept
+    {
+        fsystem::windows::watcher_common::mark_edit_committed(
+            state
+        );
+    }
+
+    inline void prepare_next_edit(watcher_state& state) noexcept
+    {
+        fsystem::windows::watcher_common::prepare_next_edit(state);
     }
 }

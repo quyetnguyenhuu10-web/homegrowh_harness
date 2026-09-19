@@ -11,7 +11,7 @@ namespace fsystem::linux::detail
         const std::filesystem::path& path,
         source_file& source,
         temporary_file& temp,
-        fsystem::WatcherState& watcher_state,
+        watcher_state& watcher_state,
         bool& replace_attempted,
         std::uint32_t& error
     );

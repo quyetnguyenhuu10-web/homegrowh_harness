@@ -6,6 +6,11 @@
 
 namespace fsystem
 {
+    EditResults edit(const EditRequests& requests)
+    {
+        return windows::edit_file(requests);
+    }
+
     EditResult edit(
         const std::filesystem::path& path,
         const std::string& old_data,
@@ -26,6 +31,11 @@ namespace fsystem
 
 namespace fsystem
 {
+    EditResults edit(const EditRequests& requests)
+    {
+        return linux::edit_file(requests);
+    }
+
     EditResult edit(
         const std::filesystem::path& path,
         const std::string& old_data,

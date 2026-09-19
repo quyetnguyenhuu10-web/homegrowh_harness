@@ -3,6 +3,8 @@
 
 namespace fsystem::windows
 {
+    EditResults edit_file(const EditRequests& requests);
+
     EditResult edit_file(
         const std::filesystem::path& path,
         const std::string& old_data,

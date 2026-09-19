@@ -133,7 +133,12 @@ int main()
     const std::filesystem::path test_path = temp_directory /
         ("filesystems-edit-test-" + std::to_string(timestamp) + ".txt");
 
+    const std::filesystem::path batch_test_path = temp_directory /
+        ("filesystems-edit-test-" + std::to_string(timestamp) +
+            "-batch.txt");
+
     test_support::temporary_file_guard cleanup{test_path};
+    test_support::temporary_file_guard batch_cleanup{batch_test_path};
 
     const std::string old_data = "old_data=hello";
     const std::string new_data = "old_data=world";
@@ -376,6 +381,93 @@ int main()
         !expect(
             empty_file_result.content == "empty-file-replacement",
             "Empty-file edit produced unexpected content."
+        ))
+    {
+        return 1;
+    }
+
+    const std::string batch_old_data_a = "batch-old-a";
+    const std::string batch_new_data_a = "batch-new-a";
+    const std::string batch_old_data_b = "batch-old-b";
+    const std::string batch_new_data_b = "batch-new-b";
+
+    if (!expect(
+            test_support::write_file(
+                test_path,
+                "prefix-a\n" + batch_old_data_a + "\nsuffix-a\n"
+            ),
+            "Unable to prepare the first batch-edit file."
+        ) ||
+        !expect(
+            test_support::write_file(
+                batch_test_path,
+                "prefix-b\n" + batch_old_data_b + "\nsuffix-b\n"
+            ),
+            "Unable to prepare the second batch-edit file."
+        ))
+    {
+        return 1;
+    }
+
+    const fsystem::EditRequests batch_requests{
+        fsystem::EditRequest{
+            test_path,
+            batch_old_data_a,
+            batch_new_data_a
+        },
+        fsystem::EditRequest{
+            batch_test_path,
+            batch_old_data_b,
+            batch_new_data_b
+        }
+    };
+
+    const fsystem::EditResults batch_results = fsystem::edit(
+        batch_requests
+    );
+
+    if (!expect(
+            batch_results.size() == batch_requests.size(),
+            "Batch edit returned the wrong number of results."
+        ) ||
+        !expect(
+            batch_results.size() == 2 &&
+                batch_results[0].path == test_path &&
+                batch_results[1].path == batch_test_path,
+            "Batch edit returned results in the wrong order or path."
+        ) ||
+        !expect(
+            batch_results.size() == 2 &&
+                batch_results[0].error == 0 &&
+                batch_results[1].error == 0,
+            "Batch edit returned an unexpected error."
+        ) ||
+        !expect(
+            batch_results.size() == 2 &&
+                batch_results[0].note == fsystem::EditNote::none &&
+                batch_results[1].note == fsystem::EditNote::none,
+            "Batch edit returned an unexpected note."
+        ))
+    {
+        return 1;
+    }
+
+    const fsystem::ReadResult batch_file_a = fsystem::read(test_path);
+    const fsystem::ReadResult batch_file_b = fsystem::read(
+        batch_test_path
+    );
+
+    if (!expect(
+            batch_file_a.error == 0 &&
+                batch_file_a.content ==
+                    "prefix-a\n" + batch_new_data_a + "\nsuffix-a\n",
+            "First batch edit produced unexpected content."
+        ) ||
+        !expect(
+            batch_file_b.error == 0 &&
+                batch_file_b.content ==
+                    "prefix-b\n" + batch_new_data_b + "\nsuffix-b\n",
+            "Second batch edit produced unexpected content."
         ))
     {
         return 1;

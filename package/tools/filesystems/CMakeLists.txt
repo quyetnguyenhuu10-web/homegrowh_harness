@@ -61,7 +61,18 @@ if(WIN32)
             src/platform/windows/fsystem/edit/detail/temp_writer.cpp
             src/platform/windows/fsystem/edit/detail/replace_transaction.h
             src/platform/windows/fsystem/edit/detail/replace_transaction.cpp
+            src/platform/windows/fsystem/watcher/windows_watcher_detail.h
+            src/platform/windows/fsystem/watcher/windows_watcher.h
             src/platform/windows/fsystem/watcher/windows_watcher.cpp
+            src/platform/windows/fsystem/watcher/windows_watcher_state.cpp
+            src/platform/windows/fsystem/watcher/windows_watcher_signal.cpp
+            src/platform/windows/fsystem/watcher/windows_watcher_io.cpp
+            src/platform/windows/fsystem/watcher/windows_watcher_events.cpp
+            src/platform/windows/fsystem/watcher/windows_watcher_loop.cpp
+            src/platform/windows/fsystem/watcher/edit_watcher.h
+            src/platform/windows/fsystem/watcher/edit_watcher.cpp
+            src/platform/windows/fsystem/watcher/public_watcher.h
+            src/platform/windows/fsystem/watcher/public_watcher.cpp
     )
 
 elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
@@ -78,7 +89,12 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             src/platform/linux/fsystem/edit/detail/temp_writer.cpp
             src/platform/linux/fsystem/edit/detail/replace_transaction.h
             src/platform/linux/fsystem/edit/detail/replace_transaction.cpp
+            src/platform/linux/fsystem/watcher/linux_watcher.h
             src/platform/linux/fsystem/watcher/linux_watcher.cpp
+            src/platform/linux/fsystem/watcher/edit_watcher.h
+            src/platform/linux/fsystem/watcher/edit_watcher.cpp
+            src/platform/linux/fsystem/watcher/public_watcher.h
+            src/platform/linux/fsystem/watcher/public_watcher.cpp
     )
 
     target_compile_definitions(filesystems
@@ -180,16 +196,6 @@ option(FILESYSTEMS_BUILD_TESTS
     ON
 )
 
-option(FILESYSTEMS_BUILD_WINDOWS_STRESS_TESTS
-    "Build the Windows edit stress harness"
-    OFF
-)
-
-option(FILESYSTEMS_BUILD_LINUX_STRESS_TESTS
-    "Build the Linux edit stress harness"
-    OFF
-)
-
 if(FILESYSTEMS_BUILD_TESTS)
 
     enable_testing()
@@ -228,130 +234,6 @@ if(FILESYSTEMS_BUILD_TESTS)
         PRIVATE
             ${FILESYSTEMS_TEST_INCLUDE_DIR}
     )
-
-    if(WIN32 AND FILESYSTEMS_BUILD_WINDOWS_STRESS_TESTS)
-
-        set(FILESYSTEMS_WINDOWS_EDIT_STRESS_DIR
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/platform/windows/fsystem/edit/windows_edit_stress
-        )
-
-        set(FILESYSTEMS_WINDOWS_EDIT_STRESS_COMPONENTS
-            windows_edit_stress_bench
-        )
-
-        set(FILESYSTEMS_WINDOWS_EDIT_STRESS_SOURCES
-            bench/bench.cpp
-        )
-
-        list(LENGTH FILESYSTEMS_WINDOWS_EDIT_STRESS_COMPONENTS
-            FILESYSTEMS_WINDOWS_EDIT_STRESS_COMPONENT_COUNT
-        )
-
-        math(EXPR FILESYSTEMS_WINDOWS_EDIT_STRESS_LAST_INDEX
-            "${FILESYSTEMS_WINDOWS_EDIT_STRESS_COMPONENT_COUNT} - 1"
-        )
-
-        foreach(index RANGE ${FILESYSTEMS_WINDOWS_EDIT_STRESS_LAST_INDEX})
-            list(GET FILESYSTEMS_WINDOWS_EDIT_STRESS_COMPONENTS
-                ${index}
-                component
-            )
-            list(GET FILESYSTEMS_WINDOWS_EDIT_STRESS_SOURCES
-                ${index}
-                source
-            )
-
-            add_executable(${component}
-                ${FILESYSTEMS_WINDOWS_EDIT_STRESS_DIR}/${source}
-                ${FILESYSTEMS_WINDOWS_EDIT_STRESS_DIR}/common/stress_support.h
-                ${FILESYSTEMS_WINDOWS_EDIT_STRESS_DIR}/common/bench_cases.h
-            )
-
-            target_link_libraries(${component}
-                PRIVATE
-                    filesystems
-                    Psapi
-                    nlohmann_json::nlohmann_json
-            )
-        endforeach()
-
-        find_program(FILESYSTEMS_NODE_EXECUTABLE
-            NAMES node node.exe
-        )
-
-        if(NOT FILESYSTEMS_NODE_EXECUTABLE)
-            message(FATAL_ERROR
-                "Node.js is required for the Windows edit stress reports"
-            )
-        endif()
-
-    endif()
-
-    if(
-        CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
-        FILESYSTEMS_BUILD_LINUX_STRESS_TESTS
-    )
-
-        set(FILESYSTEMS_LINUX_EDIT_STRESS_DIR
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/platform/linux/fsystem/edit/linux_edit_stress
-        )
-
-        set(FILESYSTEMS_LINUX_EDIT_STRESS_COMPONENTS
-            linux_edit_stress_bench
-        )
-
-        set(FILESYSTEMS_LINUX_EDIT_STRESS_SOURCES
-            bench/bench.cpp
-        )
-
-        list(LENGTH FILESYSTEMS_LINUX_EDIT_STRESS_COMPONENTS
-            FILESYSTEMS_LINUX_EDIT_STRESS_COMPONENT_COUNT
-        )
-
-        math(EXPR FILESYSTEMS_LINUX_EDIT_STRESS_LAST_INDEX
-            "${FILESYSTEMS_LINUX_EDIT_STRESS_COMPONENT_COUNT} - 1"
-        )
-
-        foreach(index RANGE ${FILESYSTEMS_LINUX_EDIT_STRESS_LAST_INDEX})
-            list(GET FILESYSTEMS_LINUX_EDIT_STRESS_COMPONENTS
-                ${index}
-                component
-            )
-            list(GET FILESYSTEMS_LINUX_EDIT_STRESS_SOURCES
-                ${index}
-                source
-            )
-
-            add_executable(${component}
-                ${FILESYSTEMS_LINUX_EDIT_STRESS_DIR}/${source}
-                ${FILESYSTEMS_LINUX_EDIT_STRESS_DIR}/common/stress_support.h
-                ${FILESYSTEMS_LINUX_EDIT_STRESS_DIR}/common/bench_cases.h
-            )
-
-            target_link_libraries(${component}
-                PRIVATE
-                    filesystems
-                    nlohmann_json::nlohmann_json
-            )
-
-            target_compile_definitions(${component}
-                PRIVATE
-                    _POSIX_C_SOURCE=200809L
-                    _GNU_SOURCE
-            )
-        endforeach()
-
-        find_program(FILESYSTEMS_NODE_EXECUTABLE
-            NAMES node nodejs node.exe
-        )
-
-        if(NOT FILESYSTEMS_NODE_EXECUTABLE)
-            message(FATAL_ERROR
-                "Node.js is required for the Linux edit stress reports"
-            )
-        endif()
-
-    endif()
 
     target_link_libraries(file_reader
         PRIVATE
@@ -394,93 +276,100 @@ if(FILESYSTEMS_BUILD_TESTS)
         COMMAND chunk_matcher_stress
     )
 
-    if(WIN32 AND FILESYSTEMS_BUILD_WINDOWS_STRESS_TESTS)
+endif()
 
-        set(FILESYSTEMS_WINDOWS_EDIT_STRESS_RUNNER
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/platform/windows/fsystem/edit/windows_edit_stress/run_all.js
-        )
+# ---------------------------------------------------------
+# RAM Benchmark
+# ---------------------------------------------------------
 
-        add_test(
-            NAME windows_edit_stress_smoke_test
-            COMMAND ${FILESYSTEMS_NODE_EXECUTABLE}
-                ${FILESYSTEMS_WINDOWS_EDIT_STRESS_RUNNER}
-                --profile smoke
-                --build-dir
-                ${CMAKE_CURRENT_BINARY_DIR}
-        )
+if(WIN32)
 
-        add_test(
-            NAME windows_edit_stress_standard_test
-            COMMAND ${FILESYSTEMS_NODE_EXECUTABLE}
-                ${FILESYSTEMS_WINDOWS_EDIT_STRESS_RUNNER}
-                --profile standard
-                --build-dir
-                ${CMAKE_CURRENT_BINARY_DIR}
-        )
-
-        add_test(
-            NAME windows_edit_stress_extreme_test
-            COMMAND ${FILESYSTEMS_NODE_EXECUTABLE}
-                ${FILESYSTEMS_WINDOWS_EDIT_STRESS_RUNNER}
-                --profile extreme
-                --build-dir
-                ${CMAKE_CURRENT_BINARY_DIR}
-        )
-
-        set_tests_properties(
-            windows_edit_stress_smoke_test
-            windows_edit_stress_standard_test
-            windows_edit_stress_extreme_test
-            PROPERTIES
-                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        )
-
-    endif()
-
-    if(
-        CMAKE_SYSTEM_NAME STREQUAL "Linux" AND
-        FILESYSTEMS_BUILD_LINUX_STRESS_TESTS
+    add_executable(bench_ram
+        tests/platform/windows/fsystem/edit/bench_ram/main.cpp
     )
 
-        set(FILESYSTEMS_LINUX_EDIT_STRESS_RUNNER
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/platform/linux/fsystem/edit/linux_edit_stress/run_all.js
-        )
+    target_include_directories(bench_ram
+        PRIVATE
+            ${FILESYSTEMS_TEST_INCLUDE_DIR}
+    )
 
-        add_test(
-            NAME linux_edit_stress_smoke_test
-            COMMAND ${FILESYSTEMS_NODE_EXECUTABLE}
-                ${FILESYSTEMS_LINUX_EDIT_STRESS_RUNNER}
-                --profile smoke
-                --build-dir
-                ${CMAKE_CURRENT_BINARY_DIR}
-        )
+    target_link_libraries(bench_ram
+        PRIVATE
+            filesystems
+            Psapi
+            nlohmann_json::nlohmann_json
+    )
 
-        add_test(
-            NAME linux_edit_stress_standard_test
-            COMMAND ${FILESYSTEMS_NODE_EXECUTABLE}
-                ${FILESYSTEMS_LINUX_EDIT_STRESS_RUNNER}
-                --profile standard
-                --build-dir
-                ${CMAKE_CURRENT_BINARY_DIR}
-        )
+    add_test(
+        NAME bench_ram_test
+        COMMAND bench_ram
+    )
 
-        add_test(
-            NAME linux_edit_stress_extreme_test
-            COMMAND ${FILESYSTEMS_NODE_EXECUTABLE}
-                ${FILESYSTEMS_LINUX_EDIT_STRESS_RUNNER}
-                --profile extreme
-                --build-dir
-                ${CMAKE_CURRENT_BINARY_DIR}
-        )
+    add_executable(interference_rejection_rate
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/main.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/edit/windows_edit.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/edit/detail/source_stream.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/edit/detail/temp_writer.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/edit/detail/replace_transaction.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/watcher/edit_watcher.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/watcher/windows_watcher.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/watcher/windows_watcher_state.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/watcher/windows_watcher_signal.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/watcher/windows_watcher_io.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/watcher/windows_watcher_events.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/watcher/windows_watcher_loop.cpp
+    )
 
-        set_tests_properties(
-            linux_edit_stress_smoke_test
-            linux_edit_stress_standard_test
-            linux_edit_stress_extreme_test
-            PROPERTIES
-                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        )
+    target_include_directories(interference_rejection_rate
+        PRIVATE
+            ${FILESYSTEMS_TEST_INCLUDE_DIR}
+    )
 
-    endif()
+    target_compile_definitions(interference_rejection_rate
+        PRIVATE
+            NOMINMAX
+            WIN32_LEAN_AND_MEAN
+    )
+
+    target_link_libraries(interference_rejection_rate
+        PRIVATE
+            filesystems
+    )
+
+    add_test(
+        NAME interference_rejection_rate_test
+        COMMAND interference_rejection_rate
+    )
+
+    add_executable(nowatcher_bench
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/nowatcher/main.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/edit/windows_edit.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/edit/detail/source_stream.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/edit/detail/temp_writer.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/edit/detail/replace_transaction.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/watcher/edit_watcher.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/watcher/windows_watcher.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/watcher/windows_watcher_state.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/watcher/windows_watcher_signal.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/watcher/windows_watcher_io.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/watcher/windows_watcher_events.cpp
+        tests/platform/windows/fsystem/edit/Interference_rejection_rate/fork/watcher/windows_watcher_loop.cpp
+    )
+
+    target_compile_definitions(nowatcher_bench
+        PRIVATE
+            NOMINMAX
+            WIN32_LEAN_AND_MEAN
+    )
+
+    target_link_libraries(nowatcher_bench
+        PRIVATE
+            filesystems
+    )
+
+    add_test(
+        NAME nowatcher_bench_test
+        COMMAND nowatcher_bench
+    )
 
 endif()

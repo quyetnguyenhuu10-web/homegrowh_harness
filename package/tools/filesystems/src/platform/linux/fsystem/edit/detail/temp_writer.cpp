@@ -15,7 +15,7 @@ namespace fsystem::linux::detail
         bool write_bytes(
             int file_descriptor,
             std::string_view data,
-            fsystem::WatcherState& watcher_state,
+            watcher_state& watcher_state,
             std::uint32_t& error
         )
         {
@@ -116,7 +116,7 @@ namespace fsystem::linux::detail
         std::uint64_t first_occurrence,
         std::size_t old_data_size,
         const std::string& new_data,
-        fsystem::WatcherState& watcher_state,
+        watcher_state& watcher_state,
         temporary_file& temp,
         std::uint32_t& error
     )

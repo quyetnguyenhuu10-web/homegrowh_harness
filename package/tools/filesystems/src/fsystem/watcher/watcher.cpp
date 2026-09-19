@@ -2,11 +2,11 @@
 
 #if defined(_WIN32)
 
-#include "../../platform/windows/fsystem/watcher/windows_watcher.h"
+#include "../../platform/windows/fsystem/watcher/public_watcher.h"
 
 #elif defined(__linux__)
 
-#include "../../platform/linux/fsystem/watcher/linux_watcher.h"
+#include "../../platform/linux/fsystem/watcher/public_watcher.h"
 
 #else
 
@@ -16,25 +16,8 @@
 
 namespace fsystem
 {
-    void request_watcher_stop(WatcherState& state) noexcept
-    {
-        state.stop_requested.store(
-            true,
-            std::memory_order_release
-        );
-
-        std::lock_guard<std::mutex> lock(
-            state.stop_signal_mutex
-        );
-
-        if (state.stop_signal != nullptr)
-        {
-            state.stop_signal(state.stop_signal_context);
-        }
-    }
-
     WatcherResult watcher(
-        std::filesystem::path path,
+        const std::filesystem::path& path,
         int timeout_f
     )
     {
@@ -42,19 +25,6 @@ namespace fsystem
         return windows::watcher_file(path, timeout_f);
 #elif defined(__linux__)
         return linux::watcher_file(path, timeout_f);
-#endif
-    }
-
-    WatcherResult watcher(
-        std::filesystem::path path,
-        int timeout_f,
-        WatcherState& state
-    )
-    {
-#if defined(_WIN32)
-        return windows::watcher_file(path, timeout_f, &state);
-#elif defined(__linux__)
-        return linux::watcher_file(path, timeout_f, &state);
 #endif
     }
 }

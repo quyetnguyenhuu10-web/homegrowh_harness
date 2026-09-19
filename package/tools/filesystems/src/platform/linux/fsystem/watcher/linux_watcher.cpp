@@ -23,7 +23,7 @@
 #include <utility>
 #include <vector>
 
-namespace fsystem::linux
+namespace fsystem::linux::watcher_common
 {
     namespace
     {
@@ -193,6 +193,21 @@ namespace fsystem::linux
                     false,
                     std::memory_order_release
                 );
+
+                state_->timeout_requested.store(
+                    false,
+                    std::memory_order_release
+                );
+
+                state_->cleanup_timed_out.store(
+                    false,
+                    std::memory_order_release
+                );
+
+                state_->edit_commit_phase.store(
+                    EditCommitPhase::Watching,
+                    std::memory_order_release
+                );
             }
 
             watcher_state_guard(const watcher_state_guard&) = delete;
@@ -221,24 +236,35 @@ namespace fsystem::linux
                 state->stop_requested.load(std::memory_order_acquire);
         }
 
-        void publish_file_changed(WatcherState* state) noexcept
+        bool publish_file_changed(WatcherState* state) noexcept
         {
-            if (state != nullptr)
-            {
-                /*
-                 * Publish the observable result before the active
-                 * cancellation signal, matching the Windows watcher.
-                 */
-                state->file_changed.store(
-                    true,
-                    std::memory_order_release
-                );
+            if (state == nullptr)
+                return true;
 
-                state->cancel_requested.store(
-                    true,
-                    std::memory_order_release
-                );
+            if (
+                state->edit_commit_phase.load(
+                    std::memory_order_acquire
+                ) != EditCommitPhase::Watching
+            )
+            {
+                return false;
             }
+
+            /*
+             * Publish the observable result before the active
+             * cancellation signal, matching the Windows watcher.
+             */
+            state->file_changed.store(
+                true,
+                std::memory_order_release
+            );
+
+            state->cancel_requested.store(
+                true,
+                std::memory_order_release
+            );
+
+            return true;
         }
 
         struct cancellation_signal_context
@@ -322,8 +348,164 @@ namespace fsystem::linux
         };
     }
 
-    WatcherResult watcher_file(
-        std::filesystem::path path,
+    void request_watcher_stop(WatcherState& state) noexcept
+    {
+        state.stop_requested.store(
+            true,
+            std::memory_order_release
+        );
+
+        std::lock_guard<std::mutex> lock(
+            state.stop_signal_mutex
+        );
+
+        if (state.stop_signal != nullptr)
+        {
+            state.stop_signal(state.stop_signal_context);
+        }
+    }
+
+    bool request_edit_timeout(WatcherState* state) noexcept
+    {
+        if (state == nullptr)
+            return false;
+
+        if (
+            state->cancel_requested.load(std::memory_order_acquire) ||
+            state->file_changed.load(std::memory_order_acquire)
+        )
+        {
+            return false;
+        }
+
+        EditCommitPhase expected = EditCommitPhase::Watching;
+
+        if (!state->edit_commit_phase.compare_exchange_strong(
+                expected,
+                EditCommitPhase::TimedOut,
+                std::memory_order_acq_rel,
+                std::memory_order_acquire
+            ))
+        {
+            return false;
+        }
+
+        state->timeout_requested.store(
+            true,
+            std::memory_order_release
+        );
+
+        state->cancel_requested.store(
+            true,
+            std::memory_order_release
+        );
+
+        return true;
+    }
+
+    bool begin_edit_commit(WatcherState& state) noexcept
+    {
+        if (
+            state.timeout_requested.load(std::memory_order_acquire) ||
+            state.file_changed.load(std::memory_order_acquire) ||
+            state.cancel_requested.load(std::memory_order_acquire)
+        )
+        {
+            return false;
+        }
+
+        EditCommitPhase expected = state.edit_commit_phase.load(
+            std::memory_order_acquire
+        );
+
+        while (
+            expected == EditCommitPhase::Watching ||
+            expected == EditCommitPhase::Committed
+        )
+        {
+            if (state.edit_commit_phase.compare_exchange_weak(
+                    expected,
+                    EditCommitPhase::Committing,
+                    std::memory_order_acq_rel,
+                    std::memory_order_acquire
+                ))
+            {
+                return true;
+            }
+
+            if (
+                state.timeout_requested.load(
+                    std::memory_order_acquire
+                ) ||
+                state.file_changed.load(
+                    std::memory_order_acquire
+                ) ||
+                state.cancel_requested.load(
+                    std::memory_order_acquire
+                )
+            )
+            {
+                return false;
+            }
+        }
+
+        return false;
+    }
+
+    void mark_edit_committed(WatcherState& state) noexcept
+    {
+        state.edit_commit_phase.store(
+            EditCommitPhase::Committed,
+            std::memory_order_release
+        );
+    }
+
+    void prepare_next_edit(WatcherState& state) noexcept
+    {
+        if (
+            state.timeout_requested.load(std::memory_order_acquire) ||
+            state.file_changed.load(std::memory_order_acquire) ||
+            state.cancel_requested.load(std::memory_order_acquire)
+        )
+        {
+            return;
+        }
+
+        EditCommitPhase phase = state.edit_commit_phase.load(
+            std::memory_order_acquire
+        );
+
+        while (phase == EditCommitPhase::Committing)
+        {
+            if (state.edit_commit_phase.compare_exchange_weak(
+                    phase,
+                    EditCommitPhase::Watching,
+                    std::memory_order_acq_rel,
+                    std::memory_order_acquire
+                ))
+            {
+                return;
+            }
+
+            if (
+                state.timeout_requested.load(
+                    std::memory_order_acquire
+                ) ||
+                state.file_changed.load(
+                    std::memory_order_acquire
+                ) ||
+                state.cancel_requested.load(
+                    std::memory_order_acquire
+                )
+            )
+            {
+                return;
+            }
+        }
+    }
+
+    WatcherResult watcher_files(
+        std::span<const std::filesystem::path> paths,
         int timeout_f,
         WatcherState* state
     )
@@ -331,7 +513,7 @@ namespace fsystem::linux
         WatcherResult watcher_result{};
         watcher_state_guard state_guard(state);
 
-        if (timeout_f < 0)
+        if (timeout_f < 0 || paths.empty())
         {
             watcher_result.error = EINVAL;
             return watcher_result;
@@ -339,33 +521,6 @@ namespace fsystem::linux
 
         const std::uint32_t timeout =
             static_cast<std::uint32_t>(timeout_f);
-
-        const std::filesystem::path parent_directory =
-            path.parent_path().empty()
-                ? std::filesystem::path(".")
-                : path.parent_path();
-
-        const std::string watched_file_name =
-            path.filename().string();
-
-        if (watched_file_name.empty())
-        {
-            watcher_result.error = EINVAL;
-            return watcher_result;
-        }
-
-        unique_fd directory_handle{fd_handle{::open(
-            parent_directory.c_str(),
-            O_RDONLY |
-            O_DIRECTORY |
-            O_CLOEXEC
-        )}};
-
-        if (!directory_handle)
-        {
-            watcher_result.error = current_errno();
-            return watcher_result;
-        }
 
         unique_fd inotify_handle{fd_handle{::inotify_init1(
             IN_NONBLOCK |
@@ -378,22 +533,61 @@ namespace fsystem::linux
             return watcher_result;
         }
 
-        const int watch_descriptor = ::inotify_add_watch(
-            inotify_handle.get().get(),
-            parent_directory.c_str(),
-            watch_mask
-        );
+        std::vector<unique_fd> directory_handles;
+        directory_handles.reserve(paths.size());
 
-        if (watch_descriptor < 0)
+        std::vector<int> watch_descriptors;
+        watch_descriptors.reserve(paths.size());
+
+        std::vector<std::string> watched_file_names;
+        watched_file_names.reserve(paths.size());
+
+        for (const std::filesystem::path& path : paths)
         {
-            watcher_result.error = current_errno();
-            return watcher_result;
-        }
+            const std::filesystem::path parent_directory =
+                path.parent_path().empty()
+                    ? std::filesystem::path(".")
+                    : path.parent_path();
 
-        inotify_watch_guard watch_guard(
-            inotify_handle.get().get(),
-            watch_descriptor
-        );
+            const std::string watched_file_name =
+                path.filename().string();
+
+            if (watched_file_name.empty())
+            {
+                watcher_result.error = EINVAL;
+                return watcher_result;
+            }
+
+            directory_handles.emplace_back(fd_handle{
+                ::open(
+                    parent_directory.c_str(),
+                    O_RDONLY |
+                    O_DIRECTORY |
+                    O_CLOEXEC
+                )
+            });
+
+            if (!directory_handles.back())
+            {
+                watcher_result.error = current_errno();
+                return watcher_result;
+            }
+
+            const int watch_descriptor = ::inotify_add_watch(
+                inotify_handle.get().get(),
+                parent_directory.c_str(),
+                watch_mask
+            );
+
+            if (watch_descriptor < 0)
+            {
+                watcher_result.error = current_errno();
+                return watcher_result;
+            }
+
+            watch_descriptors.push_back(watch_descriptor);
+            watched_file_names.push_back(watched_file_name);
+        }
 
         unique_fd event_handle{fd_handle{
             ::epoll_create1(EPOLL_CLOEXEC)
@@ -581,7 +775,12 @@ namespace fsystem::linux
                 )
                 {
                     if (wait_timeout == 0)
+                    {
+                        if (!stop_requested(state))
+                            (void)request_edit_timeout(state);
+
                         return finish_after_timeout();
+                    }
 
                     continue;
                 }
@@ -595,6 +794,14 @@ namespace fsystem::linux
 
             if (events_ready == 0)
             {
+                if (
+                    !queue_overflow &&
+                    !stop_requested(state)
+                )
+                {
+                    (void)request_edit_timeout(state);
+                }
+
                 watcher_result.error =
                     queue_overflow
                         ? EOVERFLOW
@@ -749,7 +956,12 @@ namespace fsystem::linux
                     }
 
                     if (remaining_timeout() == 0)
+                    {
+                        if (!stop_requested(state))
+                            (void)request_edit_timeout(state);
+
                         return finish_after_timeout();
+                    }
 
                     continue;
                 }
@@ -883,9 +1095,20 @@ namespace fsystem::linux
                     queue_overflow = true;
                 }
 
+                bool watched_directory = false;
+
+                for (const int watch_descriptor : watch_descriptors)
+                {
+                    if (watch_descriptor == event_header.wd)
+                    {
+                        watched_directory = true;
+                        break;
+                    }
+                }
+
                 if (
                     (event_header.mask & IN_IGNORED) != 0 &&
-                    event_header.wd == watch_descriptor
+                    watched_directory
                 )
                 {
                     watcher_result.event_status =
@@ -895,10 +1118,7 @@ namespace fsystem::linux
                     return watcher_result;
                 }
 
-                if (
-                    event_header.wd == watch_descriptor &&
-                    event_name_bytes != 0
-                )
+                if (watched_directory && event_name_bytes != 0)
                 {
                     const char* event_name_data =
                         reinterpret_cast<const char*>(
@@ -923,15 +1143,27 @@ namespace fsystem::linux
                                 ) - event_name_data
                             );
 
-                    if (
-                        std::string_view(
-                            event_name_data,
-                            event_name_length
-                        ) == watched_file_name
+                    const std::string_view event_name(
+                        event_name_data,
+                        event_name_length
+                    );
+
+                    for (
+                        std::size_t index = 0;
+                        index < watch_descriptors.size();
+                        ++index
                     )
                     {
-                        target_file_changed = true;
-                        publish_file_changed(state);
+                        if (
+                            watch_descriptors[index] ==
+                                event_header.wd &&
+                            event_name == watched_file_names[index]
+                        )
+                        {
+                            if (publish_file_changed(state))
+                                target_file_changed = true;
+                            break;
+                        }
                     }
                 }
 
@@ -954,5 +1186,18 @@ namespace fsystem::linux
                 return finish_after_timeout();
             }
         }
+    }
+
+    WatcherResult watcher_file(
+        const std::filesystem::path& path,
+        int timeout_f,
+        WatcherState* state
+    )
+    {
+        return watcher_files(
+            std::span<const std::filesystem::path>(&path, 1),
+            timeout_f,
+            state
+        );
     }
 }

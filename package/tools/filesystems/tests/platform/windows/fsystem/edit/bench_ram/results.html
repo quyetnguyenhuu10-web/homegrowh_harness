@@ -1,0 +1,1754 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Báo cáo Phân tích Hiệu năng Benchmark</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+    
+    /* Dark Theme (Default) */
+    --bg-base: #090d16;
+    --bg-surface: #111827;
+    --bg-card: #1f2937;
+    --bg-card-hover: #374151;
+    --border-color: rgba(255, 255, 255, 0.08);
+    --border-accent: rgba(59, 130, 246, 0.3);
+    
+    --text-main: #f9fafb;
+    --text-muted: #9ca3af;
+    --text-subtle: #6b7280;
+    
+    --accent-blue: #3b82f6;
+    --accent-blue-glow: rgba(59, 130, 246, 0.15);
+    --accent-pink: #ec4899;
+    --accent-pink-glow: rgba(236, 72, 153, 0.15);
+    --accent-green: #10b981;
+    --accent-amber: #f59e0b;
+    
+    --grid-line: rgba(255, 255, 255, 0.05);
+    --shadow-card: 0 4px 20px -2px rgba(0, 0, 0, 0.5);
+  }
+
+  [data-theme="light"] {
+    --bg-base: #f8fafc;
+    --bg-surface: #ffffff;
+    --bg-card: #f1f5f9;
+    --bg-card-hover: #e2e8f0;
+    --border-color: rgba(0, 0, 0, 0.08);
+    --border-accent: rgba(37, 99, 235, 0.3);
+    
+    --text-main: #0f172a;
+    --text-muted: #475569;
+    --text-subtle: #94a3b8;
+    
+    --accent-blue: #2563eb;
+    --accent-blue-glow: rgba(37, 99, 235, 0.1);
+    --accent-pink: #db2777;
+    --accent-pink-glow: rgba(219, 39, 119, 0.1);
+    --accent-green: #059669;
+    --accent-amber: #d97706;
+    
+    --grid-line: rgba(0, 0, 0, 0.05);
+    --shadow-card: 0 4px 12px -2px rgba(0, 0, 0, 0.05);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; transition: background-color 0.25s, border-color 0.25s; }
+  
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--bg-base);
+    color: var(--text-main);
+    min-height: 100vh;
+    padding: 24px;
+    line-height: 1.5;
+  }
+
+  .container {
+    max-width: 1600px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+
+  /* Header Section */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--bg-surface);
+    padding: 20px 24px;
+    border-radius: 16px;
+    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-card);
+  }
+
+  .header-titles h1 {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .header-sub {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 4px;
+    font-family: var(--font-mono);
+  }
+
+  .controls {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  #panel-chart .panel-header {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .btn {
+    background: var(--bg-card);
+    color: var(--text-main);
+    border: 1px solid var(--border-color);
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .btn:hover {
+    background: var(--bg-card-hover);
+    border-color: var(--accent-blue);
+  }
+
+  .btn.active {
+    background: var(--accent-blue);
+    color: #ffffff;
+    border-color: var(--accent-blue);
+  }
+
+  /* KPI Cards Grid */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+  }
+
+  .kpi-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    box-shadow: var(--shadow-card);
+    position: relative;
+    overflow: hidden;
+  }
+
+  .kpi-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; height: 3px;
+    background: transparent;
+  }
+
+  .kpi-card.ram-card::before { background: var(--accent-blue); }
+  .kpi-card.time-card::before { background: var(--accent-pink); }
+  .kpi-card.stat-card::before { background: var(--accent-green); }
+
+  .kpi-label {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .kpi-value {
+    font-family: var(--font-mono);
+    font-size: 18px;
+    font-weight: 700;
+    margin: 6px 0 2px;
+    color: var(--text-main);
+  }
+
+  .kpi-subtext {
+    font-size: 10px;
+    color: var(--text-subtle);
+    font-family: var(--font-mono);
+  }
+
+  /* Compact KPI strip inside the chart panel */
+  .kpi-inside-chart {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .kpi-inside-chart .kpi-card {
+    background: var(--bg-card);
+    border-radius: 10px;
+    padding: 10px 12px;
+    box-shadow: none;
+  }
+
+  .kpi-inside-chart .kpi-value {
+    font-size: 15px;
+    margin: 4px 0 2px;
+  }
+
+  @media (max-width: 900px) {
+    .kpi-inside-chart {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  /* Layout Main Section */
+  .main-content {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    --split-pct: 60%;
+  }
+
+  body.split-layout .main-content {
+    display: grid;
+    grid-template-columns: var(--split-pct) 12px minmax(0, 1fr);
+    gap: 0;
+    align-items: stretch;
+  }
+
+  body.split-layout .panel-chart {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+    min-width: 0;
+  }
+
+  body.split-layout .panel-table {
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+    border-left: none;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Draggable vertical splitter (only visible in split mode) */
+  .splitter {
+    display: none;
+    cursor: col-resize;
+    position: relative;
+    background: transparent;
+    touch-action: none;
+    user-select: none;
+    z-index: 5;
+  }
+
+  body.split-layout .splitter {
+    display: block;
+  }
+
+  .splitter::after {
+    content: '';
+    position: absolute;
+    top: 0; bottom: 0; left: 4px; right: 4px;
+    border-radius: 4px;
+    background: var(--border-color);
+    transition: background 0.15s;
+  }
+
+  .splitter:hover::after,
+  .splitter.dragging::after {
+    background: var(--accent-blue);
+  }
+
+  .splitter::before {
+    content: '⋮';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--text-subtle);
+    font-size: 14px;
+    letter-spacing: -2px;
+    z-index: 1;
+  }
+
+  .splitter.dragging::before {
+    color: #fff;
+  }
+
+  body.split-resizing {
+    cursor: col-resize !important;
+  }
+
+  body.split-resizing * {
+    user-select: none !important;
+    pointer-events: none !important;
+  }
+
+  body.split-resizing .splitter {
+    pointer-events: auto !important;
+  }
+
+  .panel {
+    background: var(--bg-surface);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 20px;
+    box-shadow: var(--shadow-card);
+  }
+
+  .panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+
+  .panel-title {
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Hide-title mode: collapse page header + chart panel title for max chart space */
+  body.hide-titles .header {
+    display: none;
+  }
+
+  body.hide-titles #panel-chart .panel-title {
+    display: none;
+  }
+
+  body.hide-titles #panel-chart .panel-header {
+    margin-bottom: 8px;
+    justify-content: flex-end;
+  }
+
+  .chart-wrapper {
+    position: relative;
+    height: 420px;
+    width: 100%;
+    min-width: 0;
+  }
+
+  body.split-layout .chart-wrapper {
+    height: 480px;
+  }
+
+  /* Data Table */
+  .table-container {
+    max-height: 500px;
+    overflow-y: auto;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+  }
+
+  body.split-layout .table-container {
+    max-height: 560px;
+    flex: 1 1 auto;
+  }
+
+  table.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    text-align: right;
+  }
+
+  table.data-table th, table.data-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  table.data-table th {
+    background: var(--bg-card);
+    color: var(--text-muted);
+    position: sticky;
+    top: 0;
+    font-weight: 600;
+    z-index: 2;
+  }
+
+  table.data-table th:first-child, table.data-table td:first-child {
+    text-align: center;
+  }
+
+  table.data-table tbody tr:hover {
+    background: var(--bg-card-hover);
+  }
+
+  @media (max-width: 1024px) {
+    body.split-layout .main-content {
+      grid-template-columns: 1fr;
+    }
+    body.split-layout .splitter {
+      display: none;
+    }
+    body.split-layout .panel-chart {
+      border-radius: 16px;
+    }
+    body.split-layout .panel-table {
+      border-radius: 16px;
+      border-left: 1px solid var(--border-color);
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <!-- Tiêu đề -->
+  <header class="header">
+    <div class="header-titles">
+      <h1>
+        Hệ thống Phân tích Benchmark
+      </h1>
+      <div class="header-sub">
+        Tạo lúc: 2026-09-19 11:58:14 &bull; Nguồn: results.jsonl &bull; Tổng thời gian chạy: 597.60s
+      </div>
+    </div>
+  </header>
+
+  <!-- Khối nội dung chính -->
+  <main class="main-content" id="main-content">
+    <!-- Panel biểu đồ -->
+    <div class="panel panel-chart" id="panel-chart">
+      <div class="panel-header">
+        <span class="panel-title">📈 Tương quan Đỉnh RAM & Độ trễ Thực thi</span>
+        <div class="controls">
+          <button class="btn" id="title-toggle" onclick="toggleChartTitle()">👁 Ẩn tiêu đề</button>
+          <button class="btn" id="theme-toggle" onclick="toggleTheme()">☀️ Chế độ Sáng</button>
+          <button class="btn" id="split-toggle" onclick="toggleSplitView()">📑 Chia đôi</button>
+          <button class="btn" onclick="toggleDataset(0)">Đỉnh RAM</button>
+          <button class="btn" onclick="toggleDataset(1)">Thời gian chạy</button>
+        </div>
+      </div>
+      <!-- Thẻ KPI nằm trong panel biểu đồ -->
+      <section class="kpi-grid kpi-inside-chart">
+        <div class="kpi-card ram-card">
+          <div class="kpi-label">RAM ổn định (từ lần 2+)</div>
+          <div class="kpi-value">4.50 MB</div>
+          <div class="kpi-subtext">Độ lệch chuẩn: &plusmn;0.0412 MB</div>
+        </div>
+        <div class="kpi-card ram-card">
+          <div class="kpi-label">Đỉnh ban đầu / Đỉnh cao nhất</div>
+          <div class="kpi-value">6.06 / 6.06 MB</div>
+          <div class="kpi-subtext">P50: 4.52 MB | P95: 4.52 MB</div>
+        </div>
+        <div class="kpi-card time-card">
+          <div class="kpi-label">Độ trễ (P50 / P90)</div>
+          <div class="kpi-value">0.64s / 1.40s</div>
+          <div class="kpi-subtext">Đỉnh đột biến: 1.63s (P99: 1.57s)</div>
+        </div>
+        <div class="kpi-card stat-card">
+          <div class="kpi-label">Số lần lặp & Thời gian TB</div>
+          <div class="kpi-value">1000 / 0.59s</div>
+          <div class="kpi-subtext">Đã kiểm chứng không rò rỉ bộ nhớ (O(1))</div>
+        </div>
+      </section>
+      <div class="chart-wrapper" id="chart-wrapper">
+        <canvas id="benchmarkChart"></canvas>
+      </div>
+    </div>
+
+    <!-- Thanh kéo dọc giữa biểu đồ và bảng -->
+    <div class="splitter" id="splitter" title="Kéo để đổi cỡ biểu đồ / bảng"></div>
+
+    <!-- Panel bảng dữ liệu -->
+    <div class="panel panel-table" id="panel-table">
+      <div class="panel-header">
+        <span class="panel-title">📋 Nhật ký Thực thi Thô (1000 Lượt chạy)</span>
+      </div>
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Lần sửa</th>
+              <th>Đỉnh RAM</th>
+              <th>Thời gian</th>
+              <th>RAM trước</th>
+              <th>RAM sau</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>1</td><td>6.0586 MB</td><td>0.1721 s</td><td>4.4922 MB</td><td>5.9766 MB</td></tr>
+<tr><td>2</td><td>4.7617 MB</td><td>0.1518 s</td><td>4.6172 MB</td><td>4.6367 MB</td></tr>
+<tr><td>3</td><td>4.5117 MB</td><td>0.1906 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>4</td><td>4.5195 MB</td><td>0.1829 s</td><td>4.3828 MB</td><td>4.3867 MB</td></tr>
+<tr><td>5</td><td>4.5117 MB</td><td>0.1725 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>6</td><td>4.5117 MB</td><td>0.1561 s</td><td>4.3789 MB</td><td>4.3867 MB</td></tr>
+<tr><td>7</td><td>4.5117 MB</td><td>0.1609 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>8</td><td>4.5117 MB</td><td>0.1716 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>9</td><td>4.5117 MB</td><td>0.1537 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>10</td><td>4.5117 MB</td><td>0.1600 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>11</td><td>4.5117 MB</td><td>0.1693 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>12</td><td>4.5117 MB</td><td>0.1507 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>13</td><td>4.5117 MB</td><td>0.2024 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>14</td><td>4.5117 MB</td><td>0.1653 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>15</td><td>4.5117 MB</td><td>0.1725 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>16</td><td>4.5156 MB</td><td>0.1527 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>17</td><td>4.5156 MB</td><td>0.1492 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>18</td><td>4.5156 MB</td><td>0.1558 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>19</td><td>4.5195 MB</td><td>0.1475 s</td><td>4.3789 MB</td><td>4.3867 MB</td></tr>
+<tr><td>20</td><td>4.5117 MB</td><td>0.1823 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>21</td><td>4.5117 MB</td><td>0.1879 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>22</td><td>4.5117 MB</td><td>0.1581 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>23</td><td>4.5156 MB</td><td>0.1573 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>24</td><td>4.5156 MB</td><td>0.1712 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>25</td><td>4.5117 MB</td><td>0.1659 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>26</td><td>4.5117 MB</td><td>0.1526 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>27</td><td>4.5117 MB</td><td>0.1579 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>28</td><td>4.5117 MB</td><td>0.1538 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>29</td><td>4.5156 MB</td><td>0.1553 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>30</td><td>4.5156 MB</td><td>0.1804 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>31</td><td>4.5156 MB</td><td>0.1618 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>32</td><td>4.5156 MB</td><td>0.1541 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>33</td><td>4.5117 MB</td><td>0.1538 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>34</td><td>4.5156 MB</td><td>0.1621 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>35</td><td>4.5117 MB</td><td>0.1601 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>36</td><td>4.5156 MB</td><td>0.1498 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>37</td><td>4.5117 MB</td><td>0.1522 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>38</td><td>4.5156 MB</td><td>0.1981 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>39</td><td>4.5156 MB</td><td>0.1666 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>40</td><td>4.5156 MB</td><td>0.1565 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>41</td><td>4.5156 MB</td><td>0.1848 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>42</td><td>4.5156 MB</td><td>0.1514 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>43</td><td>4.5156 MB</td><td>0.1717 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>44</td><td>4.5117 MB</td><td>0.1659 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>45</td><td>4.5117 MB</td><td>0.1527 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>46</td><td>4.5156 MB</td><td>0.1622 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>47</td><td>4.5156 MB</td><td>0.1699 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>48</td><td>4.5195 MB</td><td>0.1728 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>49</td><td>4.5156 MB</td><td>0.1603 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>50</td><td>4.5234 MB</td><td>0.1578 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>51</td><td>4.5195 MB</td><td>0.1437 s</td><td>4.3789 MB</td><td>4.3867 MB</td></tr>
+<tr><td>52</td><td>4.5156 MB</td><td>0.1939 s</td><td>4.3789 MB</td><td>4.5000 MB</td></tr>
+<tr><td>53</td><td>4.4609 MB</td><td>0.1684 s</td><td>4.3789 MB</td><td>4.3203 MB</td></tr>
+<tr><td>54</td><td>4.5195 MB</td><td>0.1562 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>55</td><td>4.5195 MB</td><td>0.1538 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>56</td><td>4.5156 MB</td><td>0.1594 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>57</td><td>4.5156 MB</td><td>0.1608 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>58</td><td>4.5156 MB</td><td>0.1665 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>59</td><td>4.5156 MB</td><td>0.1542 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>60</td><td>4.5156 MB</td><td>0.1484 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>61</td><td>4.5156 MB</td><td>0.1513 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>62</td><td>4.5156 MB</td><td>0.1532 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>63</td><td>4.5156 MB</td><td>0.1518 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>64</td><td>4.5156 MB</td><td>0.1551 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>65</td><td>4.5156 MB</td><td>0.1601 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>66</td><td>4.5156 MB</td><td>0.1617 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>67</td><td>4.5156 MB</td><td>0.1522 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>68</td><td>4.5156 MB</td><td>0.1518 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>69</td><td>4.5156 MB</td><td>0.1873 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>70</td><td>4.5156 MB</td><td>0.1571 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>71</td><td>4.5156 MB</td><td>0.1553 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>72</td><td>4.5156 MB</td><td>0.1588 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>73</td><td>4.5156 MB</td><td>0.1665 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>74</td><td>4.5156 MB</td><td>0.1556 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>75</td><td>4.5156 MB</td><td>0.1505 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>76</td><td>4.5156 MB</td><td>0.1666 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>77</td><td>4.5156 MB</td><td>0.1590 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>78</td><td>4.5156 MB</td><td>0.1566 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>79</td><td>4.5156 MB</td><td>0.1627 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>80</td><td>4.5156 MB</td><td>0.1544 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>81</td><td>4.5156 MB</td><td>0.1545 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>82</td><td>4.5156 MB</td><td>0.1509 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>83</td><td>4.5156 MB</td><td>0.1499 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>84</td><td>4.5234 MB</td><td>0.1826 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>85</td><td>4.5195 MB</td><td>0.1507 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>86</td><td>4.5156 MB</td><td>0.1565 s</td><td>4.3789 MB</td><td>4.3867 MB</td></tr>
+<tr><td>87</td><td>4.5156 MB</td><td>0.1674 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>88</td><td>4.5156 MB</td><td>0.2097 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>89</td><td>4.5156 MB</td><td>0.1661 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>90</td><td>4.5156 MB</td><td>0.1674 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>91</td><td>4.5156 MB</td><td>0.1606 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>92</td><td>4.5156 MB</td><td>0.1247 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>93</td><td>4.5156 MB</td><td>0.1048 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>94</td><td>4.5156 MB</td><td>0.1010 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>95</td><td>4.5156 MB</td><td>0.1093 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>96</td><td>4.5156 MB</td><td>0.1022 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>97</td><td>4.5156 MB</td><td>0.1037 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>98</td><td>4.5195 MB</td><td>0.1145 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>99</td><td>4.5156 MB</td><td>0.0963 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>100</td><td>4.5156 MB</td><td>0.1844 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>101</td><td>4.5156 MB</td><td>0.1063 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>102</td><td>4.5156 MB</td><td>0.1310 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>103</td><td>4.5156 MB</td><td>0.2516 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>104</td><td>4.5156 MB</td><td>0.2662 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>105</td><td>4.5156 MB</td><td>0.1655 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>106</td><td>4.5156 MB</td><td>0.1584 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>107</td><td>4.5156 MB</td><td>0.1796 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>108</td><td>4.5156 MB</td><td>0.3193 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>109</td><td>4.5156 MB</td><td>0.1623 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>110</td><td>4.5156 MB</td><td>0.1570 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>111</td><td>4.5156 MB</td><td>0.1586 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>112</td><td>4.5156 MB</td><td>0.2227 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>113</td><td>4.5156 MB</td><td>0.1614 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>114</td><td>4.5156 MB</td><td>0.1541 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>115</td><td>4.5156 MB</td><td>0.2867 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>116</td><td>4.5156 MB</td><td>0.5978 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>117</td><td>4.5156 MB</td><td>0.6794 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>118</td><td>4.5156 MB</td><td>0.6940 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>119</td><td>4.5234 MB</td><td>0.6900 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>120</td><td>4.5195 MB</td><td>0.7980 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>121</td><td>4.5156 MB</td><td>0.7905 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>122</td><td>4.5156 MB</td><td>0.6700 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>123</td><td>4.5156 MB</td><td>0.6674 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>124</td><td>4.5195 MB</td><td>0.6980 s</td><td>4.3789 MB</td><td>4.3867 MB</td></tr>
+<tr><td>125</td><td>4.5117 MB</td><td>0.6532 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>126</td><td>4.5117 MB</td><td>0.7116 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>127</td><td>4.5117 MB</td><td>0.7200 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>128</td><td>4.5117 MB</td><td>0.5645 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>129</td><td>4.5117 MB</td><td>0.5818 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>130</td><td>4.5117 MB</td><td>0.5503 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>131</td><td>4.5117 MB</td><td>0.6211 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>132</td><td>4.5117 MB</td><td>0.6680 s</td><td>4.3789 MB</td><td>4.3594 MB</td></tr>
+<tr><td>133</td><td>4.5117 MB</td><td>0.6261 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>134</td><td>4.5117 MB</td><td>0.5687 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>135</td><td>4.5117 MB</td><td>0.5435 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>136</td><td>4.5117 MB</td><td>0.5706 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>137</td><td>4.5117 MB</td><td>0.5635 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>138</td><td>4.5117 MB</td><td>0.6057 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>139</td><td>4.5117 MB</td><td>0.8201 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>140</td><td>4.5117 MB</td><td>0.5479 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>141</td><td>4.5117 MB</td><td>0.5550 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>142</td><td>4.5117 MB</td><td>0.6011 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>143</td><td>4.5117 MB</td><td>0.5834 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>144</td><td>4.5117 MB</td><td>0.6353 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>145</td><td>4.5117 MB</td><td>0.6467 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>146</td><td>4.5117 MB</td><td>0.5554 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>147</td><td>4.5117 MB</td><td>0.5736 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>148</td><td>4.5195 MB</td><td>0.5670 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>149</td><td>4.5117 MB</td><td>0.5737 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>150</td><td>4.5117 MB</td><td>0.5794 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>151</td><td>4.5117 MB</td><td>0.6475 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>152</td><td>4.5117 MB</td><td>1.1712 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>153</td><td>4.5117 MB</td><td>1.4868 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>154</td><td>4.5195 MB</td><td>1.5027 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>155</td><td>4.5117 MB</td><td>1.4087 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>156</td><td>4.5156 MB</td><td>0.9234 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>157</td><td>4.5156 MB</td><td>0.1838 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>158</td><td>4.5156 MB</td><td>0.1686 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>159</td><td>4.5156 MB</td><td>0.1702 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>160</td><td>4.5156 MB</td><td>0.1887 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>161</td><td>4.5156 MB</td><td>0.1827 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>162</td><td>4.5156 MB</td><td>0.1699 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>163</td><td>4.5156 MB</td><td>0.1617 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>164</td><td>4.5156 MB</td><td>0.1569 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>165</td><td>4.5156 MB</td><td>0.3591 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>166</td><td>4.5156 MB</td><td>0.6616 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>167</td><td>4.5156 MB</td><td>0.6509 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>168</td><td>4.5156 MB</td><td>0.6665 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>169</td><td>4.5156 MB</td><td>0.7025 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>170</td><td>4.5156 MB</td><td>0.7917 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>171</td><td>4.5156 MB</td><td>0.7274 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>172</td><td>4.5156 MB</td><td>0.6447 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>173</td><td>4.5234 MB</td><td>0.6446 s</td><td>4.3789 MB</td><td>4.3867 MB</td></tr>
+<tr><td>174</td><td>4.5156 MB</td><td>0.6736 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>175</td><td>4.5156 MB</td><td>0.6429 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>176</td><td>4.5156 MB</td><td>0.6909 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>177</td><td>4.5156 MB</td><td>0.9972 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>178</td><td>4.5156 MB</td><td>1.4138 s</td><td>4.3789 MB</td><td>4.3398 MB</td></tr>
+<tr><td>179</td><td>4.5156 MB</td><td>1.5960 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>180</td><td>4.5156 MB</td><td>1.4042 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>181</td><td>4.5156 MB</td><td>1.3263 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>182</td><td>4.5156 MB</td><td>0.2055 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>183</td><td>4.5156 MB</td><td>0.1737 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>184</td><td>4.5156 MB</td><td>0.1507 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>185</td><td>4.5156 MB</td><td>0.1528 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>186</td><td>4.5156 MB</td><td>0.1642 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>187</td><td>4.5156 MB</td><td>0.1550 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>188</td><td>4.5156 MB</td><td>0.4203 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>189</td><td>4.5195 MB</td><td>0.6515 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>190</td><td>4.5156 MB</td><td>0.6494 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>191</td><td>4.5156 MB</td><td>0.6584 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>192</td><td>4.5156 MB</td><td>0.7090 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>193</td><td>4.5156 MB</td><td>0.7507 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>194</td><td>4.5156 MB</td><td>0.7224 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>195</td><td>4.5156 MB</td><td>0.6272 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>196</td><td>4.5156 MB</td><td>0.6605 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>197</td><td>4.5156 MB</td><td>0.6317 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>198</td><td>4.5156 MB</td><td>0.6456 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>199</td><td>4.5156 MB</td><td>0.6831 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>200</td><td>4.5156 MB</td><td>0.7618 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>201</td><td>4.5156 MB</td><td>1.3610 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>202</td><td>4.5156 MB</td><td>1.5635 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>203</td><td>4.5156 MB</td><td>1.4257 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>204</td><td>4.5156 MB</td><td>1.4573 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>205</td><td>4.5156 MB</td><td>0.5794 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>206</td><td>4.5156 MB</td><td>0.1598 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>207</td><td>4.5156 MB</td><td>0.1527 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>208</td><td>4.5156 MB</td><td>0.1582 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>209</td><td>4.5156 MB</td><td>0.1632 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>210</td><td>4.5156 MB</td><td>0.1547 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>211</td><td>4.5156 MB</td><td>0.1593 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>212</td><td>4.5156 MB</td><td>0.1669 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>213</td><td>4.5156 MB</td><td>0.1456 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>214</td><td>4.5156 MB</td><td>0.1678 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>215</td><td>4.5156 MB</td><td>0.6231 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>216</td><td>4.5156 MB</td><td>0.6679 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>217</td><td>4.5156 MB</td><td>0.6484 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>218</td><td>4.5156 MB</td><td>0.6330 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>219</td><td>4.5156 MB</td><td>0.7728 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>220</td><td>4.5156 MB</td><td>0.7886 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>221</td><td>4.5156 MB</td><td>0.6621 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>222</td><td>4.5156 MB</td><td>0.6230 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>223</td><td>4.5156 MB</td><td>0.6845 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>224</td><td>4.5234 MB</td><td>0.6470 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>225</td><td>4.5234 MB</td><td>0.6591 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>226</td><td>4.5234 MB</td><td>0.7247 s</td><td>4.3789 MB</td><td>4.3906 MB</td></tr>
+<tr><td>227</td><td>4.5156 MB</td><td>1.1829 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>228</td><td>4.5156 MB</td><td>1.5071 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>229</td><td>4.5156 MB</td><td>1.4885 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>230</td><td>4.5156 MB</td><td>1.4202 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>231</td><td>4.5156 MB</td><td>0.9686 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>232</td><td>4.5156 MB</td><td>0.1775 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>233</td><td>4.5156 MB</td><td>0.1866 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>234</td><td>4.5156 MB</td><td>0.1521 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>235</td><td>4.5156 MB</td><td>0.1640 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>236</td><td>4.5156 MB</td><td>0.1613 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>237</td><td>4.5156 MB</td><td>0.1706 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>238</td><td>4.5156 MB</td><td>0.1506 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>239</td><td>4.5156 MB</td><td>0.1556 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>240</td><td>4.5156 MB</td><td>0.2093 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>241</td><td>4.5156 MB</td><td>0.6300 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>242</td><td>4.5156 MB</td><td>0.6514 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>243</td><td>4.5156 MB</td><td>0.6837 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>244</td><td>4.5156 MB</td><td>0.7155 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>245</td><td>4.5156 MB</td><td>0.7881 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>246</td><td>4.5156 MB</td><td>0.7565 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>247</td><td>4.5156 MB</td><td>0.6406 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>248</td><td>4.5156 MB</td><td>0.6179 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>249</td><td>4.5156 MB</td><td>0.6654 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>250</td><td>4.5156 MB</td><td>0.6651 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>251</td><td>4.5156 MB</td><td>0.6619 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>252</td><td>4.5156 MB</td><td>0.7318 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>253</td><td>4.5156 MB</td><td>1.2691 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>254</td><td>4.5156 MB</td><td>1.5406 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>255</td><td>4.5156 MB</td><td>1.4437 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>256</td><td>4.5156 MB</td><td>1.4452 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>257</td><td>4.5156 MB</td><td>0.7675 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>258</td><td>4.5156 MB</td><td>0.1407 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>259</td><td>4.5195 MB</td><td>0.2146 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>260</td><td>4.5156 MB</td><td>0.1729 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>261</td><td>4.5156 MB</td><td>0.1595 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>262</td><td>4.5156 MB</td><td>0.1614 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>263</td><td>4.5156 MB</td><td>0.1765 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>264</td><td>4.5156 MB</td><td>0.1543 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>265</td><td>4.5156 MB</td><td>0.2319 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>266</td><td>4.5156 MB</td><td>0.6510 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>267</td><td>4.5156 MB</td><td>0.6544 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>268</td><td>4.5156 MB</td><td>0.6247 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>269</td><td>4.5156 MB</td><td>0.6837 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>270</td><td>4.5156 MB</td><td>0.7458 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>271</td><td>4.5156 MB</td><td>0.7392 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>272</td><td>4.5156 MB</td><td>0.6674 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>273</td><td>4.5156 MB</td><td>0.6499 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>274</td><td>4.5234 MB</td><td>0.6365 s</td><td>4.3789 MB</td><td>4.3867 MB</td></tr>
+<tr><td>275</td><td>4.5156 MB</td><td>0.6345 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>276</td><td>4.5156 MB</td><td>0.6003 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>277</td><td>4.5156 MB</td><td>0.7639 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>278</td><td>4.5156 MB</td><td>1.3419 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>279</td><td>4.5156 MB</td><td>1.5351 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>280</td><td>4.5156 MB</td><td>1.4198 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>281</td><td>4.5156 MB</td><td>1.4682 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>282</td><td>4.5156 MB</td><td>0.5656 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>283</td><td>4.5156 MB</td><td>0.1751 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>284</td><td>4.5156 MB</td><td>0.1579 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>285</td><td>4.5156 MB</td><td>0.1594 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>286</td><td>4.5156 MB</td><td>0.1671 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>287</td><td>4.5156 MB</td><td>0.1496 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>288</td><td>4.5156 MB</td><td>0.2933 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>289</td><td>4.5156 MB</td><td>0.6322 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>290</td><td>4.5156 MB</td><td>0.6425 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>291</td><td>4.5156 MB</td><td>0.6384 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>292</td><td>4.5156 MB</td><td>0.6733 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>293</td><td>4.5156 MB</td><td>0.7913 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>294</td><td>4.5234 MB</td><td>0.7041 s</td><td>4.3789 MB</td><td>4.3867 MB</td></tr>
+<tr><td>295</td><td>4.5156 MB</td><td>0.6605 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>296</td><td>4.5156 MB</td><td>0.6370 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>297</td><td>4.5156 MB</td><td>0.6382 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>298</td><td>4.5156 MB</td><td>0.6414 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>299</td><td>4.5156 MB</td><td>0.6667 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>300</td><td>4.5156 MB</td><td>0.7357 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>301</td><td>4.5156 MB</td><td>1.2008 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>302</td><td>4.5156 MB</td><td>1.5027 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>303</td><td>4.5156 MB</td><td>1.4976 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>304</td><td>4.5156 MB</td><td>1.4085 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>305</td><td>4.5156 MB</td><td>0.9229 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>306</td><td>4.5156 MB</td><td>0.1614 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>307</td><td>4.5156 MB</td><td>0.1589 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>308</td><td>4.5156 MB</td><td>0.1887 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>309</td><td>4.5156 MB</td><td>0.1517 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>310</td><td>4.5156 MB</td><td>0.1577 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>311</td><td>4.5156 MB</td><td>0.1514 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>312</td><td>4.5156 MB</td><td>0.1504 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>313</td><td>4.5156 MB</td><td>0.1603 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>314</td><td>4.5156 MB</td><td>0.1542 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>315</td><td>4.5156 MB</td><td>0.2351 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>316</td><td>4.5156 MB</td><td>0.6445 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>317</td><td>4.5156 MB</td><td>0.6447 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>318</td><td>4.5156 MB</td><td>0.6297 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>319</td><td>4.5156 MB</td><td>0.6690 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>320</td><td>4.5156 MB</td><td>0.7547 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>321</td><td>4.5156 MB</td><td>0.7274 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>322</td><td>4.5156 MB</td><td>0.6497 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>323</td><td>4.5156 MB</td><td>0.6359 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>324</td><td>4.5156 MB</td><td>0.6701 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>325</td><td>4.5234 MB</td><td>0.6428 s</td><td>4.3789 MB</td><td>4.3867 MB</td></tr>
+<tr><td>326</td><td>4.5156 MB</td><td>0.6544 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>327</td><td>4.5156 MB</td><td>0.7604 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>328</td><td>4.5156 MB</td><td>1.3172 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>329</td><td>4.5156 MB</td><td>1.5662 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>330</td><td>4.5156 MB</td><td>1.4493 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>331</td><td>4.5156 MB</td><td>1.4327 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>332</td><td>4.5156 MB</td><td>0.6994 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>333</td><td>4.5156 MB</td><td>0.1610 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>334</td><td>4.5156 MB</td><td>0.1777 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>335</td><td>4.5156 MB</td><td>0.1531 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>336</td><td>4.5156 MB</td><td>0.1514 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>337</td><td>4.5156 MB</td><td>0.1613 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>338</td><td>4.5156 MB</td><td>0.1556 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>339</td><td>4.5156 MB</td><td>0.6268 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>340</td><td>4.5156 MB</td><td>0.6520 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>341</td><td>4.5156 MB</td><td>0.6624 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>342</td><td>4.5156 MB</td><td>0.6560 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>343</td><td>4.5156 MB</td><td>0.7346 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>344</td><td>4.5156 MB</td><td>0.7285 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>345</td><td>4.5156 MB</td><td>0.6969 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>346</td><td>4.5156 MB</td><td>0.6300 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>347</td><td>4.5156 MB</td><td>0.6471 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>348</td><td>4.5156 MB</td><td>0.6707 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>349</td><td>4.5156 MB</td><td>0.6348 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>350</td><td>4.5156 MB</td><td>0.7282 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>351</td><td>4.5156 MB</td><td>1.1824 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>352</td><td>4.5156 MB</td><td>1.4953 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>353</td><td>4.5156 MB</td><td>1.5236 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>354</td><td>4.5156 MB</td><td>1.3766 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>355</td><td>4.5156 MB</td><td>0.9444 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>356</td><td>4.5156 MB</td><td>0.1514 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>357</td><td>4.5156 MB</td><td>0.1903 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>358</td><td>4.5156 MB</td><td>0.1504 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>359</td><td>4.5156 MB</td><td>0.1467 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>360</td><td>4.5156 MB</td><td>0.1544 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>361</td><td>4.5156 MB</td><td>0.1476 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>362</td><td>4.5156 MB</td><td>0.1401 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>363</td><td>4.5156 MB</td><td>0.1793 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>364</td><td>4.5156 MB</td><td>0.1689 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>365</td><td>4.5156 MB</td><td>0.4712 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>366</td><td>4.5273 MB</td><td>0.6352 s</td><td>4.3789 MB</td><td>4.3867 MB</td></tr>
+<tr><td>367</td><td>4.5195 MB</td><td>0.6484 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>368</td><td>4.5195 MB</td><td>0.6519 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>369</td><td>4.5195 MB</td><td>0.7309 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>370</td><td>4.5195 MB</td><td>0.7634 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>371</td><td>4.5195 MB</td><td>0.7111 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>372</td><td>4.5195 MB</td><td>0.6482 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>373</td><td>4.5195 MB</td><td>0.6363 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>374</td><td>4.5195 MB</td><td>0.6605 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>375</td><td>4.5352 MB</td><td>0.6387 s</td><td>4.3789 MB</td><td>4.3945 MB</td></tr>
+<tr><td>376</td><td>4.5195 MB</td><td>0.7009 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>377</td><td>4.5195 MB</td><td>0.8372 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>378</td><td>4.5195 MB</td><td>1.3959 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>379</td><td>4.5195 MB</td><td>1.5740 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>380</td><td>4.5195 MB</td><td>1.4000 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>381</td><td>4.5195 MB</td><td>1.5049 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>382</td><td>4.5195 MB</td><td>0.2752 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>383</td><td>4.5195 MB</td><td>0.1511 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>384</td><td>4.5195 MB</td><td>0.1594 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>385</td><td>4.5195 MB</td><td>0.1606 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>386</td><td>4.5195 MB</td><td>0.1554 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>387</td><td>4.5195 MB</td><td>0.1594 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>388</td><td>4.5195 MB</td><td>0.1543 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>389</td><td>4.5195 MB</td><td>0.1531 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>390</td><td>4.5195 MB</td><td>0.1603 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>391</td><td>4.5195 MB</td><td>0.6040 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>392</td><td>4.5195 MB</td><td>0.6742 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>393</td><td>4.5195 MB</td><td>0.6443 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>394</td><td>4.5195 MB</td><td>0.6849 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>395</td><td>4.5195 MB</td><td>0.7426 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>396</td><td>4.5195 MB</td><td>0.7472 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>397</td><td>4.5195 MB</td><td>0.7320 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>398</td><td>4.5195 MB</td><td>0.6203 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>399</td><td>4.5195 MB</td><td>0.6373 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>400</td><td>4.5195 MB</td><td>0.6529 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>401</td><td>4.5195 MB</td><td>0.6723 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>402</td><td>4.5195 MB</td><td>0.7361 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>403</td><td>4.5195 MB</td><td>1.3078 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>404</td><td>4.5195 MB</td><td>1.5364 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>405</td><td>4.5195 MB</td><td>1.4386 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>406</td><td>4.5195 MB</td><td>1.4482 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>407</td><td>4.5195 MB</td><td>0.7146 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>408</td><td>4.5195 MB</td><td>0.1937 s</td><td>4.3789 MB</td><td>4.3945 MB</td></tr>
+<tr><td>409</td><td>4.5195 MB</td><td>0.1569 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>410</td><td>4.5195 MB</td><td>0.1478 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>411</td><td>4.5195 MB</td><td>0.1543 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>412</td><td>4.5195 MB</td><td>0.1692 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>413</td><td>4.5195 MB</td><td>0.1620 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>414</td><td>4.5195 MB</td><td>0.6631 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>415</td><td>4.5195 MB</td><td>0.6546 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>416</td><td>4.5195 MB</td><td>0.6558 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>417</td><td>4.5195 MB</td><td>0.6735 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>418</td><td>4.5195 MB</td><td>0.7681 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>419</td><td>4.5195 MB</td><td>0.7562 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>420</td><td>4.5195 MB</td><td>0.6614 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>421</td><td>4.5195 MB</td><td>0.6545 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>422</td><td>4.5195 MB</td><td>0.6339 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>423</td><td>4.5195 MB</td><td>0.6289 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>424</td><td>4.5195 MB</td><td>0.7005 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>425</td><td>4.5195 MB</td><td>0.7086 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>426</td><td>4.5195 MB</td><td>1.0710 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>427</td><td>4.5195 MB</td><td>1.4319 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>428</td><td>4.5195 MB</td><td>1.5483 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>429</td><td>4.5195 MB</td><td>1.4037 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>430</td><td>4.5195 MB</td><td>1.1889 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>431</td><td>4.5195 MB</td><td>0.3345 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>432</td><td>4.5195 MB</td><td>0.3910 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>433</td><td>4.5195 MB</td><td>0.1472 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>434</td><td>4.5195 MB</td><td>0.1487 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>435</td><td>4.5195 MB</td><td>0.1577 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>436</td><td>4.5195 MB</td><td>0.1577 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>437</td><td>4.5195 MB</td><td>0.1876 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>438</td><td>4.5273 MB</td><td>0.1755 s</td><td>4.3789 MB</td><td>4.3867 MB</td></tr>
+<tr><td>439</td><td>4.5195 MB</td><td>0.4822 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>440</td><td>4.5195 MB</td><td>0.6524 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>441</td><td>4.5195 MB</td><td>0.6748 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>442</td><td>4.5195 MB</td><td>0.6506 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>443</td><td>4.5195 MB</td><td>0.7050 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>444</td><td>4.5195 MB</td><td>0.7595 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>445</td><td>4.5195 MB</td><td>0.7279 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>446</td><td>4.5195 MB</td><td>0.6123 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>447</td><td>4.5195 MB</td><td>0.6337 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>448</td><td>4.5195 MB</td><td>0.6677 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>449</td><td>4.5195 MB</td><td>0.6383 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>450</td><td>4.5195 MB</td><td>0.6665 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>451</td><td>4.5195 MB</td><td>0.8904 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>452</td><td>4.5195 MB</td><td>1.3983 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>453</td><td>4.5195 MB</td><td>1.5934 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>454</td><td>4.5195 MB</td><td>1.4285 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>455</td><td>4.5195 MB</td><td>1.5283 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>456</td><td>4.5195 MB</td><td>0.3979 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>457</td><td>4.5195 MB</td><td>0.4157 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>458</td><td>4.5195 MB</td><td>0.1824 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>459</td><td>4.5195 MB</td><td>0.1593 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>460</td><td>4.5195 MB</td><td>0.1549 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>461</td><td>4.5195 MB</td><td>0.1548 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>462</td><td>4.5195 MB</td><td>0.1635 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>463</td><td>4.5195 MB</td><td>0.1693 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>464</td><td>4.5195 MB</td><td>0.4259 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>465</td><td>4.5195 MB</td><td>0.6356 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>466</td><td>4.5195 MB</td><td>0.6590 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>467</td><td>4.5195 MB</td><td>0.6402 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>468</td><td>4.5195 MB</td><td>0.7004 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>469</td><td>4.5195 MB</td><td>0.7487 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>470</td><td>4.5195 MB</td><td>0.7118 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>471</td><td>4.5195 MB</td><td>0.6544 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>472</td><td>4.5195 MB</td><td>0.6485 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>473</td><td>4.5195 MB</td><td>0.6430 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>474</td><td>4.5195 MB</td><td>0.6409 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>475</td><td>4.5195 MB</td><td>0.6641 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>476</td><td>4.5195 MB</td><td>0.7465 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>477</td><td>4.5312 MB</td><td>1.4036 s</td><td>4.3789 MB</td><td>4.3906 MB</td></tr>
+<tr><td>478</td><td>4.5195 MB</td><td>1.5863 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>479</td><td>4.5195 MB</td><td>1.3998 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>480</td><td>4.5195 MB</td><td>1.4617 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>481</td><td>4.5195 MB</td><td>0.6376 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>482</td><td>4.5195 MB</td><td>0.5040 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>483</td><td>4.5195 MB</td><td>0.1754 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>484</td><td>4.5195 MB</td><td>0.1486 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>485</td><td>4.5195 MB</td><td>0.1607 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>486</td><td>4.5195 MB</td><td>0.1524 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>487</td><td>4.5195 MB</td><td>0.1513 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>488</td><td>4.5195 MB</td><td>0.1578 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>489</td><td>4.5195 MB</td><td>0.4507 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>490</td><td>4.5195 MB</td><td>0.6891 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>491</td><td>4.5195 MB</td><td>0.6400 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>492</td><td>4.5195 MB</td><td>0.6365 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>493</td><td>4.5195 MB</td><td>0.6957 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>494</td><td>4.5195 MB</td><td>0.7548 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>495</td><td>4.5195 MB</td><td>0.7018 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>496</td><td>4.5195 MB</td><td>0.6097 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>497</td><td>4.5195 MB</td><td>0.6389 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>498</td><td>4.5195 MB</td><td>0.6279 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>499</td><td>4.5195 MB</td><td>0.6375 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>500</td><td>4.5195 MB</td><td>0.6819 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>501</td><td>4.5195 MB</td><td>0.8203 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>502</td><td>4.5195 MB</td><td>1.4088 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>503</td><td>4.5195 MB</td><td>1.6039 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>504</td><td>4.5195 MB</td><td>1.3796 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>505</td><td>4.5195 MB</td><td>1.4936 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>506</td><td>4.5195 MB</td><td>0.3770 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>507</td><td>4.5195 MB</td><td>0.4534 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>508</td><td>4.5195 MB</td><td>0.2974 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>509</td><td>4.5195 MB</td><td>0.1730 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>510</td><td>4.5273 MB</td><td>0.1479 s</td><td>4.3789 MB</td><td>4.3867 MB</td></tr>
+<tr><td>511</td><td>4.5195 MB</td><td>0.1553 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>512</td><td>4.5195 MB</td><td>0.2065 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>513</td><td>4.5195 MB</td><td>0.1492 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>514</td><td>4.5195 MB</td><td>0.2302 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>515</td><td>4.5195 MB</td><td>0.6232 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>516</td><td>4.5195 MB</td><td>0.6326 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>517</td><td>4.5195 MB</td><td>0.6336 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>518</td><td>4.5195 MB</td><td>0.6734 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>519</td><td>4.5195 MB</td><td>0.7484 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>520</td><td>4.5195 MB</td><td>0.7380 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>521</td><td>4.5195 MB</td><td>0.6472 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>522</td><td>4.5195 MB</td><td>0.6336 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>523</td><td>4.5195 MB</td><td>0.6338 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>524</td><td>4.5195 MB</td><td>0.6475 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>525</td><td>4.5195 MB</td><td>0.6619 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>526</td><td>4.5195 MB</td><td>0.7438 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>527</td><td>4.5195 MB</td><td>1.1812 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>528</td><td>4.5195 MB</td><td>1.4805 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>529</td><td>4.5195 MB</td><td>1.4851 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>530</td><td>4.5195 MB</td><td>1.4064 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>531</td><td>4.5195 MB</td><td>0.9922 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>532</td><td>4.5195 MB</td><td>0.3768 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>533</td><td>4.5195 MB</td><td>0.3876 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>534</td><td>4.5195 MB</td><td>0.1560 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>535</td><td>4.5195 MB</td><td>0.1541 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>536</td><td>4.5195 MB</td><td>0.1641 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>537</td><td>4.5195 MB</td><td>0.1562 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>538</td><td>4.5195 MB</td><td>0.1550 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>539</td><td>4.5195 MB</td><td>0.1833 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>540</td><td>4.5195 MB</td><td>0.5269 s</td><td>4.3789 MB</td><td>4.3633 MB</td></tr>
+<tr><td>541</td><td>4.5195 MB</td><td>0.6745 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>542</td><td>4.5195 MB</td><td>0.6524 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>543</td><td>4.5195 MB</td><td>0.6292 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>544</td><td>4.5195 MB</td><td>0.7456 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>545</td><td>4.5195 MB</td><td>0.7366 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>546</td><td>4.5195 MB</td><td>0.7171 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>547</td><td>4.5195 MB</td><td>0.6454 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>548</td><td>4.5195 MB</td><td>0.6390 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>549</td><td>4.5195 MB</td><td>0.7142 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>550</td><td>4.6328 MB</td><td>0.6229 s</td><td>4.3789 MB</td><td>4.4922 MB</td></tr>
+<tr><td>551</td><td>4.5234 MB</td><td>0.6801 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>552</td><td>4.5195 MB</td><td>0.9114 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>553</td><td>4.5195 MB</td><td>1.3960 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>554</td><td>4.5195 MB</td><td>1.5724 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>555</td><td>4.5195 MB</td><td>1.3950 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>556</td><td>4.5195 MB</td><td>1.4812 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>557</td><td>4.5234 MB</td><td>0.3825 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>558</td><td>4.5195 MB</td><td>0.3761 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>559</td><td>4.5195 MB</td><td>0.1635 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>560</td><td>4.5195 MB</td><td>0.1630 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>561</td><td>4.5195 MB</td><td>0.1573 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>562</td><td>4.5195 MB</td><td>0.1548 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>563</td><td>4.5195 MB</td><td>0.1622 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>564</td><td>4.5195 MB</td><td>0.1489 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>565</td><td>4.5195 MB</td><td>0.5244 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>566</td><td>4.5234 MB</td><td>0.6829 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>567</td><td>4.5195 MB</td><td>0.6372 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>568</td><td>4.5195 MB</td><td>0.6344 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>569</td><td>4.5195 MB</td><td>0.7238 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>570</td><td>4.5195 MB</td><td>0.7274 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>571</td><td>4.5195 MB</td><td>0.7162 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>572</td><td>4.5234 MB</td><td>0.6484 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>573</td><td>4.5195 MB</td><td>0.6469 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>574</td><td>4.5195 MB</td><td>0.6375 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>575</td><td>4.5195 MB</td><td>0.6196 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>576</td><td>4.5195 MB</td><td>0.7012 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>577</td><td>4.5195 MB</td><td>1.0462 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>578</td><td>4.5352 MB</td><td>1.4582 s</td><td>4.3789 MB</td><td>4.3945 MB</td></tr>
+<tr><td>579</td><td>4.5156 MB</td><td>1.5106 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>580</td><td>4.5195 MB</td><td>1.3926 s</td><td>4.3789 MB</td><td>4.3516 MB</td></tr>
+<tr><td>581</td><td>4.5312 MB</td><td>1.2113 s</td><td>4.3789 MB</td><td>4.4102 MB</td></tr>
+<tr><td>582</td><td>4.5352 MB</td><td>0.4304 s</td><td>4.3789 MB</td><td>4.3906 MB</td></tr>
+<tr><td>583</td><td>4.5195 MB</td><td>0.3292 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>584</td><td>4.5234 MB</td><td>0.1471 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>585</td><td>4.5195 MB</td><td>0.1488 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>586</td><td>4.5195 MB</td><td>0.2017 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>587</td><td>4.5195 MB</td><td>0.1726 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>588</td><td>4.5195 MB</td><td>0.1592 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>589</td><td>4.5234 MB</td><td>0.1513 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>590</td><td>4.5195 MB</td><td>0.5508 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>591</td><td>4.5195 MB</td><td>0.6302 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>592</td><td>4.5195 MB</td><td>0.6446 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>593</td><td>4.5195 MB</td><td>0.6444 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>594</td><td>4.5195 MB</td><td>0.7280 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>595</td><td>4.5234 MB</td><td>0.7585 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>596</td><td>4.5195 MB</td><td>0.6861 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>597</td><td>4.5195 MB</td><td>0.6260 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>598</td><td>4.5195 MB</td><td>0.6333 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>599</td><td>4.5195 MB</td><td>0.6308 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>600</td><td>4.5195 MB</td><td>0.6704 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>601</td><td>4.5195 MB</td><td>0.6835 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>602</td><td>4.5195 MB</td><td>0.8991 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>603</td><td>4.5195 MB</td><td>1.4116 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>604</td><td>4.5234 MB</td><td>1.5663 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>605</td><td>4.5195 MB</td><td>1.3975 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>606</td><td>4.5195 MB</td><td>1.4322 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>607</td><td>4.5195 MB</td><td>0.2861 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>608</td><td>4.5195 MB</td><td>0.4208 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>609</td><td>4.5234 MB</td><td>0.2215 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>610</td><td>4.5195 MB</td><td>0.1605 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>611</td><td>4.5195 MB</td><td>0.1500 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>612</td><td>4.5195 MB</td><td>0.1566 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>613</td><td>4.5195 MB</td><td>0.1867 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>614</td><td>4.5195 MB</td><td>0.1845 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>615</td><td>4.5195 MB</td><td>0.3597 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>616</td><td>4.5195 MB</td><td>0.6365 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>617</td><td>4.5195 MB</td><td>0.6399 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>618</td><td>4.5195 MB</td><td>0.6303 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>619</td><td>4.5234 MB</td><td>0.7152 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>620</td><td>4.5195 MB</td><td>0.7398 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>621</td><td>4.5195 MB</td><td>0.6977 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>622</td><td>4.5195 MB</td><td>0.6586 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>623</td><td>4.5195 MB</td><td>0.6201 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>624</td><td>4.5234 MB</td><td>0.6480 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>625</td><td>4.5195 MB</td><td>0.6484 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>626</td><td>4.5195 MB</td><td>0.6417 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>627</td><td>4.5195 MB</td><td>0.8289 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>628</td><td>4.5195 MB</td><td>1.4083 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>629</td><td>4.5195 MB</td><td>1.5632 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>630</td><td>4.5195 MB</td><td>1.4079 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>631</td><td>4.5195 MB</td><td>1.4732 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>632</td><td>4.5195 MB</td><td>0.5941 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>633</td><td>4.5195 MB</td><td>0.4022 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>634</td><td>4.5234 MB</td><td>0.2197 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>635</td><td>4.5195 MB</td><td>0.1499 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>636</td><td>4.5195 MB</td><td>0.1871 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>637</td><td>4.5195 MB</td><td>0.1618 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>638</td><td>4.5195 MB</td><td>0.1486 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>639</td><td>4.5234 MB</td><td>0.1538 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>640</td><td>4.5195 MB</td><td>0.4605 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>641</td><td>4.5195 MB</td><td>0.6281 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>642</td><td>4.5195 MB</td><td>0.6928 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>643</td><td>4.5195 MB</td><td>0.6457 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>644</td><td>4.5195 MB</td><td>0.7417 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>645</td><td>4.5195 MB</td><td>0.7214 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>646</td><td>4.5195 MB</td><td>0.6981 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>647</td><td>4.5195 MB</td><td>0.6550 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>648</td><td>4.5195 MB</td><td>0.6207 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>649</td><td>4.5234 MB</td><td>0.6530 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>650</td><td>4.5195 MB</td><td>0.6360 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>651</td><td>4.5195 MB</td><td>0.6739 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>652</td><td>4.5195 MB</td><td>0.8204 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>653</td><td>4.5195 MB</td><td>1.3938 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>654</td><td>4.5234 MB</td><td>1.5841 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>655</td><td>4.5195 MB</td><td>1.3914 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>656</td><td>4.5195 MB</td><td>1.4985 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>657</td><td>4.5195 MB</td><td>0.4315 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>658</td><td>4.5195 MB</td><td>0.3991 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>659</td><td>4.5195 MB</td><td>0.2612 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>660</td><td>4.5195 MB</td><td>0.1500 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>661</td><td>4.5195 MB</td><td>0.1554 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>662</td><td>4.5195 MB</td><td>0.1477 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>663</td><td>4.5195 MB</td><td>0.1512 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>664</td><td>4.5234 MB</td><td>0.1635 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>665</td><td>4.5195 MB</td><td>0.3911 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>666</td><td>4.5195 MB</td><td>0.6370 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>667</td><td>4.5234 MB</td><td>0.6768 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>668</td><td>4.5195 MB</td><td>0.6818 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>669</td><td>4.5195 MB</td><td>0.7039 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>670</td><td>4.5195 MB</td><td>0.7454 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>671</td><td>4.5195 MB</td><td>0.7379 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>672</td><td>4.5195 MB</td><td>0.6163 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>673</td><td>4.5195 MB</td><td>0.6383 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>674</td><td>4.5195 MB</td><td>0.6653 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>675</td><td>4.5195 MB</td><td>0.6991 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>676</td><td>4.5195 MB</td><td>0.6640 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>677</td><td>4.5195 MB</td><td>0.7457 s</td><td>4.3789 MB</td><td>4.3750 MB</td></tr>
+<tr><td>678</td><td>4.5195 MB</td><td>1.3579 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>679</td><td>4.5234 MB</td><td>1.5295 s</td><td>4.3789 MB</td><td>4.3828 MB</td></tr>
+<tr><td>680</td><td>4.5352 MB</td><td>1.4259 s</td><td>4.3789 MB</td><td>4.3594 MB</td></tr>
+<tr><td>681</td><td>4.5352 MB</td><td>1.4534 s</td><td>4.3789 MB</td><td>4.4141 MB</td></tr>
+<tr><td>682</td><td>4.5156 MB</td><td>0.7089 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>683</td><td>4.5156 MB</td><td>0.4394 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>684</td><td>4.5156 MB</td><td>0.1466 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>685</td><td>4.5156 MB</td><td>0.1530 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>686</td><td>4.5156 MB</td><td>0.1487 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>687</td><td>4.5156 MB</td><td>0.1523 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>688</td><td>4.5156 MB</td><td>0.1591 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>689</td><td>4.5156 MB</td><td>0.1703 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>690</td><td>4.5156 MB</td><td>0.5197 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>691</td><td>4.5156 MB</td><td>0.6436 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>692</td><td>4.5156 MB</td><td>0.6470 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>693</td><td>4.5156 MB</td><td>0.6325 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>694</td><td>4.5156 MB</td><td>0.7136 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>695</td><td>4.5156 MB</td><td>0.7507 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>696</td><td>4.5156 MB</td><td>0.7153 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>697</td><td>4.5156 MB</td><td>0.6156 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>698</td><td>4.5156 MB</td><td>0.6366 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>699</td><td>4.5156 MB</td><td>0.6441 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>700</td><td>4.5156 MB</td><td>0.6684 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>701</td><td>4.5156 MB</td><td>0.6881 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>702</td><td>4.5156 MB</td><td>0.9730 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>703</td><td>4.5156 MB</td><td>1.3870 s</td><td>4.3789 MB</td><td>4.3438 MB</td></tr>
+<tr><td>704</td><td>4.5156 MB</td><td>1.5697 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>705</td><td>4.5156 MB</td><td>1.4126 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>706</td><td>4.5156 MB</td><td>1.3970 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>707</td><td>4.5156 MB</td><td>0.4463 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>708</td><td>4.5156 MB</td><td>0.2945 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>709</td><td>4.5156 MB</td><td>0.1850 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>710</td><td>4.5156 MB</td><td>0.1519 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>711</td><td>4.5156 MB</td><td>0.1494 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>712</td><td>4.5156 MB</td><td>0.1633 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>713</td><td>4.5156 MB</td><td>0.1505 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>714</td><td>4.5156 MB</td><td>0.1492 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>715</td><td>4.5156 MB</td><td>0.1568 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>716</td><td>4.5156 MB</td><td>0.1487 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>717</td><td>4.5156 MB</td><td>0.4356 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>718</td><td>4.5156 MB</td><td>0.6547 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>719</td><td>4.5156 MB</td><td>0.6473 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>720</td><td>4.5156 MB</td><td>0.6642 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>721</td><td>4.5156 MB</td><td>0.7060 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>722</td><td>4.5156 MB</td><td>0.7325 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>723</td><td>4.5156 MB</td><td>0.7036 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>724</td><td>4.5156 MB</td><td>0.6205 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>725</td><td>4.5156 MB</td><td>0.6411 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>726</td><td>4.5156 MB</td><td>0.6199 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>727</td><td>4.5352 MB</td><td>0.6454 s</td><td>4.3789 MB</td><td>4.3945 MB</td></tr>
+<tr><td>728</td><td>4.5195 MB</td><td>0.6546 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>729</td><td>4.5195 MB</td><td>0.8842 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>730</td><td>4.5195 MB</td><td>1.4026 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>731</td><td>4.5039 MB</td><td>1.5531 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>732</td><td>4.5195 MB</td><td>1.4118 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>733</td><td>4.5195 MB</td><td>1.4712 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>734</td><td>4.5195 MB</td><td>0.4612 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>735</td><td>4.5195 MB</td><td>0.2973 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>736</td><td>4.5195 MB</td><td>0.1540 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>737</td><td>4.3945 MB</td><td>0.1510 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>738</td><td>4.3945 MB</td><td>0.1538 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>739</td><td>4.3945 MB</td><td>0.1632 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>740</td><td>4.3945 MB</td><td>0.1713 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>741</td><td>4.5195 MB</td><td>0.2102 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>742</td><td>4.5195 MB</td><td>0.6487 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>743</td><td>4.5195 MB</td><td>0.6420 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>744</td><td>4.5195 MB</td><td>0.6776 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>745</td><td>4.5195 MB</td><td>0.6639 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>746</td><td>4.3945 MB</td><td>0.7369 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>747</td><td>4.3945 MB</td><td>0.7646 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>748</td><td>4.3945 MB</td><td>0.6856 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>749</td><td>4.3945 MB</td><td>0.6312 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>750</td><td>4.5195 MB</td><td>0.6417 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>751</td><td>4.5195 MB</td><td>0.6278 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>752</td><td>4.5195 MB</td><td>0.6716 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>753</td><td>4.5195 MB</td><td>0.7447 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>754</td><td>4.5195 MB</td><td>1.2922 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>755</td><td>4.3945 MB</td><td>1.5246 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>756</td><td>4.3945 MB</td><td>1.4431 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>757</td><td>4.3945 MB</td><td>1.4363 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>758</td><td>4.3945 MB</td><td>0.6875 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>759</td><td>4.5195 MB</td><td>0.4333 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>760</td><td>4.5195 MB</td><td>0.4245 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>761</td><td>4.5195 MB</td><td>0.1608 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>762</td><td>4.5195 MB</td><td>0.1813 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>763</td><td>4.5195 MB</td><td>0.1701 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>764</td><td>4.3945 MB</td><td>0.1560 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>765</td><td>4.3945 MB</td><td>0.1594 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>766</td><td>4.3945 MB</td><td>0.1656 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>767</td><td>4.3945 MB</td><td>0.4819 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>768</td><td>4.5195 MB</td><td>0.6855 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>769</td><td>4.5195 MB</td><td>0.6615 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>770</td><td>4.5195 MB</td><td>0.6576 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>771</td><td>4.5195 MB</td><td>0.7434 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>772</td><td>4.5195 MB</td><td>0.7359 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>773</td><td>4.3945 MB</td><td>0.7109 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>774</td><td>4.3945 MB</td><td>0.6035 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>775</td><td>4.3945 MB</td><td>0.6281 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>776</td><td>4.3945 MB</td><td>0.6606 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>777</td><td>4.5195 MB</td><td>0.6584 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>778</td><td>4.5195 MB</td><td>0.6737 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>779</td><td>4.5195 MB</td><td>0.8552 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>780</td><td>4.5195 MB</td><td>1.4097 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>781</td><td>4.5469 MB</td><td>1.5759 s</td><td>4.3789 MB</td><td>4.5312 MB</td></tr>
+<tr><td>782</td><td>4.3945 MB</td><td>1.3876 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>783</td><td>4.3945 MB</td><td>1.5154 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>784</td><td>4.3945 MB</td><td>0.4527 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>785</td><td>4.3945 MB</td><td>0.4333 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>786</td><td>4.5195 MB</td><td>0.1634 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>787</td><td>4.5195 MB</td><td>0.1735 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>788</td><td>4.5195 MB</td><td>0.1635 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>789</td><td>4.5195 MB</td><td>0.1591 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>790</td><td>4.5195 MB</td><td>0.1914 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>791</td><td>4.3945 MB</td><td>0.1730 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>792</td><td>4.3945 MB</td><td>0.6338 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>793</td><td>4.3945 MB</td><td>0.6675 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>794</td><td>4.3945 MB</td><td>0.6281 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>795</td><td>4.5195 MB</td><td>0.6656 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>796</td><td>4.5195 MB</td><td>0.7675 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>797</td><td>4.5195 MB</td><td>0.7560 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>798</td><td>4.5195 MB</td><td>0.6891 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>799</td><td>4.5195 MB</td><td>0.6511 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>800</td><td>4.3945 MB</td><td>0.6574 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>801</td><td>4.3945 MB</td><td>0.6600 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>802</td><td>4.3945 MB</td><td>0.6779 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>803</td><td>4.3945 MB</td><td>0.7210 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>804</td><td>4.5195 MB</td><td>1.0858 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>805</td><td>4.5195 MB</td><td>1.4394 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>806</td><td>4.5195 MB</td><td>1.5322 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>807</td><td>4.5195 MB</td><td>1.4290 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>808</td><td>4.5195 MB</td><td>1.2490 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>809</td><td>4.3945 MB</td><td>0.3243 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>810</td><td>4.3945 MB</td><td>0.2602 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>811</td><td>4.3945 MB</td><td>0.3066 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>812</td><td>4.3945 MB</td><td>0.1686 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>813</td><td>4.5195 MB</td><td>0.1610 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>814</td><td>4.5195 MB</td><td>0.2015 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>815</td><td>4.5195 MB</td><td>0.2404 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>816</td><td>4.5195 MB</td><td>0.1811 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>817</td><td>4.5195 MB</td><td>0.3019 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>818</td><td>4.3945 MB</td><td>0.6639 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>819</td><td>4.3945 MB</td><td>0.6414 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>820</td><td>4.3945 MB</td><td>0.6673 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>821</td><td>4.3945 MB</td><td>0.6534 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>822</td><td>4.5195 MB</td><td>0.7445 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>823</td><td>4.5195 MB</td><td>0.7426 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>824</td><td>4.5195 MB</td><td>0.6279 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>825</td><td>4.5195 MB</td><td>0.6711 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>826</td><td>4.5195 MB</td><td>0.6389 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>827</td><td>4.3945 MB</td><td>0.6458 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>828</td><td>4.3945 MB</td><td>0.6675 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>829</td><td>4.3945 MB</td><td>0.9160 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>830</td><td>4.3945 MB</td><td>1.4038 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>831</td><td>4.5195 MB</td><td>1.5814 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>832</td><td>4.5195 MB</td><td>1.4018 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>833</td><td>4.5195 MB</td><td>1.4509 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>834</td><td>4.5195 MB</td><td>0.4020 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>835</td><td>4.5195 MB</td><td>0.2890 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>836</td><td>4.3945 MB</td><td>0.3609 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>837</td><td>4.3945 MB</td><td>0.2152 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>838</td><td>4.3945 MB</td><td>0.1807 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>839</td><td>4.3945 MB</td><td>0.1853 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>840</td><td>4.5195 MB</td><td>0.1748 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>841</td><td>4.5195 MB</td><td>0.1988 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>842</td><td>4.5195 MB</td><td>0.2322 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>843</td><td>4.5195 MB</td><td>0.6342 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>844</td><td>4.5195 MB</td><td>0.6509 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>845</td><td>4.3945 MB</td><td>0.6720 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>846</td><td>4.3945 MB</td><td>0.6663 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>847</td><td>4.3945 MB</td><td>0.7794 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>848</td><td>4.3945 MB</td><td>0.7596 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>849</td><td>4.5195 MB</td><td>0.6441 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>850</td><td>4.5195 MB</td><td>0.6218 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>851</td><td>4.5195 MB</td><td>0.7147 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>852</td><td>4.5195 MB</td><td>0.6424 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>853</td><td>4.5195 MB</td><td>0.6309 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>854</td><td>4.3945 MB</td><td>0.7491 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>855</td><td>4.3945 MB</td><td>1.2552 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>856</td><td>4.3945 MB</td><td>1.5101 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>857</td><td>4.3945 MB</td><td>1.4631 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>858</td><td>4.5195 MB</td><td>1.4234 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>859</td><td>4.5195 MB</td><td>0.9469 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>860</td><td>4.5195 MB</td><td>0.4722 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>861</td><td>4.5195 MB</td><td>0.1767 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>862</td><td>4.5195 MB</td><td>0.1589 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>863</td><td>4.3945 MB</td><td>0.1605 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>864</td><td>4.3945 MB</td><td>0.2485 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>865</td><td>4.3945 MB</td><td>0.1539 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>866</td><td>4.3945 MB</td><td>0.1463 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>867</td><td>4.5195 MB</td><td>0.4801 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>868</td><td>4.5195 MB</td><td>0.6289 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>869</td><td>4.5195 MB</td><td>0.6400 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>870</td><td>4.5195 MB</td><td>0.6533 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>871</td><td>4.5195 MB</td><td>0.7357 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>872</td><td>4.4102 MB</td><td>0.7473 s</td><td>4.3789 MB</td><td>4.3945 MB</td></tr>
+<tr><td>873</td><td>4.3945 MB</td><td>0.6886 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>874</td><td>4.3945 MB</td><td>0.6323 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>875</td><td>4.3945 MB</td><td>0.6533 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>876</td><td>4.5195 MB</td><td>0.6705 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>877</td><td>4.5195 MB</td><td>0.6460 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>878</td><td>4.5195 MB</td><td>0.6849 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>879</td><td>4.5195 MB</td><td>1.0262 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>880</td><td>4.5195 MB</td><td>1.4429 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>881</td><td>4.3945 MB</td><td>1.5728 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>882</td><td>4.3945 MB</td><td>1.3897 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>883</td><td>4.3945 MB</td><td>1.2627 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>884</td><td>4.3945 MB</td><td>0.4000 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>885</td><td>4.5195 MB</td><td>0.2974 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>886</td><td>4.5195 MB</td><td>0.2517 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>887</td><td>4.5195 MB</td><td>0.1989 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>888</td><td>4.5195 MB</td><td>0.1997 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>889</td><td>4.5195 MB</td><td>0.2060 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>890</td><td>4.3945 MB</td><td>0.1911 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>891</td><td>4.3945 MB</td><td>0.1588 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>892</td><td>4.3945 MB</td><td>0.3816 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>893</td><td>4.3945 MB</td><td>0.6404 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>894</td><td>4.5195 MB</td><td>0.6483 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>895</td><td>4.5195 MB</td><td>0.6829 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>896</td><td>4.5195 MB</td><td>0.7056 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>897</td><td>4.5195 MB</td><td>0.7828 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>898</td><td>4.5195 MB</td><td>0.7249 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>899</td><td>4.3945 MB</td><td>0.6382 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>900</td><td>4.3945 MB</td><td>0.6484 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>901</td><td>4.3945 MB</td><td>0.6386 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>902</td><td>4.3945 MB</td><td>0.6822 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>903</td><td>4.5195 MB</td><td>0.6756 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>904</td><td>4.5195 MB</td><td>0.7584 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>905</td><td>4.5195 MB</td><td>1.3371 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>906</td><td>4.5195 MB</td><td>1.5547 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>907</td><td>4.5195 MB</td><td>1.4288 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>908</td><td>4.3945 MB</td><td>1.4586 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>909</td><td>4.3945 MB</td><td>0.8103 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>910</td><td>4.3945 MB</td><td>0.4499 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>911</td><td>4.3945 MB</td><td>0.1715 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>912</td><td>4.5195 MB</td><td>0.2312 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>913</td><td>4.5195 MB</td><td>0.1620 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>914</td><td>4.5195 MB</td><td>0.1713 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>915</td><td>4.5195 MB</td><td>0.1637 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>916</td><td>4.5195 MB</td><td>0.1639 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>917</td><td>4.3945 MB</td><td>0.5275 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>918</td><td>4.3945 MB</td><td>0.6444 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>919</td><td>4.3945 MB</td><td>0.6573 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>920</td><td>4.3945 MB</td><td>0.6496 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>921</td><td>4.5195 MB</td><td>0.7060 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>922</td><td>4.5195 MB</td><td>0.7567 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>923</td><td>4.5195 MB</td><td>0.6815 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>924</td><td>4.5195 MB</td><td>0.6336 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>925</td><td>4.5195 MB</td><td>0.6644 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>926</td><td>4.3945 MB</td><td>0.6437 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>927</td><td>4.3945 MB</td><td>0.6482 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>928</td><td>4.3945 MB</td><td>0.6859 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>929</td><td>4.3945 MB</td><td>0.9868 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>930</td><td>4.5195 MB</td><td>1.4039 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>931</td><td>4.5195 MB</td><td>1.5405 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>932</td><td>4.5195 MB</td><td>1.3862 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>933</td><td>4.5195 MB</td><td>1.3294 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>934</td><td>4.5195 MB</td><td>0.4511 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>935</td><td>4.3945 MB</td><td>0.2239 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>936</td><td>4.3945 MB</td><td>0.1747 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>937</td><td>4.3945 MB</td><td>0.2043 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>938</td><td>4.3945 MB</td><td>0.1767 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>939</td><td>4.5195 MB</td><td>0.2236 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>940</td><td>4.5195 MB</td><td>0.1583 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>941</td><td>4.5195 MB</td><td>0.4196 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>942</td><td>4.5195 MB</td><td>0.6484 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>943</td><td>4.5195 MB</td><td>0.6415 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>944</td><td>4.3945 MB</td><td>0.6499 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>945</td><td>4.3945 MB</td><td>0.6937 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>946</td><td>4.3945 MB</td><td>0.7570 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>947</td><td>4.3945 MB</td><td>0.7508 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>948</td><td>4.5195 MB</td><td>0.6360 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>949</td><td>4.5195 MB</td><td>0.6331 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>950</td><td>4.5195 MB</td><td>0.6637 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>951</td><td>4.5195 MB</td><td>0.6418 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>952</td><td>4.5195 MB</td><td>0.6642 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>953</td><td>4.3945 MB</td><td>0.8880 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>954</td><td>4.3945 MB</td><td>1.4044 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>955</td><td>4.3945 MB</td><td>1.6274 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>956</td><td>4.3945 MB</td><td>1.4000 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>957</td><td>4.5195 MB</td><td>1.4838 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>958</td><td>4.5195 MB</td><td>0.4340 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>959</td><td>4.5195 MB</td><td>0.3444 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>960</td><td>4.5195 MB</td><td>0.1711 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>961</td><td>4.5195 MB</td><td>0.1513 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>962</td><td>4.3945 MB</td><td>0.1672 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>963</td><td>4.3945 MB</td><td>0.1891 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>964</td><td>4.3945 MB</td><td>0.1637 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>965</td><td>4.3945 MB</td><td>0.1624 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>966</td><td>4.5195 MB</td><td>0.6475 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>967</td><td>4.5195 MB</td><td>0.6323 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>968</td><td>4.5195 MB</td><td>0.6675 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>969</td><td>4.5195 MB</td><td>0.6575 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>970</td><td>4.5195 MB</td><td>0.7492 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>971</td><td>4.3945 MB</td><td>0.7529 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>972</td><td>4.3945 MB</td><td>0.7007 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>973</td><td>4.3945 MB</td><td>0.6496 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>974</td><td>4.3945 MB</td><td>0.6548 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>975</td><td>4.5195 MB</td><td>0.6687 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>976</td><td>4.5195 MB</td><td>0.6591 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>977</td><td>4.5195 MB</td><td>0.7199 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>978</td><td>4.5195 MB</td><td>1.1464 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>979</td><td>4.5195 MB</td><td>1.4784 s</td><td>4.3789 MB</td><td>4.5039 MB</td></tr>
+<tr><td>980</td><td>4.3945 MB</td><td>1.4839 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>981</td><td>4.3945 MB</td><td>1.4087 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>982</td><td>4.3945 MB</td><td>1.1141 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>983</td><td>4.3945 MB</td><td>0.2312 s</td><td>4.3789 MB</td><td>4.2539 MB</td></tr>
+<tr><td>984</td><td>4.5195 MB</td><td>0.3451 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>985</td><td>4.5508 MB</td><td>0.1576 s</td><td>4.3789 MB</td><td>4.5352 MB</td></tr>
+<tr><td>986</td><td>4.3945 MB</td><td>0.1842 s</td><td>4.3789 MB</td><td>4.2578 MB</td></tr>
+<tr><td>987</td><td>4.5156 MB</td><td>0.1770 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>988</td><td>4.5156 MB</td><td>0.1585 s</td><td>4.3789 MB</td><td>4.5000 MB</td></tr>
+<tr><td>989</td><td>4.3945 MB</td><td>0.1790 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>990</td><td>4.3945 MB</td><td>0.1911 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>991</td><td>4.3945 MB</td><td>0.6526 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>992</td><td>4.3945 MB</td><td>0.6441 s</td><td>4.3789 MB</td><td>4.2578 MB</td></tr>
+<tr><td>993</td><td>4.5156 MB</td><td>0.6962 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>994</td><td>4.5156 MB</td><td>0.6652 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>995</td><td>4.5156 MB</td><td>0.7486 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>996</td><td>4.5156 MB</td><td>0.7684 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>997</td><td>4.5156 MB</td><td>0.6673 s</td><td>4.3789 MB</td><td>4.5000 MB</td></tr>
+<tr><td>998</td><td>4.3945 MB</td><td>0.6401 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>999</td><td>4.3945 MB</td><td>0.6360 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+<tr><td>1000</td><td>4.3945 MB</td><td>0.6803 s</td><td>4.3789 MB</td><td>4.3789 MB</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+</div>
+
+<script>
+const rawData = [{"i": 1, "ram": 6.0586, "time": 0.1721, "before": 4.4922, "after": 5.9766}, {"i": 2, "ram": 4.7617, "time": 0.1518, "before": 4.6172, "after": 4.6367}, {"i": 3, "ram": 4.5117, "time": 0.1906, "before": 4.3789, "after": 4.3789}, {"i": 4, "ram": 4.5195, "time": 0.1829, "before": 4.3828, "after": 4.3867}, {"i": 5, "ram": 4.5117, "time": 0.1725, "before": 4.3789, "after": 4.3789}, {"i": 6, "ram": 4.5117, "time": 0.1561, "before": 4.3789, "after": 4.3867}, {"i": 7, "ram": 4.5117, "time": 0.1609, "before": 4.3789, "after": 4.3789}, {"i": 8, "ram": 4.5117, "time": 0.1716, "before": 4.3789, "after": 4.3789}, {"i": 9, "ram": 4.5117, "time": 0.1537, "before": 4.3789, "after": 4.3789}, {"i": 10, "ram": 4.5117, "time": 0.16, "before": 4.3789, "after": 4.3789}, {"i": 11, "ram": 4.5117, "time": 0.1693, "before": 4.3789, "after": 4.3789}, {"i": 12, "ram": 4.5117, "time": 0.1507, "before": 4.3789, "after": 4.3789}, {"i": 13, "ram": 4.5117, "time": 0.2024, "before": 4.3789, "after": 4.3789}, {"i": 14, "ram": 4.5117, "time": 0.1653, "before": 4.3789, "after": 4.3789}, {"i": 15, "ram": 4.5117, "time": 0.1725, "before": 4.3789, "after": 4.3789}, {"i": 16, "ram": 4.5156, "time": 0.1527, "before": 4.3789, "after": 4.3828}, {"i": 17, "ram": 4.5156, "time": 0.1492, "before": 4.3789, "after": 4.3789}, {"i": 18, "ram": 4.5156, "time": 0.1558, "before": 4.3789, "after": 4.3789}, {"i": 19, "ram": 4.5195, "time": 0.1475, "before": 4.3789, "after": 4.3867}, {"i": 20, "ram": 4.5117, "time": 0.1823, "before": 4.3789, "after": 4.3789}, {"i": 21, "ram": 4.5117, "time": 0.1879, "before": 4.3789, "after": 4.3789}, {"i": 22, "ram": 4.5117, "time": 0.1581, "before": 4.3789, "after": 4.3789}, {"i": 23, "ram": 4.5156, "time": 0.1573, "before": 4.3789, "after": 4.3789}, {"i": 24, "ram": 4.5156, "time": 0.1712, "before": 4.3789, "after": 4.3789}, {"i": 25, "ram": 4.5117, "time": 0.1659, "before": 4.3789, "after": 4.3789}, {"i": 26, "ram": 4.5117, "time": 0.1526, "before": 4.3789, "after": 4.3789}, {"i": 27, "ram": 4.5117, "time": 0.1579, "before": 4.3789, "after": 4.3789}, {"i": 28, "ram": 4.5117, "time": 0.1538, "before": 4.3789, "after": 4.3789}, {"i": 29, "ram": 4.5156, "time": 0.1553, "before": 4.3789, "after": 4.3789}, {"i": 30, "ram": 4.5156, "time": 0.1804, "before": 4.3789, "after": 4.3789}, {"i": 31, "ram": 4.5156, "time": 0.1618, "before": 4.3789, "after": 4.3789}, {"i": 32, "ram": 4.5156, "time": 0.1541, "before": 4.3789, "after": 4.3789}, {"i": 33, "ram": 4.5117, "time": 0.1538, "before": 4.3789, "after": 4.3789}, {"i": 34, "ram": 4.5156, "time": 0.1621, "before": 4.3789, "after": 4.3789}, {"i": 35, "ram": 4.5117, "time": 0.1601, "before": 4.3789, "after": 4.3789}, {"i": 36, "ram": 4.5156, "time": 0.1498, "before": 4.3789, "after": 4.3789}, {"i": 37, "ram": 4.5117, "time": 0.1522, "before": 4.3789, "after": 4.3789}, {"i": 38, "ram": 4.5156, "time": 0.1981, "before": 4.3789, "after": 4.3789}, {"i": 39, "ram": 4.5156, "time": 0.1666, "before": 4.3789, "after": 4.3789}, {"i": 40, "ram": 4.5156, "time": 0.1565, "before": 4.3789, "after": 4.3789}, {"i": 41, "ram": 4.5156, "time": 0.1848, "before": 4.3789, "after": 4.3789}, {"i": 42, "ram": 4.5156, "time": 0.1514, "before": 4.3789, "after": 4.3789}, {"i": 43, "ram": 4.5156, "time": 0.1717, "before": 4.3789, "after": 4.3789}, {"i": 44, "ram": 4.5117, "time": 0.1659, "before": 4.3789, "after": 4.3789}, {"i": 45, "ram": 4.5117, "time": 0.1527, "before": 4.3789, "after": 4.3789}, {"i": 46, "ram": 4.5156, "time": 0.1622, "before": 4.3789, "after": 4.3789}, {"i": 47, "ram": 4.5156, "time": 0.1699, "before": 4.3789, "after": 4.3789}, {"i": 48, "ram": 4.5195, "time": 0.1728, "before": 4.3789, "after": 4.3828}, {"i": 49, "ram": 4.5156, "time": 0.1603, "before": 4.3789, "after": 4.375}, {"i": 50, "ram": 4.5234, "time": 0.1578, "before": 4.3789, "after": 4.3789}, {"i": 51, "ram": 4.5195, "time": 0.1437, "before": 4.3789, "after": 4.3867}, {"i": 52, "ram": 4.5156, "time": 0.1939, "before": 4.3789, "after": 4.5}, {"i": 53, "ram": 4.4609, "time": 0.1684, "before": 4.3789, "after": 4.3203}, {"i": 54, "ram": 4.5195, "time": 0.1562, "before": 4.3789, "after": 4.3789}, {"i": 55, "ram": 4.5195, "time": 0.1538, "before": 4.3789, "after": 4.3828}, {"i": 56, "ram": 4.5156, "time": 0.1594, "before": 4.3789, "after": 4.3789}, {"i": 57, "ram": 4.5156, "time": 0.1608, "before": 4.3789, "after": 4.3789}, {"i": 58, "ram": 4.5156, "time": 0.1665, "before": 4.3789, "after": 4.3789}, {"i": 59, "ram": 4.5156, "time": 0.1542, "before": 4.3789, "after": 4.3789}, {"i": 60, "ram": 4.5156, "time": 0.1484, "before": 4.3789, "after": 4.3789}, {"i": 61, "ram": 4.5156, "time": 0.1513, "before": 4.3789, "after": 4.3789}, {"i": 62, "ram": 4.5156, "time": 0.1532, "before": 4.3789, "after": 4.3789}, {"i": 63, "ram": 4.5156, "time": 0.1518, "before": 4.3789, "after": 4.3789}, {"i": 64, "ram": 4.5156, "time": 0.1551, "before": 4.3789, "after": 4.3789}, {"i": 65, "ram": 4.5156, "time": 0.1601, "before": 4.3789, "after": 4.3789}, {"i": 66, "ram": 4.5156, "time": 0.1617, "before": 4.3789, "after": 4.3789}, {"i": 67, "ram": 4.5156, "time": 0.1522, "before": 4.3789, "after": 4.3789}, {"i": 68, "ram": 4.5156, "time": 0.1518, "before": 4.3789, "after": 4.3789}, {"i": 69, "ram": 4.5156, "time": 0.1873, "before": 4.3789, "after": 4.3789}, {"i": 70, "ram": 4.5156, "time": 0.1571, "before": 4.3789, "after": 4.3789}, {"i": 71, "ram": 4.5156, "time": 0.1553, "before": 4.3789, "after": 4.3789}, {"i": 72, "ram": 4.5156, "time": 0.1588, "before": 4.3789, "after": 4.3789}, {"i": 73, "ram": 4.5156, "time": 0.1665, "before": 4.3789, "after": 4.3789}, {"i": 74, "ram": 4.5156, "time": 0.1556, "before": 4.3789, "after": 4.3789}, {"i": 75, "ram": 4.5156, "time": 0.1505, "before": 4.3789, "after": 4.3789}, {"i": 76, "ram": 4.5156, "time": 0.1666, "before": 4.3789, "after": 4.3789}, {"i": 77, "ram": 4.5156, "time": 0.159, "before": 4.3789, "after": 4.3789}, {"i": 78, "ram": 4.5156, "time": 0.1566, "before": 4.3789, "after": 4.3789}, {"i": 79, "ram": 4.5156, "time": 0.1627, "before": 4.3789, "after": 4.3789}, {"i": 80, "ram": 4.5156, "time": 0.1544, "before": 4.3789, "after": 4.3789}, {"i": 81, "ram": 4.5156, "time": 0.1545, "before": 4.3789, "after": 4.3789}, {"i": 82, "ram": 4.5156, "time": 0.1509, "before": 4.3789, "after": 4.3789}, {"i": 83, "ram": 4.5156, "time": 0.1499, "before": 4.3789, "after": 4.3789}, {"i": 84, "ram": 4.5234, "time": 0.1826, "before": 4.3789, "after": 4.3828}, {"i": 85, "ram": 4.5195, "time": 0.1507, "before": 4.3789, "after": 4.375}, {"i": 86, "ram": 4.5156, "time": 0.1565, "before": 4.3789, "after": 4.3867}, {"i": 87, "ram": 4.5156, "time": 0.1674, "before": 4.3789, "after": 4.3789}, {"i": 88, "ram": 4.5156, "time": 0.2097, "before": 4.3789, "after": 4.3789}, {"i": 89, "ram": 4.5156, "time": 0.1661, "before": 4.3789, "after": 4.3789}, {"i": 90, "ram": 4.5156, "time": 0.1674, "before": 4.3789, "after": 4.3789}, {"i": 91, "ram": 4.5156, "time": 0.1606, "before": 4.3789, "after": 4.3789}, {"i": 92, "ram": 4.5156, "time": 0.1247, "before": 4.3789, "after": 4.3789}, {"i": 93, "ram": 4.5156, "time": 0.1048, "before": 4.3789, "after": 4.3789}, {"i": 94, "ram": 4.5156, "time": 0.101, "before": 4.3789, "after": 4.3789}, {"i": 95, "ram": 4.5156, "time": 0.1093, "before": 4.3789, "after": 4.3789}, {"i": 96, "ram": 4.5156, "time": 0.1022, "before": 4.3789, "after": 4.3789}, {"i": 97, "ram": 4.5156, "time": 0.1037, "before": 4.3789, "after": 4.3789}, {"i": 98, "ram": 4.5195, "time": 0.1145, "before": 4.3789, "after": 4.3828}, {"i": 99, "ram": 4.5156, "time": 0.0963, "before": 4.3789, "after": 4.3789}, {"i": 100, "ram": 4.5156, "time": 0.1844, "before": 4.3789, "after": 4.3789}, {"i": 101, "ram": 4.5156, "time": 0.1063, "before": 4.3789, "after": 4.3789}, {"i": 102, "ram": 4.5156, "time": 0.131, "before": 4.3789, "after": 4.3789}, {"i": 103, "ram": 4.5156, "time": 0.2516, "before": 4.3789, "after": 4.3789}, {"i": 104, "ram": 4.5156, "time": 0.2662, "before": 4.3789, "after": 4.3789}, {"i": 105, "ram": 4.5156, "time": 0.1655, "before": 4.3789, "after": 4.3789}, {"i": 106, "ram": 4.5156, "time": 0.1584, "before": 4.3789, "after": 4.3789}, {"i": 107, "ram": 4.5156, "time": 0.1796, "before": 4.3789, "after": 4.3789}, {"i": 108, "ram": 4.5156, "time": 0.3193, "before": 4.3789, "after": 4.3789}, {"i": 109, "ram": 4.5156, "time": 0.1623, "before": 4.3789, "after": 4.3789}, {"i": 110, "ram": 4.5156, "time": 0.157, "before": 4.3789, "after": 4.3789}, {"i": 111, "ram": 4.5156, "time": 0.1586, "before": 4.3789, "after": 4.3789}, {"i": 112, "ram": 4.5156, "time": 0.2227, "before": 4.3789, "after": 4.3789}, {"i": 113, "ram": 4.5156, "time": 0.1614, "before": 4.3789, "after": 4.3789}, {"i": 114, "ram": 4.5156, "time": 0.1541, "before": 4.3789, "after": 4.3789}, {"i": 115, "ram": 4.5156, "time": 0.2867, "before": 4.3789, "after": 4.3789}, {"i": 116, "ram": 4.5156, "time": 0.5978, "before": 4.3789, "after": 4.3789}, {"i": 117, "ram": 4.5156, "time": 0.6794, "before": 4.3789, "after": 4.3789}, {"i": 118, "ram": 4.5156, "time": 0.694, "before": 4.3789, "after": 4.3789}, {"i": 119, "ram": 4.5234, "time": 0.69, "before": 4.3789, "after": 4.3828}, {"i": 120, "ram": 4.5195, "time": 0.798, "before": 4.3789, "after": 4.3789}, {"i": 121, "ram": 4.5156, "time": 0.7905, "before": 4.3789, "after": 4.3789}, {"i": 122, "ram": 4.5156, "time": 0.67, "before": 4.3789, "after": 4.3789}, {"i": 123, "ram": 4.5156, "time": 0.6674, "before": 4.3789, "after": 4.3789}, {"i": 124, "ram": 4.5195, "time": 0.698, "before": 4.3789, "after": 4.3867}, {"i": 125, "ram": 4.5117, "time": 0.6532, "before": 4.3789, "after": 4.3789}, {"i": 126, "ram": 4.5117, "time": 0.7116, "before": 4.3789, "after": 4.3789}, {"i": 127, "ram": 4.5117, "time": 0.72, "before": 4.3789, "after": 4.3789}, {"i": 128, "ram": 4.5117, "time": 0.5645, "before": 4.3789, "after": 4.3789}, {"i": 129, "ram": 4.5117, "time": 0.5818, "before": 4.3789, "after": 4.3789}, {"i": 130, "ram": 4.5117, "time": 0.5503, "before": 4.3789, "after": 4.3789}, {"i": 131, "ram": 4.5117, "time": 0.6211, "before": 4.3789, "after": 4.3789}, {"i": 132, "ram": 4.5117, "time": 0.668, "before": 4.3789, "after": 4.3594}, {"i": 133, "ram": 4.5117, "time": 0.6261, "before": 4.3789, "after": 4.3789}, {"i": 134, "ram": 4.5117, "time": 0.5687, "before": 4.3789, "after": 4.3789}, {"i": 135, "ram": 4.5117, "time": 0.5435, "before": 4.3789, "after": 4.3789}, {"i": 136, "ram": 4.5117, "time": 0.5706, "before": 4.3789, "after": 4.3789}, {"i": 137, "ram": 4.5117, "time": 0.5635, "before": 4.3789, "after": 4.3789}, {"i": 138, "ram": 4.5117, "time": 0.6057, "before": 4.3789, "after": 4.3789}, {"i": 139, "ram": 4.5117, "time": 0.8201, "before": 4.3789, "after": 4.3789}, {"i": 140, "ram": 4.5117, "time": 0.5479, "before": 4.3789, "after": 4.3789}, {"i": 141, "ram": 4.5117, "time": 0.555, "before": 4.3789, "after": 4.3789}, {"i": 142, "ram": 4.5117, "time": 0.6011, "before": 4.3789, "after": 4.3789}, {"i": 143, "ram": 4.5117, "time": 0.5834, "before": 4.3789, "after": 4.3789}, {"i": 144, "ram": 4.5117, "time": 0.6353, "before": 4.3789, "after": 4.3789}, {"i": 145, "ram": 4.5117, "time": 0.6467, "before": 4.3789, "after": 4.3789}, {"i": 146, "ram": 4.5117, "time": 0.5554, "before": 4.3789, "after": 4.3789}, {"i": 147, "ram": 4.5117, "time": 0.5736, "before": 4.3789, "after": 4.3789}, {"i": 148, "ram": 4.5195, "time": 0.567, "before": 4.3789, "after": 4.3828}, {"i": 149, "ram": 4.5117, "time": 0.5737, "before": 4.3789, "after": 4.3789}, {"i": 150, "ram": 4.5117, "time": 0.5794, "before": 4.3789, "after": 4.3789}, {"i": 151, "ram": 4.5117, "time": 0.6475, "before": 4.3789, "after": 4.3789}, {"i": 152, "ram": 4.5117, "time": 1.1712, "before": 4.3789, "after": 4.3789}, {"i": 153, "ram": 4.5117, "time": 1.4868, "before": 4.3789, "after": 4.3789}, {"i": 154, "ram": 4.5195, "time": 1.5027, "before": 4.3789, "after": 4.3789}, {"i": 155, "ram": 4.5117, "time": 1.4087, "before": 4.3789, "after": 4.3828}, {"i": 156, "ram": 4.5156, "time": 0.9234, "before": 4.3789, "after": 4.3789}, {"i": 157, "ram": 4.5156, "time": 0.1838, "before": 4.3789, "after": 4.3789}, {"i": 158, "ram": 4.5156, "time": 0.1686, "before": 4.3789, "after": 4.3789}, {"i": 159, "ram": 4.5156, "time": 0.1702, "before": 4.3789, "after": 4.3789}, {"i": 160, "ram": 4.5156, "time": 0.1887, "before": 4.3789, "after": 4.3789}, {"i": 161, "ram": 4.5156, "time": 0.1827, "before": 4.3789, "after": 4.3789}, {"i": 162, "ram": 4.5156, "time": 0.1699, "before": 4.3789, "after": 4.3789}, {"i": 163, "ram": 4.5156, "time": 0.1617, "before": 4.3789, "after": 4.3789}, {"i": 164, "ram": 4.5156, "time": 0.1569, "before": 4.3789, "after": 4.3789}, {"i": 165, "ram": 4.5156, "time": 0.3591, "before": 4.3789, "after": 4.3789}, {"i": 166, "ram": 4.5156, "time": 0.6616, "before": 4.3789, "after": 4.3789}, {"i": 167, "ram": 4.5156, "time": 0.6509, "before": 4.3789, "after": 4.3789}, {"i": 168, "ram": 4.5156, "time": 0.6665, "before": 4.3789, "after": 4.3789}, {"i": 169, "ram": 4.5156, "time": 0.7025, "before": 4.3789, "after": 4.3789}, {"i": 170, "ram": 4.5156, "time": 0.7917, "before": 4.3789, "after": 4.3789}, {"i": 171, "ram": 4.5156, "time": 0.7274, "before": 4.3789, "after": 4.3789}, {"i": 172, "ram": 4.5156, "time": 0.6447, "before": 4.3789, "after": 4.3789}, {"i": 173, "ram": 4.5234, "time": 0.6446, "before": 4.3789, "after": 4.3867}, {"i": 174, "ram": 4.5156, "time": 0.6736, "before": 4.3789, "after": 4.3789}, {"i": 175, "ram": 4.5156, "time": 0.6429, "before": 4.3789, "after": 4.3789}, {"i": 176, "ram": 4.5156, "time": 0.6909, "before": 4.3789, "after": 4.3789}, {"i": 177, "ram": 4.5156, "time": 0.9972, "before": 4.3789, "after": 4.3789}, {"i": 178, "ram": 4.5156, "time": 1.4138, "before": 4.3789, "after": 4.3398}, {"i": 179, "ram": 4.5156, "time": 1.596, "before": 4.3789, "after": 4.3789}, {"i": 180, "ram": 4.5156, "time": 1.4042, "before": 4.3789, "after": 4.3789}, {"i": 181, "ram": 4.5156, "time": 1.3263, "before": 4.3789, "after": 4.3789}, {"i": 182, "ram": 4.5156, "time": 0.2055, "before": 4.3789, "after": 4.3789}, {"i": 183, "ram": 4.5156, "time": 0.1737, "before": 4.3789, "after": 4.3789}, {"i": 184, "ram": 4.5156, "time": 0.1507, "before": 4.3789, "after": 4.3789}, {"i": 185, "ram": 4.5156, "time": 0.1528, "before": 4.3789, "after": 4.3789}, {"i": 186, "ram": 4.5156, "time": 0.1642, "before": 4.3789, "after": 4.3789}, {"i": 187, "ram": 4.5156, "time": 0.155, "before": 4.3789, "after": 4.3789}, {"i": 188, "ram": 4.5156, "time": 0.4203, "before": 4.3789, "after": 4.3789}, {"i": 189, "ram": 4.5195, "time": 0.6515, "before": 4.3789, "after": 4.3828}, {"i": 190, "ram": 4.5156, "time": 0.6494, "before": 4.3789, "after": 4.3789}, {"i": 191, "ram": 4.5156, "time": 0.6584, "before": 4.3789, "after": 4.3789}, {"i": 192, "ram": 4.5156, "time": 0.709, "before": 4.3789, "after": 4.3789}, {"i": 193, "ram": 4.5156, "time": 0.7507, "before": 4.3789, "after": 4.3789}, {"i": 194, "ram": 4.5156, "time": 0.7224, "before": 4.3789, "after": 4.3789}, {"i": 195, "ram": 4.5156, "time": 0.6272, "before": 4.3789, "after": 4.3789}, {"i": 196, "ram": 4.5156, "time": 0.6605, "before": 4.3789, "after": 4.3789}, {"i": 197, "ram": 4.5156, "time": 0.6317, "before": 4.3789, "after": 4.3789}, {"i": 198, "ram": 4.5156, "time": 0.6456, "before": 4.3789, "after": 4.3789}, {"i": 199, "ram": 4.5156, "time": 0.6831, "before": 4.3789, "after": 4.3789}, {"i": 200, "ram": 4.5156, "time": 0.7618, "before": 4.3789, "after": 4.3789}, {"i": 201, "ram": 4.5156, "time": 1.361, "before": 4.3789, "after": 4.3789}, {"i": 202, "ram": 4.5156, "time": 1.5635, "before": 4.3789, "after": 4.3789}, {"i": 203, "ram": 4.5156, "time": 1.4257, "before": 4.3789, "after": 4.3789}, {"i": 204, "ram": 4.5156, "time": 1.4573, "before": 4.3789, "after": 4.3789}, {"i": 205, "ram": 4.5156, "time": 0.5794, "before": 4.3789, "after": 4.3789}, {"i": 206, "ram": 4.5156, "time": 0.1598, "before": 4.3789, "after": 4.3789}, {"i": 207, "ram": 4.5156, "time": 0.1527, "before": 4.3789, "after": 4.3789}, {"i": 208, "ram": 4.5156, "time": 0.1582, "before": 4.3789, "after": 4.3789}, {"i": 209, "ram": 4.5156, "time": 0.1632, "before": 4.3789, "after": 4.3789}, {"i": 210, "ram": 4.5156, "time": 0.1547, "before": 4.3789, "after": 4.3789}, {"i": 211, "ram": 4.5156, "time": 0.1593, "before": 4.3789, "after": 4.3789}, {"i": 212, "ram": 4.5156, "time": 0.1669, "before": 4.3789, "after": 4.3789}, {"i": 213, "ram": 4.5156, "time": 0.1456, "before": 4.3789, "after": 4.3789}, {"i": 214, "ram": 4.5156, "time": 0.1678, "before": 4.3789, "after": 4.3789}, {"i": 215, "ram": 4.5156, "time": 0.6231, "before": 4.3789, "after": 4.3789}, {"i": 216, "ram": 4.5156, "time": 0.6679, "before": 4.3789, "after": 4.3789}, {"i": 217, "ram": 4.5156, "time": 0.6484, "before": 4.3789, "after": 4.3789}, {"i": 218, "ram": 4.5156, "time": 0.633, "before": 4.3789, "after": 4.3789}, {"i": 219, "ram": 4.5156, "time": 0.7728, "before": 4.3789, "after": 4.3789}, {"i": 220, "ram": 4.5156, "time": 0.7886, "before": 4.3789, "after": 4.3789}, {"i": 221, "ram": 4.5156, "time": 0.6621, "before": 4.3789, "after": 4.3789}, {"i": 222, "ram": 4.5156, "time": 0.623, "before": 4.3789, "after": 4.3789}, {"i": 223, "ram": 4.5156, "time": 0.6845, "before": 4.3789, "after": 4.3789}, {"i": 224, "ram": 4.5234, "time": 0.647, "before": 4.3789, "after": 4.3789}, {"i": 225, "ram": 4.5234, "time": 0.6591, "before": 4.3789, "after": 4.3789}, {"i": 226, "ram": 4.5234, "time": 0.7247, "before": 4.3789, "after": 4.3906}, {"i": 227, "ram": 4.5156, "time": 1.1829, "before": 4.3789, "after": 4.3789}, {"i": 228, "ram": 4.5156, "time": 1.5071, "before": 4.3789, "after": 4.3789}, {"i": 229, "ram": 4.5156, "time": 1.4885, "before": 4.3789, "after": 4.3789}, {"i": 230, "ram": 4.5156, "time": 1.4202, "before": 4.3789, "after": 4.3789}, {"i": 231, "ram": 4.5156, "time": 0.9686, "before": 4.3789, "after": 4.3789}, {"i": 232, "ram": 4.5156, "time": 0.1775, "before": 4.3789, "after": 4.3789}, {"i": 233, "ram": 4.5156, "time": 0.1866, "before": 4.3789, "after": 4.3789}, {"i": 234, "ram": 4.5156, "time": 0.1521, "before": 4.3789, "after": 4.3789}, {"i": 235, "ram": 4.5156, "time": 0.164, "before": 4.3789, "after": 4.3789}, {"i": 236, "ram": 4.5156, "time": 0.1613, "before": 4.3789, "after": 4.3789}, {"i": 237, "ram": 4.5156, "time": 0.1706, "before": 4.3789, "after": 4.3789}, {"i": 238, "ram": 4.5156, "time": 0.1506, "before": 4.3789, "after": 4.3789}, {"i": 239, "ram": 4.5156, "time": 0.1556, "before": 4.3789, "after": 4.3789}, {"i": 240, "ram": 4.5156, "time": 0.2093, "before": 4.3789, "after": 4.3789}, {"i": 241, "ram": 4.5156, "time": 0.63, "before": 4.3789, "after": 4.3789}, {"i": 242, "ram": 4.5156, "time": 0.6514, "before": 4.3789, "after": 4.3789}, {"i": 243, "ram": 4.5156, "time": 0.6837, "before": 4.3789, "after": 4.3789}, {"i": 244, "ram": 4.5156, "time": 0.7155, "before": 4.3789, "after": 4.3789}, {"i": 245, "ram": 4.5156, "time": 0.7881, "before": 4.3789, "after": 4.3789}, {"i": 246, "ram": 4.5156, "time": 0.7565, "before": 4.3789, "after": 4.3789}, {"i": 247, "ram": 4.5156, "time": 0.6406, "before": 4.3789, "after": 4.3789}, {"i": 248, "ram": 4.5156, "time": 0.6179, "before": 4.3789, "after": 4.3789}, {"i": 249, "ram": 4.5156, "time": 0.6654, "before": 4.3789, "after": 4.3789}, {"i": 250, "ram": 4.5156, "time": 0.6651, "before": 4.3789, "after": 4.3789}, {"i": 251, "ram": 4.5156, "time": 0.6619, "before": 4.3789, "after": 4.3789}, {"i": 252, "ram": 4.5156, "time": 0.7318, "before": 4.3789, "after": 4.3789}, {"i": 253, "ram": 4.5156, "time": 1.2691, "before": 4.3789, "after": 4.3789}, {"i": 254, "ram": 4.5156, "time": 1.5406, "before": 4.3789, "after": 4.3789}, {"i": 255, "ram": 4.5156, "time": 1.4437, "before": 4.3789, "after": 4.3789}, {"i": 256, "ram": 4.5156, "time": 1.4452, "before": 4.3789, "after": 4.3789}, {"i": 257, "ram": 4.5156, "time": 0.7675, "before": 4.3789, "after": 4.3789}, {"i": 258, "ram": 4.5156, "time": 0.1407, "before": 4.3789, "after": 4.3789}, {"i": 259, "ram": 4.5195, "time": 0.2146, "before": 4.3789, "after": 4.3828}, {"i": 260, "ram": 4.5156, "time": 0.1729, "before": 4.3789, "after": 4.3789}, {"i": 261, "ram": 4.5156, "time": 0.1595, "before": 4.3789, "after": 4.3789}, {"i": 262, "ram": 4.5156, "time": 0.1614, "before": 4.3789, "after": 4.3789}, {"i": 263, "ram": 4.5156, "time": 0.1765, "before": 4.3789, "after": 4.3789}, {"i": 264, "ram": 4.5156, "time": 0.1543, "before": 4.3789, "after": 4.3789}, {"i": 265, "ram": 4.5156, "time": 0.2319, "before": 4.3789, "after": 4.3789}, {"i": 266, "ram": 4.5156, "time": 0.651, "before": 4.3789, "after": 4.3789}, {"i": 267, "ram": 4.5156, "time": 0.6544, "before": 4.3789, "after": 4.3789}, {"i": 268, "ram": 4.5156, "time": 0.6247, "before": 4.3789, "after": 4.3789}, {"i": 269, "ram": 4.5156, "time": 0.6837, "before": 4.3789, "after": 4.3789}, {"i": 270, "ram": 4.5156, "time": 0.7458, "before": 4.3789, "after": 4.3789}, {"i": 271, "ram": 4.5156, "time": 0.7392, "before": 4.3789, "after": 4.3789}, {"i": 272, "ram": 4.5156, "time": 0.6674, "before": 4.3789, "after": 4.3789}, {"i": 273, "ram": 4.5156, "time": 0.6499, "before": 4.3789, "after": 4.3789}, {"i": 274, "ram": 4.5234, "time": 0.6365, "before": 4.3789, "after": 4.3867}, {"i": 275, "ram": 4.5156, "time": 0.6345, "before": 4.3789, "after": 4.3789}, {"i": 276, "ram": 4.5156, "time": 0.6003, "before": 4.3789, "after": 4.3789}, {"i": 277, "ram": 4.5156, "time": 0.7639, "before": 4.3789, "after": 4.3789}, {"i": 278, "ram": 4.5156, "time": 1.3419, "before": 4.3789, "after": 4.3789}, {"i": 279, "ram": 4.5156, "time": 1.5351, "before": 4.3789, "after": 4.3789}, {"i": 280, "ram": 4.5156, "time": 1.4198, "before": 4.3789, "after": 4.3789}, {"i": 281, "ram": 4.5156, "time": 1.4682, "before": 4.3789, "after": 4.3789}, {"i": 282, "ram": 4.5156, "time": 0.5656, "before": 4.3789, "after": 4.3789}, {"i": 283, "ram": 4.5156, "time": 0.1751, "before": 4.3789, "after": 4.3789}, {"i": 284, "ram": 4.5156, "time": 0.1579, "before": 4.3789, "after": 4.3789}, {"i": 285, "ram": 4.5156, "time": 0.1594, "before": 4.3789, "after": 4.3789}, {"i": 286, "ram": 4.5156, "time": 0.1671, "before": 4.3789, "after": 4.3789}, {"i": 287, "ram": 4.5156, "time": 0.1496, "before": 4.3789, "after": 4.3789}, {"i": 288, "ram": 4.5156, "time": 0.2933, "before": 4.3789, "after": 4.3789}, {"i": 289, "ram": 4.5156, "time": 0.6322, "before": 4.3789, "after": 4.3789}, {"i": 290, "ram": 4.5156, "time": 0.6425, "before": 4.3789, "after": 4.3789}, {"i": 291, "ram": 4.5156, "time": 0.6384, "before": 4.3789, "after": 4.3789}, {"i": 292, "ram": 4.5156, "time": 0.6733, "before": 4.3789, "after": 4.3789}, {"i": 293, "ram": 4.5156, "time": 0.7913, "before": 4.3789, "after": 4.3789}, {"i": 294, "ram": 4.5234, "time": 0.7041, "before": 4.3789, "after": 4.3867}, {"i": 295, "ram": 4.5156, "time": 0.6605, "before": 4.3789, "after": 4.3789}, {"i": 296, "ram": 4.5156, "time": 0.637, "before": 4.3789, "after": 4.3789}, {"i": 297, "ram": 4.5156, "time": 0.6382, "before": 4.3789, "after": 4.3789}, {"i": 298, "ram": 4.5156, "time": 0.6414, "before": 4.3789, "after": 4.3789}, {"i": 299, "ram": 4.5156, "time": 0.6667, "before": 4.3789, "after": 4.3789}, {"i": 300, "ram": 4.5156, "time": 0.7357, "before": 4.3789, "after": 4.3789}, {"i": 301, "ram": 4.5156, "time": 1.2008, "before": 4.3789, "after": 4.3789}, {"i": 302, "ram": 4.5156, "time": 1.5027, "before": 4.3789, "after": 4.3789}, {"i": 303, "ram": 4.5156, "time": 1.4976, "before": 4.3789, "after": 4.3789}, {"i": 304, "ram": 4.5156, "time": 1.4085, "before": 4.3789, "after": 4.3789}, {"i": 305, "ram": 4.5156, "time": 0.9229, "before": 4.3789, "after": 4.3789}, {"i": 306, "ram": 4.5156, "time": 0.1614, "before": 4.3789, "after": 4.3789}, {"i": 307, "ram": 4.5156, "time": 0.1589, "before": 4.3789, "after": 4.3789}, {"i": 308, "ram": 4.5156, "time": 0.1887, "before": 4.3789, "after": 4.3789}, {"i": 309, "ram": 4.5156, "time": 0.1517, "before": 4.3789, "after": 4.3789}, {"i": 310, "ram": 4.5156, "time": 0.1577, "before": 4.3789, "after": 4.3789}, {"i": 311, "ram": 4.5156, "time": 0.1514, "before": 4.3789, "after": 4.3789}, {"i": 312, "ram": 4.5156, "time": 0.1504, "before": 4.3789, "after": 4.3789}, {"i": 313, "ram": 4.5156, "time": 0.1603, "before": 4.3789, "after": 4.3789}, {"i": 314, "ram": 4.5156, "time": 0.1542, "before": 4.3789, "after": 4.3789}, {"i": 315, "ram": 4.5156, "time": 0.2351, "before": 4.3789, "after": 4.3789}, {"i": 316, "ram": 4.5156, "time": 0.6445, "before": 4.3789, "after": 4.3789}, {"i": 317, "ram": 4.5156, "time": 0.6447, "before": 4.3789, "after": 4.3789}, {"i": 318, "ram": 4.5156, "time": 0.6297, "before": 4.3789, "after": 4.3789}, {"i": 319, "ram": 4.5156, "time": 0.669, "before": 4.3789, "after": 4.3789}, {"i": 320, "ram": 4.5156, "time": 0.7547, "before": 4.3789, "after": 4.3789}, {"i": 321, "ram": 4.5156, "time": 0.7274, "before": 4.3789, "after": 4.3789}, {"i": 322, "ram": 4.5156, "time": 0.6497, "before": 4.3789, "after": 4.3789}, {"i": 323, "ram": 4.5156, "time": 0.6359, "before": 4.3789, "after": 4.3789}, {"i": 324, "ram": 4.5156, "time": 0.6701, "before": 4.3789, "after": 4.3789}, {"i": 325, "ram": 4.5234, "time": 0.6428, "before": 4.3789, "after": 4.3867}, {"i": 326, "ram": 4.5156, "time": 0.6544, "before": 4.3789, "after": 4.3789}, {"i": 327, "ram": 4.5156, "time": 0.7604, "before": 4.3789, "after": 4.3789}, {"i": 328, "ram": 4.5156, "time": 1.3172, "before": 4.3789, "after": 4.3789}, {"i": 329, "ram": 4.5156, "time": 1.5662, "before": 4.3789, "after": 4.3789}, {"i": 330, "ram": 4.5156, "time": 1.4493, "before": 4.3789, "after": 4.3789}, {"i": 331, "ram": 4.5156, "time": 1.4327, "before": 4.3789, "after": 4.3789}, {"i": 332, "ram": 4.5156, "time": 0.6994, "before": 4.3789, "after": 4.3789}, {"i": 333, "ram": 4.5156, "time": 0.161, "before": 4.3789, "after": 4.3789}, {"i": 334, "ram": 4.5156, "time": 0.1777, "before": 4.3789, "after": 4.3789}, {"i": 335, "ram": 4.5156, "time": 0.1531, "before": 4.3789, "after": 4.3789}, {"i": 336, "ram": 4.5156, "time": 0.1514, "before": 4.3789, "after": 4.3789}, {"i": 337, "ram": 4.5156, "time": 0.1613, "before": 4.3789, "after": 4.3789}, {"i": 338, "ram": 4.5156, "time": 0.1556, "before": 4.3789, "after": 4.3789}, {"i": 339, "ram": 4.5156, "time": 0.6268, "before": 4.3789, "after": 4.3789}, {"i": 340, "ram": 4.5156, "time": 0.652, "before": 4.3789, "after": 4.3789}, {"i": 341, "ram": 4.5156, "time": 0.6624, "before": 4.3789, "after": 4.3789}, {"i": 342, "ram": 4.5156, "time": 0.656, "before": 4.3789, "after": 4.3789}, {"i": 343, "ram": 4.5156, "time": 0.7346, "before": 4.3789, "after": 4.3789}, {"i": 344, "ram": 4.5156, "time": 0.7285, "before": 4.3789, "after": 4.3789}, {"i": 345, "ram": 4.5156, "time": 0.6969, "before": 4.3789, "after": 4.3789}, {"i": 346, "ram": 4.5156, "time": 0.63, "before": 4.3789, "after": 4.3789}, {"i": 347, "ram": 4.5156, "time": 0.6471, "before": 4.3789, "after": 4.3789}, {"i": 348, "ram": 4.5156, "time": 0.6707, "before": 4.3789, "after": 4.3789}, {"i": 349, "ram": 4.5156, "time": 0.6348, "before": 4.3789, "after": 4.3789}, {"i": 350, "ram": 4.5156, "time": 0.7282, "before": 4.3789, "after": 4.3789}, {"i": 351, "ram": 4.5156, "time": 1.1824, "before": 4.3789, "after": 4.3789}, {"i": 352, "ram": 4.5156, "time": 1.4953, "before": 4.3789, "after": 4.3789}, {"i": 353, "ram": 4.5156, "time": 1.5236, "before": 4.3789, "after": 4.3789}, {"i": 354, "ram": 4.5156, "time": 1.3766, "before": 4.3789, "after": 4.3789}, {"i": 355, "ram": 4.5156, "time": 0.9444, "before": 4.3789, "after": 4.3789}, {"i": 356, "ram": 4.5156, "time": 0.1514, "before": 4.3789, "after": 4.3789}, {"i": 357, "ram": 4.5156, "time": 0.1903, "before": 4.3789, "after": 4.3789}, {"i": 358, "ram": 4.5156, "time": 0.1504, "before": 4.3789, "after": 4.3789}, {"i": 359, "ram": 4.5156, "time": 0.1467, "before": 4.3789, "after": 4.3789}, {"i": 360, "ram": 4.5156, "time": 0.1544, "before": 4.3789, "after": 4.3789}, {"i": 361, "ram": 4.5156, "time": 0.1476, "before": 4.3789, "after": 4.3789}, {"i": 362, "ram": 4.5156, "time": 0.1401, "before": 4.3789, "after": 4.3789}, {"i": 363, "ram": 4.5156, "time": 0.1793, "before": 4.3789, "after": 4.3789}, {"i": 364, "ram": 4.5156, "time": 0.1689, "before": 4.3789, "after": 4.3789}, {"i": 365, "ram": 4.5156, "time": 0.4712, "before": 4.3789, "after": 4.3789}, {"i": 366, "ram": 4.5273, "time": 0.6352, "before": 4.3789, "after": 4.3867}, {"i": 367, "ram": 4.5195, "time": 0.6484, "before": 4.3789, "after": 4.3789}, {"i": 368, "ram": 4.5195, "time": 0.6519, "before": 4.3789, "after": 4.3789}, {"i": 369, "ram": 4.5195, "time": 0.7309, "before": 4.3789, "after": 4.3789}, {"i": 370, "ram": 4.5195, "time": 0.7634, "before": 4.3789, "after": 4.3789}, {"i": 371, "ram": 4.5195, "time": 0.7111, "before": 4.3789, "after": 4.3789}, {"i": 372, "ram": 4.5195, "time": 0.6482, "before": 4.3789, "after": 4.3789}, {"i": 373, "ram": 4.5195, "time": 0.6363, "before": 4.3789, "after": 4.3789}, {"i": 374, "ram": 4.5195, "time": 0.6605, "before": 4.3789, "after": 4.3789}, {"i": 375, "ram": 4.5352, "time": 0.6387, "before": 4.3789, "after": 4.3945}, {"i": 376, "ram": 4.5195, "time": 0.7009, "before": 4.3789, "after": 4.3789}, {"i": 377, "ram": 4.5195, "time": 0.8372, "before": 4.3789, "after": 4.3789}, {"i": 378, "ram": 4.5195, "time": 1.3959, "before": 4.3789, "after": 4.3789}, {"i": 379, "ram": 4.5195, "time": 1.574, "before": 4.3789, "after": 4.3789}, {"i": 380, "ram": 4.5195, "time": 1.4, "before": 4.3789, "after": 4.3789}, {"i": 381, "ram": 4.5195, "time": 1.5049, "before": 4.3789, "after": 4.3789}, {"i": 382, "ram": 4.5195, "time": 0.2752, "before": 4.3789, "after": 4.3789}, {"i": 383, "ram": 4.5195, "time": 0.1511, "before": 4.3789, "after": 4.3789}, {"i": 384, "ram": 4.5195, "time": 0.1594, "before": 4.3789, "after": 4.3789}, {"i": 385, "ram": 4.5195, "time": 0.1606, "before": 4.3789, "after": 4.3789}, {"i": 386, "ram": 4.5195, "time": 0.1554, "before": 4.3789, "after": 4.3789}, {"i": 387, "ram": 4.5195, "time": 0.1594, "before": 4.3789, "after": 4.3789}, {"i": 388, "ram": 4.5195, "time": 0.1543, "before": 4.3789, "after": 4.3789}, {"i": 389, "ram": 4.5195, "time": 0.1531, "before": 4.3789, "after": 4.3789}, {"i": 390, "ram": 4.5195, "time": 0.1603, "before": 4.3789, "after": 4.3789}, {"i": 391, "ram": 4.5195, "time": 0.604, "before": 4.3789, "after": 4.3789}, {"i": 392, "ram": 4.5195, "time": 0.6742, "before": 4.3789, "after": 4.3789}, {"i": 393, "ram": 4.5195, "time": 0.6443, "before": 4.3789, "after": 4.3789}, {"i": 394, "ram": 4.5195, "time": 0.6849, "before": 4.3789, "after": 4.3789}, {"i": 395, "ram": 4.5195, "time": 0.7426, "before": 4.3789, "after": 4.3789}, {"i": 396, "ram": 4.5195, "time": 0.7472, "before": 4.3789, "after": 4.3789}, {"i": 397, "ram": 4.5195, "time": 0.732, "before": 4.3789, "after": 4.3789}, {"i": 398, "ram": 4.5195, "time": 0.6203, "before": 4.3789, "after": 4.3789}, {"i": 399, "ram": 4.5195, "time": 0.6373, "before": 4.3789, "after": 4.3789}, {"i": 400, "ram": 4.5195, "time": 0.6529, "before": 4.3789, "after": 4.3789}, {"i": 401, "ram": 4.5195, "time": 0.6723, "before": 4.3789, "after": 4.3789}, {"i": 402, "ram": 4.5195, "time": 0.7361, "before": 4.3789, "after": 4.3789}, {"i": 403, "ram": 4.5195, "time": 1.3078, "before": 4.3789, "after": 4.3789}, {"i": 404, "ram": 4.5195, "time": 1.5364, "before": 4.3789, "after": 4.3789}, {"i": 405, "ram": 4.5195, "time": 1.4386, "before": 4.3789, "after": 4.3789}, {"i": 406, "ram": 4.5195, "time": 1.4482, "before": 4.3789, "after": 4.3789}, {"i": 407, "ram": 4.5195, "time": 0.7146, "before": 4.3789, "after": 4.3789}, {"i": 408, "ram": 4.5195, "time": 0.1937, "before": 4.3789, "after": 4.3945}, {"i": 409, "ram": 4.5195, "time": 0.1569, "before": 4.3789, "after": 4.3789}, {"i": 410, "ram": 4.5195, "time": 0.1478, "before": 4.3789, "after": 4.3789}, {"i": 411, "ram": 4.5195, "time": 0.1543, "before": 4.3789, "after": 4.3789}, {"i": 412, "ram": 4.5195, "time": 0.1692, "before": 4.3789, "after": 4.3789}, {"i": 413, "ram": 4.5195, "time": 0.162, "before": 4.3789, "after": 4.3789}, {"i": 414, "ram": 4.5195, "time": 0.6631, "before": 4.3789, "after": 4.3789}, {"i": 415, "ram": 4.5195, "time": 0.6546, "before": 4.3789, "after": 4.3789}, {"i": 416, "ram": 4.5195, "time": 0.6558, "before": 4.3789, "after": 4.3789}, {"i": 417, "ram": 4.5195, "time": 0.6735, "before": 4.3789, "after": 4.3789}, {"i": 418, "ram": 4.5195, "time": 0.7681, "before": 4.3789, "after": 4.3789}, {"i": 419, "ram": 4.5195, "time": 0.7562, "before": 4.3789, "after": 4.3789}, {"i": 420, "ram": 4.5195, "time": 0.6614, "before": 4.3789, "after": 4.3789}, {"i": 421, "ram": 4.5195, "time": 0.6545, "before": 4.3789, "after": 4.3789}, {"i": 422, "ram": 4.5195, "time": 0.6339, "before": 4.3789, "after": 4.3789}, {"i": 423, "ram": 4.5195, "time": 0.6289, "before": 4.3789, "after": 4.3789}, {"i": 424, "ram": 4.5195, "time": 0.7005, "before": 4.3789, "after": 4.3789}, {"i": 425, "ram": 4.5195, "time": 0.7086, "before": 4.3789, "after": 4.3789}, {"i": 426, "ram": 4.5195, "time": 1.071, "before": 4.3789, "after": 4.3789}, {"i": 427, "ram": 4.5195, "time": 1.4319, "before": 4.3789, "after": 4.3789}, {"i": 428, "ram": 4.5195, "time": 1.5483, "before": 4.3789, "after": 4.3789}, {"i": 429, "ram": 4.5195, "time": 1.4037, "before": 4.3789, "after": 4.3789}, {"i": 430, "ram": 4.5195, "time": 1.1889, "before": 4.3789, "after": 4.3789}, {"i": 431, "ram": 4.5195, "time": 0.3345, "before": 4.3789, "after": 4.3789}, {"i": 432, "ram": 4.5195, "time": 0.391, "before": 4.3789, "after": 4.3789}, {"i": 433, "ram": 4.5195, "time": 0.1472, "before": 4.3789, "after": 4.3789}, {"i": 434, "ram": 4.5195, "time": 0.1487, "before": 4.3789, "after": 4.3789}, {"i": 435, "ram": 4.5195, "time": 0.1577, "before": 4.3789, "after": 4.3789}, {"i": 436, "ram": 4.5195, "time": 0.1577, "before": 4.3789, "after": 4.3789}, {"i": 437, "ram": 4.5195, "time": 0.1876, "before": 4.3789, "after": 4.3789}, {"i": 438, "ram": 4.5273, "time": 0.1755, "before": 4.3789, "after": 4.3867}, {"i": 439, "ram": 4.5195, "time": 0.4822, "before": 4.3789, "after": 4.3789}, {"i": 440, "ram": 4.5195, "time": 0.6524, "before": 4.3789, "after": 4.3789}, {"i": 441, "ram": 4.5195, "time": 0.6748, "before": 4.3789, "after": 4.3789}, {"i": 442, "ram": 4.5195, "time": 0.6506, "before": 4.3789, "after": 4.3789}, {"i": 443, "ram": 4.5195, "time": 0.705, "before": 4.3789, "after": 4.3789}, {"i": 444, "ram": 4.5195, "time": 0.7595, "before": 4.3789, "after": 4.3789}, {"i": 445, "ram": 4.5195, "time": 0.7279, "before": 4.3789, "after": 4.3789}, {"i": 446, "ram": 4.5195, "time": 0.6123, "before": 4.3789, "after": 4.3789}, {"i": 447, "ram": 4.5195, "time": 0.6337, "before": 4.3789, "after": 4.3789}, {"i": 448, "ram": 4.5195, "time": 0.6677, "before": 4.3789, "after": 4.3789}, {"i": 449, "ram": 4.5195, "time": 0.6383, "before": 4.3789, "after": 4.3789}, {"i": 450, "ram": 4.5195, "time": 0.6665, "before": 4.3789, "after": 4.3789}, {"i": 451, "ram": 4.5195, "time": 0.8904, "before": 4.3789, "after": 4.3789}, {"i": 452, "ram": 4.5195, "time": 1.3983, "before": 4.3789, "after": 4.3789}, {"i": 453, "ram": 4.5195, "time": 1.5934, "before": 4.3789, "after": 4.3789}, {"i": 454, "ram": 4.5195, "time": 1.4285, "before": 4.3789, "after": 4.3789}, {"i": 455, "ram": 4.5195, "time": 1.5283, "before": 4.3789, "after": 4.3789}, {"i": 456, "ram": 4.5195, "time": 0.3979, "before": 4.3789, "after": 4.3789}, {"i": 457, "ram": 4.5195, "time": 0.4157, "before": 4.3789, "after": 4.3789}, {"i": 458, "ram": 4.5195, "time": 0.1824, "before": 4.3789, "after": 4.3789}, {"i": 459, "ram": 4.5195, "time": 0.1593, "before": 4.3789, "after": 4.3789}, {"i": 460, "ram": 4.5195, "time": 0.1549, "before": 4.3789, "after": 4.3789}, {"i": 461, "ram": 4.5195, "time": 0.1548, "before": 4.3789, "after": 4.3789}, {"i": 462, "ram": 4.5195, "time": 0.1635, "before": 4.3789, "after": 4.3789}, {"i": 463, "ram": 4.5195, "time": 0.1693, "before": 4.3789, "after": 4.3789}, {"i": 464, "ram": 4.5195, "time": 0.4259, "before": 4.3789, "after": 4.3789}, {"i": 465, "ram": 4.5195, "time": 0.6356, "before": 4.3789, "after": 4.3789}, {"i": 466, "ram": 4.5195, "time": 0.659, "before": 4.3789, "after": 4.3789}, {"i": 467, "ram": 4.5195, "time": 0.6402, "before": 4.3789, "after": 4.3789}, {"i": 468, "ram": 4.5195, "time": 0.7004, "before": 4.3789, "after": 4.3789}, {"i": 469, "ram": 4.5195, "time": 0.7487, "before": 4.3789, "after": 4.3789}, {"i": 470, "ram": 4.5195, "time": 0.7118, "before": 4.3789, "after": 4.3789}, {"i": 471, "ram": 4.5195, "time": 0.6544, "before": 4.3789, "after": 4.3789}, {"i": 472, "ram": 4.5195, "time": 0.6485, "before": 4.3789, "after": 4.3789}, {"i": 473, "ram": 4.5195, "time": 0.643, "before": 4.3789, "after": 4.3789}, {"i": 474, "ram": 4.5195, "time": 0.6409, "before": 4.3789, "after": 4.3789}, {"i": 475, "ram": 4.5195, "time": 0.6641, "before": 4.3789, "after": 4.3789}, {"i": 476, "ram": 4.5195, "time": 0.7465, "before": 4.3789, "after": 4.3789}, {"i": 477, "ram": 4.5312, "time": 1.4036, "before": 4.3789, "after": 4.3906}, {"i": 478, "ram": 4.5195, "time": 1.5863, "before": 4.3789, "after": 4.3789}, {"i": 479, "ram": 4.5195, "time": 1.3998, "before": 4.3789, "after": 4.3789}, {"i": 480, "ram": 4.5195, "time": 1.4617, "before": 4.3789, "after": 4.3789}, {"i": 481, "ram": 4.5195, "time": 0.6376, "before": 4.3789, "after": 4.3789}, {"i": 482, "ram": 4.5195, "time": 0.504, "before": 4.3789, "after": 4.3789}, {"i": 483, "ram": 4.5195, "time": 0.1754, "before": 4.3789, "after": 4.3789}, {"i": 484, "ram": 4.5195, "time": 0.1486, "before": 4.3789, "after": 4.3789}, {"i": 485, "ram": 4.5195, "time": 0.1607, "before": 4.3789, "after": 4.3789}, {"i": 486, "ram": 4.5195, "time": 0.1524, "before": 4.3789, "after": 4.3789}, {"i": 487, "ram": 4.5195, "time": 0.1513, "before": 4.3789, "after": 4.3789}, {"i": 488, "ram": 4.5195, "time": 0.1578, "before": 4.3789, "after": 4.3789}, {"i": 489, "ram": 4.5195, "time": 0.4507, "before": 4.3789, "after": 4.3789}, {"i": 490, "ram": 4.5195, "time": 0.6891, "before": 4.3789, "after": 4.3789}, {"i": 491, "ram": 4.5195, "time": 0.64, "before": 4.3789, "after": 4.3789}, {"i": 492, "ram": 4.5195, "time": 0.6365, "before": 4.3789, "after": 4.3789}, {"i": 493, "ram": 4.5195, "time": 0.6957, "before": 4.3789, "after": 4.3789}, {"i": 494, "ram": 4.5195, "time": 0.7548, "before": 4.3789, "after": 4.3789}, {"i": 495, "ram": 4.5195, "time": 0.7018, "before": 4.3789, "after": 4.3789}, {"i": 496, "ram": 4.5195, "time": 0.6097, "before": 4.3789, "after": 4.3789}, {"i": 497, "ram": 4.5195, "time": 0.6389, "before": 4.3789, "after": 4.3789}, {"i": 498, "ram": 4.5195, "time": 0.6279, "before": 4.3789, "after": 4.3789}, {"i": 499, "ram": 4.5195, "time": 0.6375, "before": 4.3789, "after": 4.3789}, {"i": 500, "ram": 4.5195, "time": 0.6819, "before": 4.3789, "after": 4.3789}, {"i": 501, "ram": 4.5195, "time": 0.8203, "before": 4.3789, "after": 4.3789}, {"i": 502, "ram": 4.5195, "time": 1.4088, "before": 4.3789, "after": 4.3789}, {"i": 503, "ram": 4.5195, "time": 1.6039, "before": 4.3789, "after": 4.3789}, {"i": 504, "ram": 4.5195, "time": 1.3796, "before": 4.3789, "after": 4.3789}, {"i": 505, "ram": 4.5195, "time": 1.4936, "before": 4.3789, "after": 4.3789}, {"i": 506, "ram": 4.5195, "time": 0.377, "before": 4.3789, "after": 4.3789}, {"i": 507, "ram": 4.5195, "time": 0.4534, "before": 4.3789, "after": 4.3789}, {"i": 508, "ram": 4.5195, "time": 0.2974, "before": 4.3789, "after": 4.3789}, {"i": 509, "ram": 4.5195, "time": 0.173, "before": 4.3789, "after": 4.3789}, {"i": 510, "ram": 4.5273, "time": 0.1479, "before": 4.3789, "after": 4.3867}, {"i": 511, "ram": 4.5195, "time": 0.1553, "before": 4.3789, "after": 4.3789}, {"i": 512, "ram": 4.5195, "time": 0.2065, "before": 4.3789, "after": 4.3789}, {"i": 513, "ram": 4.5195, "time": 0.1492, "before": 4.3789, "after": 4.3789}, {"i": 514, "ram": 4.5195, "time": 0.2302, "before": 4.3789, "after": 4.3789}, {"i": 515, "ram": 4.5195, "time": 0.6232, "before": 4.3789, "after": 4.3789}, {"i": 516, "ram": 4.5195, "time": 0.6326, "before": 4.3789, "after": 4.3789}, {"i": 517, "ram": 4.5195, "time": 0.6336, "before": 4.3789, "after": 4.3789}, {"i": 518, "ram": 4.5195, "time": 0.6734, "before": 4.3789, "after": 4.3789}, {"i": 519, "ram": 4.5195, "time": 0.7484, "before": 4.3789, "after": 4.3789}, {"i": 520, "ram": 4.5195, "time": 0.738, "before": 4.3789, "after": 4.3789}, {"i": 521, "ram": 4.5195, "time": 0.6472, "before": 4.3789, "after": 4.3789}, {"i": 522, "ram": 4.5195, "time": 0.6336, "before": 4.3789, "after": 4.3789}, {"i": 523, "ram": 4.5195, "time": 0.6338, "before": 4.3789, "after": 4.3789}, {"i": 524, "ram": 4.5195, "time": 0.6475, "before": 4.3789, "after": 4.3789}, {"i": 525, "ram": 4.5195, "time": 0.6619, "before": 4.3789, "after": 4.3789}, {"i": 526, "ram": 4.5195, "time": 0.7438, "before": 4.3789, "after": 4.3789}, {"i": 527, "ram": 4.5195, "time": 1.1812, "before": 4.3789, "after": 4.3789}, {"i": 528, "ram": 4.5195, "time": 1.4805, "before": 4.3789, "after": 4.3789}, {"i": 529, "ram": 4.5195, "time": 1.4851, "before": 4.3789, "after": 4.3789}, {"i": 530, "ram": 4.5195, "time": 1.4064, "before": 4.3789, "after": 4.3789}, {"i": 531, "ram": 4.5195, "time": 0.9922, "before": 4.3789, "after": 4.3789}, {"i": 532, "ram": 4.5195, "time": 0.3768, "before": 4.3789, "after": 4.3789}, {"i": 533, "ram": 4.5195, "time": 0.3876, "before": 4.3789, "after": 4.3789}, {"i": 534, "ram": 4.5195, "time": 0.156, "before": 4.3789, "after": 4.3789}, {"i": 535, "ram": 4.5195, "time": 0.1541, "before": 4.3789, "after": 4.3789}, {"i": 536, "ram": 4.5195, "time": 0.1641, "before": 4.3789, "after": 4.3789}, {"i": 537, "ram": 4.5195, "time": 0.1562, "before": 4.3789, "after": 4.3789}, {"i": 538, "ram": 4.5195, "time": 0.155, "before": 4.3789, "after": 4.3789}, {"i": 539, "ram": 4.5195, "time": 0.1833, "before": 4.3789, "after": 4.375}, {"i": 540, "ram": 4.5195, "time": 0.5269, "before": 4.3789, "after": 4.3633}, {"i": 541, "ram": 4.5195, "time": 0.6745, "before": 4.3789, "after": 4.3789}, {"i": 542, "ram": 4.5195, "time": 0.6524, "before": 4.3789, "after": 4.3789}, {"i": 543, "ram": 4.5195, "time": 0.6292, "before": 4.3789, "after": 4.3789}, {"i": 544, "ram": 4.5195, "time": 0.7456, "before": 4.3789, "after": 4.3789}, {"i": 545, "ram": 4.5195, "time": 0.7366, "before": 4.3789, "after": 4.3789}, {"i": 546, "ram": 4.5195, "time": 0.7171, "before": 4.3789, "after": 4.3789}, {"i": 547, "ram": 4.5195, "time": 0.6454, "before": 4.3789, "after": 4.3789}, {"i": 548, "ram": 4.5195, "time": 0.639, "before": 4.3789, "after": 4.3789}, {"i": 549, "ram": 4.5195, "time": 0.7142, "before": 4.3789, "after": 4.3789}, {"i": 550, "ram": 4.6328, "time": 0.6229, "before": 4.3789, "after": 4.4922}, {"i": 551, "ram": 4.5234, "time": 0.6801, "before": 4.3789, "after": 4.3828}, {"i": 552, "ram": 4.5195, "time": 0.9114, "before": 4.3789, "after": 4.3789}, {"i": 553, "ram": 4.5195, "time": 1.396, "before": 4.3789, "after": 4.3789}, {"i": 554, "ram": 4.5195, "time": 1.5724, "before": 4.3789, "after": 4.3789}, {"i": 555, "ram": 4.5195, "time": 1.395, "before": 4.3789, "after": 4.375}, {"i": 556, "ram": 4.5195, "time": 1.4812, "before": 4.3789, "after": 4.3789}, {"i": 557, "ram": 4.5234, "time": 0.3825, "before": 4.3789, "after": 4.3828}, {"i": 558, "ram": 4.5195, "time": 0.3761, "before": 4.3789, "after": 4.3789}, {"i": 559, "ram": 4.5195, "time": 0.1635, "before": 4.3789, "after": 4.3789}, {"i": 560, "ram": 4.5195, "time": 0.163, "before": 4.3789, "after": 4.3789}, {"i": 561, "ram": 4.5195, "time": 0.1573, "before": 4.3789, "after": 4.3789}, {"i": 562, "ram": 4.5195, "time": 0.1548, "before": 4.3789, "after": 4.3789}, {"i": 563, "ram": 4.5195, "time": 0.1622, "before": 4.3789, "after": 4.3789}, {"i": 564, "ram": 4.5195, "time": 0.1489, "before": 4.3789, "after": 4.375}, {"i": 565, "ram": 4.5195, "time": 0.5244, "before": 4.3789, "after": 4.3789}, {"i": 566, "ram": 4.5234, "time": 0.6829, "before": 4.3789, "after": 4.3828}, {"i": 567, "ram": 4.5195, "time": 0.6372, "before": 4.3789, "after": 4.3789}, {"i": 568, "ram": 4.5195, "time": 0.6344, "before": 4.3789, "after": 4.3789}, {"i": 569, "ram": 4.5195, "time": 0.7238, "before": 4.3789, "after": 4.3789}, {"i": 570, "ram": 4.5195, "time": 0.7274, "before": 4.3789, "after": 4.375}, {"i": 571, "ram": 4.5195, "time": 0.7162, "before": 4.3789, "after": 4.3789}, {"i": 572, "ram": 4.5234, "time": 0.6484, "before": 4.3789, "after": 4.3828}, {"i": 573, "ram": 4.5195, "time": 0.6469, "before": 4.3789, "after": 4.3789}, {"i": 574, "ram": 4.5195, "time": 0.6375, "before": 4.3789, "after": 4.3789}, {"i": 575, "ram": 4.5195, "time": 0.6196, "before": 4.3789, "after": 4.3789}, {"i": 576, "ram": 4.5195, "time": 0.7012, "before": 4.3789, "after": 4.3789}, {"i": 577, "ram": 4.5195, "time": 1.0462, "before": 4.3789, "after": 4.3789}, {"i": 578, "ram": 4.5352, "time": 1.4582, "before": 4.3789, "after": 4.3945}, {"i": 579, "ram": 4.5156, "time": 1.5106, "before": 4.3789, "after": 4.3789}, {"i": 580, "ram": 4.5195, "time": 1.3926, "before": 4.3789, "after": 4.3516}, {"i": 581, "ram": 4.5312, "time": 1.2113, "before": 4.3789, "after": 4.4102}, {"i": 582, "ram": 4.5352, "time": 0.4304, "before": 4.3789, "after": 4.3906}, {"i": 583, "ram": 4.5195, "time": 0.3292, "before": 4.3789, "after": 4.3789}, {"i": 584, "ram": 4.5234, "time": 0.1471, "before": 4.3789, "after": 4.3828}, {"i": 585, "ram": 4.5195, "time": 0.1488, "before": 4.3789, "after": 4.3789}, {"i": 586, "ram": 4.5195, "time": 0.2017, "before": 4.3789, "after": 4.3789}, {"i": 587, "ram": 4.5195, "time": 0.1726, "before": 4.3789, "after": 4.375}, {"i": 588, "ram": 4.5195, "time": 0.1592, "before": 4.3789, "after": 4.3789}, {"i": 589, "ram": 4.5234, "time": 0.1513, "before": 4.3789, "after": 4.3828}, {"i": 590, "ram": 4.5195, "time": 0.5508, "before": 4.3789, "after": 4.3789}, {"i": 591, "ram": 4.5195, "time": 0.6302, "before": 4.3789, "after": 4.3789}, {"i": 592, "ram": 4.5195, "time": 0.6446, "before": 4.3789, "after": 4.3789}, {"i": 593, "ram": 4.5195, "time": 0.6444, "before": 4.3789, "after": 4.375}, {"i": 594, "ram": 4.5195, "time": 0.728, "before": 4.3789, "after": 4.3789}, {"i": 595, "ram": 4.5234, "time": 0.7585, "before": 4.3789, "after": 4.3828}, {"i": 596, "ram": 4.5195, "time": 0.6861, "before": 4.3789, "after": 4.3789}, {"i": 597, "ram": 4.5195, "time": 0.626, "before": 4.3789, "after": 4.3789}, {"i": 598, "ram": 4.5195, "time": 0.6333, "before": 4.3789, "after": 4.3789}, {"i": 599, "ram": 4.5195, "time": 0.6308, "before": 4.3789, "after": 4.3789}, {"i": 600, "ram": 4.5195, "time": 0.6704, "before": 4.3789, "after": 4.3789}, {"i": 601, "ram": 4.5195, "time": 0.6835, "before": 4.3789, "after": 4.3789}, {"i": 602, "ram": 4.5195, "time": 0.8991, "before": 4.3789, "after": 4.375}, {"i": 603, "ram": 4.5195, "time": 1.4116, "before": 4.3789, "after": 4.3789}, {"i": 604, "ram": 4.5234, "time": 1.5663, "before": 4.3789, "after": 4.3828}, {"i": 605, "ram": 4.5195, "time": 1.3975, "before": 4.3789, "after": 4.3789}, {"i": 606, "ram": 4.5195, "time": 1.4322, "before": 4.3789, "after": 4.3789}, {"i": 607, "ram": 4.5195, "time": 0.2861, "before": 4.3789, "after": 4.375}, {"i": 608, "ram": 4.5195, "time": 0.4208, "before": 4.3789, "after": 4.3789}, {"i": 609, "ram": 4.5234, "time": 0.2215, "before": 4.3789, "after": 4.3828}, {"i": 610, "ram": 4.5195, "time": 0.1605, "before": 4.3789, "after": 4.3789}, {"i": 611, "ram": 4.5195, "time": 0.15, "before": 4.3789, "after": 4.3789}, {"i": 612, "ram": 4.5195, "time": 0.1566, "before": 4.3789, "after": 4.3789}, {"i": 613, "ram": 4.5195, "time": 0.1867, "before": 4.3789, "after": 4.3789}, {"i": 614, "ram": 4.5195, "time": 0.1845, "before": 4.3789, "after": 4.3789}, {"i": 615, "ram": 4.5195, "time": 0.3597, "before": 4.3789, "after": 4.3789}, {"i": 616, "ram": 4.5195, "time": 0.6365, "before": 4.3789, "after": 4.3789}, {"i": 617, "ram": 4.5195, "time": 0.6399, "before": 4.3789, "after": 4.375}, {"i": 618, "ram": 4.5195, "time": 0.6303, "before": 4.3789, "after": 4.3789}, {"i": 619, "ram": 4.5234, "time": 0.7152, "before": 4.3789, "after": 4.3828}, {"i": 620, "ram": 4.5195, "time": 0.7398, "before": 4.3789, "after": 4.3789}, {"i": 621, "ram": 4.5195, "time": 0.6977, "before": 4.3789, "after": 4.3789}, {"i": 622, "ram": 4.5195, "time": 0.6586, "before": 4.3789, "after": 4.375}, {"i": 623, "ram": 4.5195, "time": 0.6201, "before": 4.3789, "after": 4.3789}, {"i": 624, "ram": 4.5234, "time": 0.648, "before": 4.3789, "after": 4.3828}, {"i": 625, "ram": 4.5195, "time": 0.6484, "before": 4.3789, "after": 4.3789}, {"i": 626, "ram": 4.5195, "time": 0.6417, "before": 4.3789, "after": 4.3789}, {"i": 627, "ram": 4.5195, "time": 0.8289, "before": 4.3789, "after": 4.3789}, {"i": 628, "ram": 4.5195, "time": 1.4083, "before": 4.3789, "after": 4.3789}, {"i": 629, "ram": 4.5195, "time": 1.5632, "before": 4.3789, "after": 4.3789}, {"i": 630, "ram": 4.5195, "time": 1.4079, "before": 4.3789, "after": 4.3789}, {"i": 631, "ram": 4.5195, "time": 1.4732, "before": 4.3789, "after": 4.3789}, {"i": 632, "ram": 4.5195, "time": 0.5941, "before": 4.3789, "after": 4.375}, {"i": 633, "ram": 4.5195, "time": 0.4022, "before": 4.3789, "after": 4.3789}, {"i": 634, "ram": 4.5234, "time": 0.2197, "before": 4.3789, "after": 4.3828}, {"i": 635, "ram": 4.5195, "time": 0.1499, "before": 4.3789, "after": 4.3789}, {"i": 636, "ram": 4.5195, "time": 0.1871, "before": 4.3789, "after": 4.3789}, {"i": 637, "ram": 4.5195, "time": 0.1618, "before": 4.3789, "after": 4.375}, {"i": 638, "ram": 4.5195, "time": 0.1486, "before": 4.3789, "after": 4.3789}, {"i": 639, "ram": 4.5234, "time": 0.1538, "before": 4.3789, "after": 4.3828}, {"i": 640, "ram": 4.5195, "time": 0.4605, "before": 4.3789, "after": 4.3789}, {"i": 641, "ram": 4.5195, "time": 0.6281, "before": 4.3789, "after": 4.3789}, {"i": 642, "ram": 4.5195, "time": 0.6928, "before": 4.3789, "after": 4.3789}, {"i": 643, "ram": 4.5195, "time": 0.6457, "before": 4.3789, "after": 4.3789}, {"i": 644, "ram": 4.5195, "time": 0.7417, "before": 4.3789, "after": 4.3789}, {"i": 645, "ram": 4.5195, "time": 0.7214, "before": 4.3789, "after": 4.3789}, {"i": 646, "ram": 4.5195, "time": 0.6981, "before": 4.3789, "after": 4.3789}, {"i": 647, "ram": 4.5195, "time": 0.655, "before": 4.3789, "after": 4.375}, {"i": 648, "ram": 4.5195, "time": 0.6207, "before": 4.3789, "after": 4.3789}, {"i": 649, "ram": 4.5234, "time": 0.653, "before": 4.3789, "after": 4.3828}, {"i": 650, "ram": 4.5195, "time": 0.636, "before": 4.3789, "after": 4.3789}, {"i": 651, "ram": 4.5195, "time": 0.6739, "before": 4.3789, "after": 4.3789}, {"i": 652, "ram": 4.5195, "time": 0.8204, "before": 4.3789, "after": 4.375}, {"i": 653, "ram": 4.5195, "time": 1.3938, "before": 4.3789, "after": 4.3789}, {"i": 654, "ram": 4.5234, "time": 1.5841, "before": 4.3789, "after": 4.3828}, {"i": 655, "ram": 4.5195, "time": 1.3914, "before": 4.3789, "after": 4.3789}, {"i": 656, "ram": 4.5195, "time": 1.4985, "before": 4.3789, "after": 4.3789}, {"i": 657, "ram": 4.5195, "time": 0.4315, "before": 4.3789, "after": 4.3789}, {"i": 658, "ram": 4.5195, "time": 0.3991, "before": 4.3789, "after": 4.3789}, {"i": 659, "ram": 4.5195, "time": 0.2612, "before": 4.3789, "after": 4.3789}, {"i": 660, "ram": 4.5195, "time": 0.15, "before": 4.3789, "after": 4.3789}, {"i": 661, "ram": 4.5195, "time": 0.1554, "before": 4.3789, "after": 4.3789}, {"i": 662, "ram": 4.5195, "time": 0.1477, "before": 4.3789, "after": 4.375}, {"i": 663, "ram": 4.5195, "time": 0.1512, "before": 4.3789, "after": 4.3789}, {"i": 664, "ram": 4.5234, "time": 0.1635, "before": 4.3789, "after": 4.3828}, {"i": 665, "ram": 4.5195, "time": 0.3911, "before": 4.3789, "after": 4.375}, {"i": 666, "ram": 4.5195, "time": 0.637, "before": 4.3789, "after": 4.3789}, {"i": 667, "ram": 4.5234, "time": 0.6768, "before": 4.3789, "after": 4.3828}, {"i": 668, "ram": 4.5195, "time": 0.6818, "before": 4.3789, "after": 4.3789}, {"i": 669, "ram": 4.5195, "time": 0.7039, "before": 4.3789, "after": 4.3789}, {"i": 670, "ram": 4.5195, "time": 0.7454, "before": 4.3789, "after": 4.3789}, {"i": 671, "ram": 4.5195, "time": 0.7379, "before": 4.3789, "after": 4.3789}, {"i": 672, "ram": 4.5195, "time": 0.6163, "before": 4.3789, "after": 4.3789}, {"i": 673, "ram": 4.5195, "time": 0.6383, "before": 4.3789, "after": 4.3789}, {"i": 674, "ram": 4.5195, "time": 0.6653, "before": 4.3789, "after": 4.3789}, {"i": 675, "ram": 4.5195, "time": 0.6991, "before": 4.3789, "after": 4.3789}, {"i": 676, "ram": 4.5195, "time": 0.664, "before": 4.3789, "after": 4.3789}, {"i": 677, "ram": 4.5195, "time": 0.7457, "before": 4.3789, "after": 4.375}, {"i": 678, "ram": 4.5195, "time": 1.3579, "before": 4.3789, "after": 4.3789}, {"i": 679, "ram": 4.5234, "time": 1.5295, "before": 4.3789, "after": 4.3828}, {"i": 680, "ram": 4.5352, "time": 1.4259, "before": 4.3789, "after": 4.3594}, {"i": 681, "ram": 4.5352, "time": 1.4534, "before": 4.3789, "after": 4.4141}, {"i": 682, "ram": 4.5156, "time": 0.7089, "before": 4.3789, "after": 4.3789}, {"i": 683, "ram": 4.5156, "time": 0.4394, "before": 4.3789, "after": 4.3789}, {"i": 684, "ram": 4.5156, "time": 0.1466, "before": 4.3789, "after": 4.3789}, {"i": 685, "ram": 4.5156, "time": 0.153, "before": 4.3789, "after": 4.3789}, {"i": 686, "ram": 4.5156, "time": 0.1487, "before": 4.3789, "after": 4.3789}, {"i": 687, "ram": 4.5156, "time": 0.1523, "before": 4.3789, "after": 4.3789}, {"i": 688, "ram": 4.5156, "time": 0.1591, "before": 4.3789, "after": 4.3789}, {"i": 689, "ram": 4.5156, "time": 0.1703, "before": 4.3789, "after": 4.3789}, {"i": 690, "ram": 4.5156, "time": 0.5197, "before": 4.3789, "after": 4.3789}, {"i": 691, "ram": 4.5156, "time": 0.6436, "before": 4.3789, "after": 4.3789}, {"i": 692, "ram": 4.5156, "time": 0.647, "before": 4.3789, "after": 4.3789}, {"i": 693, "ram": 4.5156, "time": 0.6325, "before": 4.3789, "after": 4.3789}, {"i": 694, "ram": 4.5156, "time": 0.7136, "before": 4.3789, "after": 4.3789}, {"i": 695, "ram": 4.5156, "time": 0.7507, "before": 4.3789, "after": 4.3789}, {"i": 696, "ram": 4.5156, "time": 0.7153, "before": 4.3789, "after": 4.3789}, {"i": 697, "ram": 4.5156, "time": 0.6156, "before": 4.3789, "after": 4.3789}, {"i": 698, "ram": 4.5156, "time": 0.6366, "before": 4.3789, "after": 4.3789}, {"i": 699, "ram": 4.5156, "time": 0.6441, "before": 4.3789, "after": 4.3789}, {"i": 700, "ram": 4.5156, "time": 0.6684, "before": 4.3789, "after": 4.3789}, {"i": 701, "ram": 4.5156, "time": 0.6881, "before": 4.3789, "after": 4.3789}, {"i": 702, "ram": 4.5156, "time": 0.973, "before": 4.3789, "after": 4.3789}, {"i": 703, "ram": 4.5156, "time": 1.387, "before": 4.3789, "after": 4.3438}, {"i": 704, "ram": 4.5156, "time": 1.5697, "before": 4.3789, "after": 4.3789}, {"i": 705, "ram": 4.5156, "time": 1.4126, "before": 4.3789, "after": 4.3789}, {"i": 706, "ram": 4.5156, "time": 1.397, "before": 4.3789, "after": 4.3789}, {"i": 707, "ram": 4.5156, "time": 0.4463, "before": 4.3789, "after": 4.3789}, {"i": 708, "ram": 4.5156, "time": 0.2945, "before": 4.3789, "after": 4.3789}, {"i": 709, "ram": 4.5156, "time": 0.185, "before": 4.3789, "after": 4.3789}, {"i": 710, "ram": 4.5156, "time": 0.1519, "before": 4.3789, "after": 4.3789}, {"i": 711, "ram": 4.5156, "time": 0.1494, "before": 4.3789, "after": 4.3789}, {"i": 712, "ram": 4.5156, "time": 0.1633, "before": 4.3789, "after": 4.3789}, {"i": 713, "ram": 4.5156, "time": 0.1505, "before": 4.3789, "after": 4.3789}, {"i": 714, "ram": 4.5156, "time": 0.1492, "before": 4.3789, "after": 4.3789}, {"i": 715, "ram": 4.5156, "time": 0.1568, "before": 4.3789, "after": 4.3789}, {"i": 716, "ram": 4.5156, "time": 0.1487, "before": 4.3789, "after": 4.3789}, {"i": 717, "ram": 4.5156, "time": 0.4356, "before": 4.3789, "after": 4.3789}, {"i": 718, "ram": 4.5156, "time": 0.6547, "before": 4.3789, "after": 4.3789}, {"i": 719, "ram": 4.5156, "time": 0.6473, "before": 4.3789, "after": 4.3789}, {"i": 720, "ram": 4.5156, "time": 0.6642, "before": 4.3789, "after": 4.3789}, {"i": 721, "ram": 4.5156, "time": 0.706, "before": 4.3789, "after": 4.3789}, {"i": 722, "ram": 4.5156, "time": 0.7325, "before": 4.3789, "after": 4.3789}, {"i": 723, "ram": 4.5156, "time": 0.7036, "before": 4.3789, "after": 4.3789}, {"i": 724, "ram": 4.5156, "time": 0.6205, "before": 4.3789, "after": 4.3789}, {"i": 725, "ram": 4.5156, "time": 0.6411, "before": 4.3789, "after": 4.3789}, {"i": 726, "ram": 4.5156, "time": 0.6199, "before": 4.3789, "after": 4.3789}, {"i": 727, "ram": 4.5352, "time": 0.6454, "before": 4.3789, "after": 4.3945}, {"i": 728, "ram": 4.5195, "time": 0.6546, "before": 4.3789, "after": 4.3789}, {"i": 729, "ram": 4.5195, "time": 0.8842, "before": 4.3789, "after": 4.3789}, {"i": 730, "ram": 4.5195, "time": 1.4026, "before": 4.3789, "after": 4.3789}, {"i": 731, "ram": 4.5039, "time": 1.5531, "before": 4.3789, "after": 4.3789}, {"i": 732, "ram": 4.5195, "time": 1.4118, "before": 4.3789, "after": 4.3789}, {"i": 733, "ram": 4.5195, "time": 1.4712, "before": 4.3789, "after": 4.3789}, {"i": 734, "ram": 4.5195, "time": 0.4612, "before": 4.3789, "after": 4.3789}, {"i": 735, "ram": 4.5195, "time": 0.2973, "before": 4.3789, "after": 4.3789}, {"i": 736, "ram": 4.5195, "time": 0.154, "before": 4.3789, "after": 4.5039}, {"i": 737, "ram": 4.3945, "time": 0.151, "before": 4.3789, "after": 4.3789}, {"i": 738, "ram": 4.3945, "time": 0.1538, "before": 4.3789, "after": 4.3789}, {"i": 739, "ram": 4.3945, "time": 0.1632, "before": 4.3789, "after": 4.3789}, {"i": 740, "ram": 4.3945, "time": 0.1713, "before": 4.3789, "after": 4.2539}, {"i": 741, "ram": 4.5195, "time": 0.2102, "before": 4.3789, "after": 4.3789}, {"i": 742, "ram": 4.5195, "time": 0.6487, "before": 4.3789, "after": 4.3789}, {"i": 743, "ram": 4.5195, "time": 0.642, "before": 4.3789, "after": 4.3789}, {"i": 744, "ram": 4.5195, "time": 0.6776, "before": 4.3789, "after": 4.3789}, {"i": 745, "ram": 4.5195, "time": 0.6639, "before": 4.3789, "after": 4.5039}, {"i": 746, "ram": 4.3945, "time": 0.7369, "before": 4.3789, "after": 4.3789}, {"i": 747, "ram": 4.3945, "time": 0.7646, "before": 4.3789, "after": 4.3789}, {"i": 748, "ram": 4.3945, "time": 0.6856, "before": 4.3789, "after": 4.3789}, {"i": 749, "ram": 4.3945, "time": 0.6312, "before": 4.3789, "after": 4.2539}, {"i": 750, "ram": 4.5195, "time": 0.6417, "before": 4.3789, "after": 4.3789}, {"i": 751, "ram": 4.5195, "time": 0.6278, "before": 4.3789, "after": 4.3789}, {"i": 752, "ram": 4.5195, "time": 0.6716, "before": 4.3789, "after": 4.3789}, {"i": 753, "ram": 4.5195, "time": 0.7447, "before": 4.3789, "after": 4.3789}, {"i": 754, "ram": 4.5195, "time": 1.2922, "before": 4.3789, "after": 4.5039}, {"i": 755, "ram": 4.3945, "time": 1.5246, "before": 4.3789, "after": 4.3789}, {"i": 756, "ram": 4.3945, "time": 1.4431, "before": 4.3789, "after": 4.3789}, {"i": 757, "ram": 4.3945, "time": 1.4363, "before": 4.3789, "after": 4.3789}, {"i": 758, "ram": 4.3945, "time": 0.6875, "before": 4.3789, "after": 4.2539}, {"i": 759, "ram": 4.5195, "time": 0.4333, "before": 4.3789, "after": 4.3789}, {"i": 760, "ram": 4.5195, "time": 0.4245, "before": 4.3789, "after": 4.3789}, {"i": 761, "ram": 4.5195, "time": 0.1608, "before": 4.3789, "after": 4.3789}, {"i": 762, "ram": 4.5195, "time": 0.1813, "before": 4.3789, "after": 4.3789}, {"i": 763, "ram": 4.5195, "time": 0.1701, "before": 4.3789, "after": 4.5039}, {"i": 764, "ram": 4.3945, "time": 0.156, "before": 4.3789, "after": 4.3789}, {"i": 765, "ram": 4.3945, "time": 0.1594, "before": 4.3789, "after": 4.3789}, {"i": 766, "ram": 4.3945, "time": 0.1656, "before": 4.3789, "after": 4.3789}, {"i": 767, "ram": 4.3945, "time": 0.4819, "before": 4.3789, "after": 4.2539}, {"i": 768, "ram": 4.5195, "time": 0.6855, "before": 4.3789, "after": 4.3789}, {"i": 769, "ram": 4.5195, "time": 0.6615, "before": 4.3789, "after": 4.3789}, {"i": 770, "ram": 4.5195, "time": 0.6576, "before": 4.3789, "after": 4.3789}, {"i": 771, "ram": 4.5195, "time": 0.7434, "before": 4.3789, "after": 4.3789}, {"i": 772, "ram": 4.5195, "time": 0.7359, "before": 4.3789, "after": 4.5039}, {"i": 773, "ram": 4.3945, "time": 0.7109, "before": 4.3789, "after": 4.3789}, {"i": 774, "ram": 4.3945, "time": 0.6035, "before": 4.3789, "after": 4.3789}, {"i": 775, "ram": 4.3945, "time": 0.6281, "before": 4.3789, "after": 4.3789}, {"i": 776, "ram": 4.3945, "time": 0.6606, "before": 4.3789, "after": 4.2539}, {"i": 777, "ram": 4.5195, "time": 0.6584, "before": 4.3789, "after": 4.3789}, {"i": 778, "ram": 4.5195, "time": 0.6737, "before": 4.3789, "after": 4.3789}, {"i": 779, "ram": 4.5195, "time": 0.8552, "before": 4.3789, "after": 4.3789}, {"i": 780, "ram": 4.5195, "time": 1.4097, "before": 4.3789, "after": 4.3789}, {"i": 781, "ram": 4.5469, "time": 1.5759, "before": 4.3789, "after": 4.5312}, {"i": 782, "ram": 4.3945, "time": 1.3876, "before": 4.3789, "after": 4.3789}, {"i": 783, "ram": 4.3945, "time": 1.5154, "before": 4.3789, "after": 4.3789}, {"i": 784, "ram": 4.3945, "time": 0.4527, "before": 4.3789, "after": 4.3789}, {"i": 785, "ram": 4.3945, "time": 0.4333, "before": 4.3789, "after": 4.2539}, {"i": 786, "ram": 4.5195, "time": 0.1634, "before": 4.3789, "after": 4.3789}, {"i": 787, "ram": 4.5195, "time": 0.1735, "before": 4.3789, "after": 4.3789}, {"i": 788, "ram": 4.5195, "time": 0.1635, "before": 4.3789, "after": 4.3789}, {"i": 789, "ram": 4.5195, "time": 0.1591, "before": 4.3789, "after": 4.3789}, {"i": 790, "ram": 4.5195, "time": 0.1914, "before": 4.3789, "after": 4.5039}, {"i": 791, "ram": 4.3945, "time": 0.173, "before": 4.3789, "after": 4.3789}, {"i": 792, "ram": 4.3945, "time": 0.6338, "before": 4.3789, "after": 4.3789}, {"i": 793, "ram": 4.3945, "time": 0.6675, "before": 4.3789, "after": 4.3789}, {"i": 794, "ram": 4.3945, "time": 0.6281, "before": 4.3789, "after": 4.2539}, {"i": 795, "ram": 4.5195, "time": 0.6656, "before": 4.3789, "after": 4.3789}, {"i": 796, "ram": 4.5195, "time": 0.7675, "before": 4.3789, "after": 4.3789}, {"i": 797, "ram": 4.5195, "time": 0.756, "before": 4.3789, "after": 4.3789}, {"i": 798, "ram": 4.5195, "time": 0.6891, "before": 4.3789, "after": 4.3789}, {"i": 799, "ram": 4.5195, "time": 0.6511, "before": 4.3789, "after": 4.5039}, {"i": 800, "ram": 4.3945, "time": 0.6574, "before": 4.3789, "after": 4.3789}, {"i": 801, "ram": 4.3945, "time": 0.66, "before": 4.3789, "after": 4.3789}, {"i": 802, "ram": 4.3945, "time": 0.6779, "before": 4.3789, "after": 4.3789}, {"i": 803, "ram": 4.3945, "time": 0.721, "before": 4.3789, "after": 4.2539}, {"i": 804, "ram": 4.5195, "time": 1.0858, "before": 4.3789, "after": 4.3789}, {"i": 805, "ram": 4.5195, "time": 1.4394, "before": 4.3789, "after": 4.3789}, {"i": 806, "ram": 4.5195, "time": 1.5322, "before": 4.3789, "after": 4.3789}, {"i": 807, "ram": 4.5195, "time": 1.429, "before": 4.3789, "after": 4.3789}, {"i": 808, "ram": 4.5195, "time": 1.249, "before": 4.3789, "after": 4.5039}, {"i": 809, "ram": 4.3945, "time": 0.3243, "before": 4.3789, "after": 4.3789}, {"i": 810, "ram": 4.3945, "time": 0.2602, "before": 4.3789, "after": 4.3789}, {"i": 811, "ram": 4.3945, "time": 0.3066, "before": 4.3789, "after": 4.3789}, {"i": 812, "ram": 4.3945, "time": 0.1686, "before": 4.3789, "after": 4.2539}, {"i": 813, "ram": 4.5195, "time": 0.161, "before": 4.3789, "after": 4.3789}, {"i": 814, "ram": 4.5195, "time": 0.2015, "before": 4.3789, "after": 4.3789}, {"i": 815, "ram": 4.5195, "time": 0.2404, "before": 4.3789, "after": 4.3789}, {"i": 816, "ram": 4.5195, "time": 0.1811, "before": 4.3789, "after": 4.3789}, {"i": 817, "ram": 4.5195, "time": 0.3019, "before": 4.3789, "after": 4.5039}, {"i": 818, "ram": 4.3945, "time": 0.6639, "before": 4.3789, "after": 4.3789}, {"i": 819, "ram": 4.3945, "time": 0.6414, "before": 4.3789, "after": 4.3789}, {"i": 820, "ram": 4.3945, "time": 0.6673, "before": 4.3789, "after": 4.3789}, {"i": 821, "ram": 4.3945, "time": 0.6534, "before": 4.3789, "after": 4.2539}, {"i": 822, "ram": 4.5195, "time": 0.7445, "before": 4.3789, "after": 4.3789}, {"i": 823, "ram": 4.5195, "time": 0.7426, "before": 4.3789, "after": 4.3789}, {"i": 824, "ram": 4.5195, "time": 0.6279, "before": 4.3789, "after": 4.3789}, {"i": 825, "ram": 4.5195, "time": 0.6711, "before": 4.3789, "after": 4.3789}, {"i": 826, "ram": 4.5195, "time": 0.6389, "before": 4.3789, "after": 4.5039}, {"i": 827, "ram": 4.3945, "time": 0.6458, "before": 4.3789, "after": 4.3789}, {"i": 828, "ram": 4.3945, "time": 0.6675, "before": 4.3789, "after": 4.3789}, {"i": 829, "ram": 4.3945, "time": 0.916, "before": 4.3789, "after": 4.3789}, {"i": 830, "ram": 4.3945, "time": 1.4038, "before": 4.3789, "after": 4.2539}, {"i": 831, "ram": 4.5195, "time": 1.5814, "before": 4.3789, "after": 4.3789}, {"i": 832, "ram": 4.5195, "time": 1.4018, "before": 4.3789, "after": 4.3789}, {"i": 833, "ram": 4.5195, "time": 1.4509, "before": 4.3789, "after": 4.3789}, {"i": 834, "ram": 4.5195, "time": 0.402, "before": 4.3789, "after": 4.3789}, {"i": 835, "ram": 4.5195, "time": 0.289, "before": 4.3789, "after": 4.5039}, {"i": 836, "ram": 4.3945, "time": 0.3609, "before": 4.3789, "after": 4.3789}, {"i": 837, "ram": 4.3945, "time": 0.2152, "before": 4.3789, "after": 4.3789}, {"i": 838, "ram": 4.3945, "time": 0.1807, "before": 4.3789, "after": 4.3789}, {"i": 839, "ram": 4.3945, "time": 0.1853, "before": 4.3789, "after": 4.2539}, {"i": 840, "ram": 4.5195, "time": 0.1748, "before": 4.3789, "after": 4.3789}, {"i": 841, "ram": 4.5195, "time": 0.1988, "before": 4.3789, "after": 4.3789}, {"i": 842, "ram": 4.5195, "time": 0.2322, "before": 4.3789, "after": 4.3789}, {"i": 843, "ram": 4.5195, "time": 0.6342, "before": 4.3789, "after": 4.3789}, {"i": 844, "ram": 4.5195, "time": 0.6509, "before": 4.3789, "after": 4.5039}, {"i": 845, "ram": 4.3945, "time": 0.672, "before": 4.3789, "after": 4.3789}, {"i": 846, "ram": 4.3945, "time": 0.6663, "before": 4.3789, "after": 4.3789}, {"i": 847, "ram": 4.3945, "time": 0.7794, "before": 4.3789, "after": 4.3789}, {"i": 848, "ram": 4.3945, "time": 0.7596, "before": 4.3789, "after": 4.2539}, {"i": 849, "ram": 4.5195, "time": 0.6441, "before": 4.3789, "after": 4.3789}, {"i": 850, "ram": 4.5195, "time": 0.6218, "before": 4.3789, "after": 4.3789}, {"i": 851, "ram": 4.5195, "time": 0.7147, "before": 4.3789, "after": 4.3789}, {"i": 852, "ram": 4.5195, "time": 0.6424, "before": 4.3789, "after": 4.3789}, {"i": 853, "ram": 4.5195, "time": 0.6309, "before": 4.3789, "after": 4.5039}, {"i": 854, "ram": 4.3945, "time": 0.7491, "before": 4.3789, "after": 4.3789}, {"i": 855, "ram": 4.3945, "time": 1.2552, "before": 4.3789, "after": 4.3789}, {"i": 856, "ram": 4.3945, "time": 1.5101, "before": 4.3789, "after": 4.3789}, {"i": 857, "ram": 4.3945, "time": 1.4631, "before": 4.3789, "after": 4.2539}, {"i": 858, "ram": 4.5195, "time": 1.4234, "before": 4.3789, "after": 4.3789}, {"i": 859, "ram": 4.5195, "time": 0.9469, "before": 4.3789, "after": 4.3789}, {"i": 860, "ram": 4.5195, "time": 0.4722, "before": 4.3789, "after": 4.3789}, {"i": 861, "ram": 4.5195, "time": 0.1767, "before": 4.3789, "after": 4.3789}, {"i": 862, "ram": 4.5195, "time": 0.1589, "before": 4.3789, "after": 4.5039}, {"i": 863, "ram": 4.3945, "time": 0.1605, "before": 4.3789, "after": 4.3789}, {"i": 864, "ram": 4.3945, "time": 0.2485, "before": 4.3789, "after": 4.3789}, {"i": 865, "ram": 4.3945, "time": 0.1539, "before": 4.3789, "after": 4.3789}, {"i": 866, "ram": 4.3945, "time": 0.1463, "before": 4.3789, "after": 4.2539}, {"i": 867, "ram": 4.5195, "time": 0.4801, "before": 4.3789, "after": 4.3789}, {"i": 868, "ram": 4.5195, "time": 0.6289, "before": 4.3789, "after": 4.3789}, {"i": 869, "ram": 4.5195, "time": 0.64, "before": 4.3789, "after": 4.3789}, {"i": 870, "ram": 4.5195, "time": 0.6533, "before": 4.3789, "after": 4.3789}, {"i": 871, "ram": 4.5195, "time": 0.7357, "before": 4.3789, "after": 4.5039}, {"i": 872, "ram": 4.4102, "time": 0.7473, "before": 4.3789, "after": 4.3945}, {"i": 873, "ram": 4.3945, "time": 0.6886, "before": 4.3789, "after": 4.3789}, {"i": 874, "ram": 4.3945, "time": 0.6323, "before": 4.3789, "after": 4.3789}, {"i": 875, "ram": 4.3945, "time": 0.6533, "before": 4.3789, "after": 4.2539}, {"i": 876, "ram": 4.5195, "time": 0.6705, "before": 4.3789, "after": 4.3789}, {"i": 877, "ram": 4.5195, "time": 0.646, "before": 4.3789, "after": 4.3789}, {"i": 878, "ram": 4.5195, "time": 0.6849, "before": 4.3789, "after": 4.3789}, {"i": 879, "ram": 4.5195, "time": 1.0262, "before": 4.3789, "after": 4.3789}, {"i": 880, "ram": 4.5195, "time": 1.4429, "before": 4.3789, "after": 4.5039}, {"i": 881, "ram": 4.3945, "time": 1.5728, "before": 4.3789, "after": 4.3789}, {"i": 882, "ram": 4.3945, "time": 1.3897, "before": 4.3789, "after": 4.3789}, {"i": 883, "ram": 4.3945, "time": 1.2627, "before": 4.3789, "after": 4.3789}, {"i": 884, "ram": 4.3945, "time": 0.4, "before": 4.3789, "after": 4.2539}, {"i": 885, "ram": 4.5195, "time": 0.2974, "before": 4.3789, "after": 4.3789}, {"i": 886, "ram": 4.5195, "time": 0.2517, "before": 4.3789, "after": 4.3789}, {"i": 887, "ram": 4.5195, "time": 0.1989, "before": 4.3789, "after": 4.3789}, {"i": 888, "ram": 4.5195, "time": 0.1997, "before": 4.3789, "after": 4.3789}, {"i": 889, "ram": 4.5195, "time": 0.206, "before": 4.3789, "after": 4.5039}, {"i": 890, "ram": 4.3945, "time": 0.1911, "before": 4.3789, "after": 4.3789}, {"i": 891, "ram": 4.3945, "time": 0.1588, "before": 4.3789, "after": 4.3789}, {"i": 892, "ram": 4.3945, "time": 0.3816, "before": 4.3789, "after": 4.3789}, {"i": 893, "ram": 4.3945, "time": 0.6404, "before": 4.3789, "after": 4.2539}, {"i": 894, "ram": 4.5195, "time": 0.6483, "before": 4.3789, "after": 4.3789}, {"i": 895, "ram": 4.5195, "time": 0.6829, "before": 4.3789, "after": 4.3789}, {"i": 896, "ram": 4.5195, "time": 0.7056, "before": 4.3789, "after": 4.3789}, {"i": 897, "ram": 4.5195, "time": 0.7828, "before": 4.3789, "after": 4.3789}, {"i": 898, "ram": 4.5195, "time": 0.7249, "before": 4.3789, "after": 4.5039}, {"i": 899, "ram": 4.3945, "time": 0.6382, "before": 4.3789, "after": 4.3789}, {"i": 900, "ram": 4.3945, "time": 0.6484, "before": 4.3789, "after": 4.3789}, {"i": 901, "ram": 4.3945, "time": 0.6386, "before": 4.3789, "after": 4.3789}, {"i": 902, "ram": 4.3945, "time": 0.6822, "before": 4.3789, "after": 4.2539}, {"i": 903, "ram": 4.5195, "time": 0.6756, "before": 4.3789, "after": 4.3789}, {"i": 904, "ram": 4.5195, "time": 0.7584, "before": 4.3789, "after": 4.3789}, {"i": 905, "ram": 4.5195, "time": 1.3371, "before": 4.3789, "after": 4.3789}, {"i": 906, "ram": 4.5195, "time": 1.5547, "before": 4.3789, "after": 4.3789}, {"i": 907, "ram": 4.5195, "time": 1.4288, "before": 4.3789, "after": 4.5039}, {"i": 908, "ram": 4.3945, "time": 1.4586, "before": 4.3789, "after": 4.3789}, {"i": 909, "ram": 4.3945, "time": 0.8103, "before": 4.3789, "after": 4.3789}, {"i": 910, "ram": 4.3945, "time": 0.4499, "before": 4.3789, "after": 4.3789}, {"i": 911, "ram": 4.3945, "time": 0.1715, "before": 4.3789, "after": 4.2539}, {"i": 912, "ram": 4.5195, "time": 0.2312, "before": 4.3789, "after": 4.3789}, {"i": 913, "ram": 4.5195, "time": 0.162, "before": 4.3789, "after": 4.3789}, {"i": 914, "ram": 4.5195, "time": 0.1713, "before": 4.3789, "after": 4.3789}, {"i": 915, "ram": 4.5195, "time": 0.1637, "before": 4.3789, "after": 4.3789}, {"i": 916, "ram": 4.5195, "time": 0.1639, "before": 4.3789, "after": 4.5039}, {"i": 917, "ram": 4.3945, "time": 0.5275, "before": 4.3789, "after": 4.3789}, {"i": 918, "ram": 4.3945, "time": 0.6444, "before": 4.3789, "after": 4.3789}, {"i": 919, "ram": 4.3945, "time": 0.6573, "before": 4.3789, "after": 4.3789}, {"i": 920, "ram": 4.3945, "time": 0.6496, "before": 4.3789, "after": 4.2539}, {"i": 921, "ram": 4.5195, "time": 0.706, "before": 4.3789, "after": 4.3789}, {"i": 922, "ram": 4.5195, "time": 0.7567, "before": 4.3789, "after": 4.3789}, {"i": 923, "ram": 4.5195, "time": 0.6815, "before": 4.3789, "after": 4.3789}, {"i": 924, "ram": 4.5195, "time": 0.6336, "before": 4.3789, "after": 4.3789}, {"i": 925, "ram": 4.5195, "time": 0.6644, "before": 4.3789, "after": 4.5039}, {"i": 926, "ram": 4.3945, "time": 0.6437, "before": 4.3789, "after": 4.3789}, {"i": 927, "ram": 4.3945, "time": 0.6482, "before": 4.3789, "after": 4.3789}, {"i": 928, "ram": 4.3945, "time": 0.6859, "before": 4.3789, "after": 4.3789}, {"i": 929, "ram": 4.3945, "time": 0.9868, "before": 4.3789, "after": 4.2539}, {"i": 930, "ram": 4.5195, "time": 1.4039, "before": 4.3789, "after": 4.3789}, {"i": 931, "ram": 4.5195, "time": 1.5405, "before": 4.3789, "after": 4.3789}, {"i": 932, "ram": 4.5195, "time": 1.3862, "before": 4.3789, "after": 4.3789}, {"i": 933, "ram": 4.5195, "time": 1.3294, "before": 4.3789, "after": 4.3789}, {"i": 934, "ram": 4.5195, "time": 0.4511, "before": 4.3789, "after": 4.5039}, {"i": 935, "ram": 4.3945, "time": 0.2239, "before": 4.3789, "after": 4.3789}, {"i": 936, "ram": 4.3945, "time": 0.1747, "before": 4.3789, "after": 4.3789}, {"i": 937, "ram": 4.3945, "time": 0.2043, "before": 4.3789, "after": 4.3789}, {"i": 938, "ram": 4.3945, "time": 0.1767, "before": 4.3789, "after": 4.2539}, {"i": 939, "ram": 4.5195, "time": 0.2236, "before": 4.3789, "after": 4.3789}, {"i": 940, "ram": 4.5195, "time": 0.1583, "before": 4.3789, "after": 4.3789}, {"i": 941, "ram": 4.5195, "time": 0.4196, "before": 4.3789, "after": 4.3789}, {"i": 942, "ram": 4.5195, "time": 0.6484, "before": 4.3789, "after": 4.3789}, {"i": 943, "ram": 4.5195, "time": 0.6415, "before": 4.3789, "after": 4.5039}, {"i": 944, "ram": 4.3945, "time": 0.6499, "before": 4.3789, "after": 4.3789}, {"i": 945, "ram": 4.3945, "time": 0.6937, "before": 4.3789, "after": 4.3789}, {"i": 946, "ram": 4.3945, "time": 0.757, "before": 4.3789, "after": 4.3789}, {"i": 947, "ram": 4.3945, "time": 0.7508, "before": 4.3789, "after": 4.2539}, {"i": 948, "ram": 4.5195, "time": 0.636, "before": 4.3789, "after": 4.3789}, {"i": 949, "ram": 4.5195, "time": 0.6331, "before": 4.3789, "after": 4.3789}, {"i": 950, "ram": 4.5195, "time": 0.6637, "before": 4.3789, "after": 4.3789}, {"i": 951, "ram": 4.5195, "time": 0.6418, "before": 4.3789, "after": 4.3789}, {"i": 952, "ram": 4.5195, "time": 0.6642, "before": 4.3789, "after": 4.5039}, {"i": 953, "ram": 4.3945, "time": 0.888, "before": 4.3789, "after": 4.3789}, {"i": 954, "ram": 4.3945, "time": 1.4044, "before": 4.3789, "after": 4.3789}, {"i": 955, "ram": 4.3945, "time": 1.6274, "before": 4.3789, "after": 4.3789}, {"i": 956, "ram": 4.3945, "time": 1.4, "before": 4.3789, "after": 4.2539}, {"i": 957, "ram": 4.5195, "time": 1.4838, "before": 4.3789, "after": 4.3789}, {"i": 958, "ram": 4.5195, "time": 0.434, "before": 4.3789, "after": 4.3789}, {"i": 959, "ram": 4.5195, "time": 0.3444, "before": 4.3789, "after": 4.3789}, {"i": 960, "ram": 4.5195, "time": 0.1711, "before": 4.3789, "after": 4.3789}, {"i": 961, "ram": 4.5195, "time": 0.1513, "before": 4.3789, "after": 4.5039}, {"i": 962, "ram": 4.3945, "time": 0.1672, "before": 4.3789, "after": 4.3789}, {"i": 963, "ram": 4.3945, "time": 0.1891, "before": 4.3789, "after": 4.3789}, {"i": 964, "ram": 4.3945, "time": 0.1637, "before": 4.3789, "after": 4.3789}, {"i": 965, "ram": 4.3945, "time": 0.1624, "before": 4.3789, "after": 4.2539}, {"i": 966, "ram": 4.5195, "time": 0.6475, "before": 4.3789, "after": 4.3789}, {"i": 967, "ram": 4.5195, "time": 0.6323, "before": 4.3789, "after": 4.3789}, {"i": 968, "ram": 4.5195, "time": 0.6675, "before": 4.3789, "after": 4.3789}, {"i": 969, "ram": 4.5195, "time": 0.6575, "before": 4.3789, "after": 4.3789}, {"i": 970, "ram": 4.5195, "time": 0.7492, "before": 4.3789, "after": 4.5039}, {"i": 971, "ram": 4.3945, "time": 0.7529, "before": 4.3789, "after": 4.3789}, {"i": 972, "ram": 4.3945, "time": 0.7007, "before": 4.3789, "after": 4.3789}, {"i": 973, "ram": 4.3945, "time": 0.6496, "before": 4.3789, "after": 4.3789}, {"i": 974, "ram": 4.3945, "time": 0.6548, "before": 4.3789, "after": 4.2539}, {"i": 975, "ram": 4.5195, "time": 0.6687, "before": 4.3789, "after": 4.3789}, {"i": 976, "ram": 4.5195, "time": 0.6591, "before": 4.3789, "after": 4.3789}, {"i": 977, "ram": 4.5195, "time": 0.7199, "before": 4.3789, "after": 4.3789}, {"i": 978, "ram": 4.5195, "time": 1.1464, "before": 4.3789, "after": 4.3789}, {"i": 979, "ram": 4.5195, "time": 1.4784, "before": 4.3789, "after": 4.5039}, {"i": 980, "ram": 4.3945, "time": 1.4839, "before": 4.3789, "after": 4.3789}, {"i": 981, "ram": 4.3945, "time": 1.4087, "before": 4.3789, "after": 4.3789}, {"i": 982, "ram": 4.3945, "time": 1.1141, "before": 4.3789, "after": 4.3789}, {"i": 983, "ram": 4.3945, "time": 0.2312, "before": 4.3789, "after": 4.2539}, {"i": 984, "ram": 4.5195, "time": 0.3451, "before": 4.3789, "after": 4.3789}, {"i": 985, "ram": 4.5508, "time": 0.1576, "before": 4.3789, "after": 4.5352}, {"i": 986, "ram": 4.3945, "time": 0.1842, "before": 4.3789, "after": 4.2578}, {"i": 987, "ram": 4.5156, "time": 0.177, "before": 4.3789, "after": 4.3789}, {"i": 988, "ram": 4.5156, "time": 0.1585, "before": 4.3789, "after": 4.5}, {"i": 989, "ram": 4.3945, "time": 0.179, "before": 4.3789, "after": 4.3789}, {"i": 990, "ram": 4.3945, "time": 0.1911, "before": 4.3789, "after": 4.3789}, {"i": 991, "ram": 4.3945, "time": 0.6526, "before": 4.3789, "after": 4.3789}, {"i": 992, "ram": 4.3945, "time": 0.6441, "before": 4.3789, "after": 4.2578}, {"i": 993, "ram": 4.5156, "time": 0.6962, "before": 4.3789, "after": 4.3789}, {"i": 994, "ram": 4.5156, "time": 0.6652, "before": 4.3789, "after": 4.3789}, {"i": 995, "ram": 4.5156, "time": 0.7486, "before": 4.3789, "after": 4.3789}, {"i": 996, "ram": 4.5156, "time": 0.7684, "before": 4.3789, "after": 4.3789}, {"i": 997, "ram": 4.5156, "time": 0.6673, "before": 4.3789, "after": 4.5}, {"i": 998, "ram": 4.3945, "time": 0.6401, "before": 4.3789, "after": 4.3789}, {"i": 999, "ram": 4.3945, "time": 0.636, "before": 4.3789, "after": 4.3789}, {"i": 1000, "ram": 4.3945, "time": 0.6803, "before": 4.3789, "after": 4.3789}];
+let chartInstance = null;
+
+function getThemeColors() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  return {
+    textColor: isDark ? '#f9fafb' : '#0f172a',
+    mutedColor: isDark ? '#9ca3af' : '#475569',
+    gridColor: isDark ? 'rgba(255, 255, 255, 0.05)' : 'rgba(0, 0, 0, 0.05)',
+    blue: isDark ? '#3b82f6' : '#2563eb',
+    blueBg: isDark ? 'rgba(59, 130, 246, 0.12)' : 'rgba(37, 99, 235, 0.08)',
+    pink: isDark ? '#ec4899' : '#db2777',
+    pinkBg: isDark ? 'rgba(236, 72, 153, 0.1)' : 'rgba(219, 39, 119, 0.06)',
+    cardBg: isDark ? '#111827' : '#ffffff'
+  };
+}
+
+function initChart() {
+  const ctx = document.getElementById('benchmarkChart').getContext('2d');
+  const colors = getThemeColors();
+  
+  if (chartInstance) chartInstance.destroy();
+
+  chartInstance = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: rawData.map(d => 'Lần sửa #' + d.i),
+      datasets: [
+        {
+          label: 'Đỉnh RAM (MB)',
+          data: rawData.map(d => d.ram),
+          yAxisID: 'yRAM',
+          borderColor: colors.blue,
+          backgroundColor: colors.blueBg,
+          borderWidth: 2,
+          fill: true,
+          tension: 0.15,
+          pointRadius: 0,
+          pointHoverRadius: 6,
+          pointHoverBackgroundColor: colors.blue
+        },
+        {
+          label: 'Thời gian chạy (giây)',
+          data: rawData.map(d => d.time),
+          yAxisID: 'yTime',
+          borderColor: colors.pink,
+          backgroundColor: colors.pinkBg,
+          borderWidth: 1.5,
+          fill: true,
+          tension: 0.1,
+          pointRadius: 0,
+          pointHoverRadius: 6,
+          pointHoverBackgroundColor: colors.pink
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: colors.cardBg,
+          titleColor: colors.textColor,
+          bodyColor: colors.mutedColor,
+          borderColor: colors.gridColor,
+          borderWidth: 1,
+          padding: 12,
+          titleFont: { family: 'JetBrains Mono', size: 13, weight: 'bold' },
+          bodyFont: { family: 'JetBrains Mono', size: 12 },
+          callbacks: {
+            label: (ctx) => ` ${ctx.dataset.label}: ${ctx.parsed.y.toFixed(4)}`
+          }
+        }
+      },
+      scales: {
+        x: {
+          grid: { display: false },
+          ticks: { color: colors.mutedColor, font: { family: 'JetBrains Mono', size: 10 }, maxTicksLimit: 12 }
+        },
+        yRAM: {
+          type: 'linear',
+          position: 'left',
+          grid: { color: colors.gridColor },
+          ticks: {
+            color: colors.mutedColor,
+            font: { family: 'JetBrains Mono', size: 11 },
+            callback: (v) => v.toFixed(1) + ' MB'
+          }
+        },
+        yTime: {
+          type: 'linear',
+          position: 'right',
+          grid: { display: false },
+          ticks: {
+            color: colors.mutedColor,
+            font: { family: 'JetBrains Mono', size: 11 },
+            callback: (v) => v.toFixed(1) + ' s'
+          }
+        }
+      }
+    }
+  });
+}
+
+function toggleTheme() {
+  const html = document.documentElement;
+  const current = html.getAttribute('data-theme');
+  const target = current === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', target);
+  document.getElementById('theme-toggle').textContent = target === 'dark' ? '☀️ Chế độ Sáng' : '🌙 Chế độ Tối';
+  initChart();
+}
+
+function refreshChartSize() {
+  if (!chartInstance) return;
+  // Chart.js caches canvas size: force a synchronous reflow then resize.
+  // Multiple passes cover grid transition + font/layout settle.
+  try {
+    void document.getElementById('chart-wrapper').offsetWidth;
+    chartInstance.resize();
+    chartInstance.update('none');
+  } catch (e) {}
+  requestAnimationFrame(() => {
+    try { chartInstance.resize(); } catch (e) {}
+  });
+  setTimeout(() => { try { chartInstance.resize(); } catch (e) {} }, 50);
+  setTimeout(() => { try { chartInstance.resize(); } catch (e) {} }, 250);
+}
+
+function toggleSplitView() {
+  const btn = document.getElementById('split-toggle');
+  const on = document.body.classList.toggle('split-layout');
+  if (btn) {
+    btn.classList.toggle('active', on);
+    btn.textContent = on ? '📑 Xếp chồng' : '📑 Chia đôi';
+  }
+  // Force layout recalculation immediately so the split shows without refresh.
+  void document.body.offsetWidth;
+  refreshChartSize();
+}
+
+function initSplitter() {
+  const splitter = document.getElementById('splitter');
+  const main = document.getElementById('main-content');
+  if (!splitter || !main) return;
+  let dragging = false;
+  let startX = 0;
+  let startPct = 60;
+
+  const pctFromEvent = (clientX) => {
+    const rect = main.getBoundingClientRect();
+    if (rect.width <= 0) return startPct;
+    const relX = clientX - rect.left;
+    let pct = (relX / rect.width) * 100;
+    // Keep both panes usable.
+    pct = Math.min(80, Math.max(20, pct));
+    return pct;
+  };
+
+  const onMove = (clientX) => {
+    const pct = pctFromEvent(clientX);
+    main.style.setProperty('--split-pct', pct + '%');
+    refreshChartSize();
+  };
+
+  splitter.addEventListener('mousedown', (e) => {
+    if (!document.body.classList.contains('split-layout')) return;
+    dragging = true;
+    startX = e.clientX;
+    const computed = getComputedStyle(main).getPropertyValue('--split-pct').trim();
+    startPct = parseFloat(computed) || 60;
+    splitter.classList.add('dragging');
+    document.body.classList.add('split-resizing');
+    e.preventDefault();
+  });
+
+  window.addEventListener('mousemove', (e) => {
+    if (!dragging) return;
+    onMove(e.clientX);
+  });
+
+  window.addEventListener('mouseup', () => {
+    if (!dragging) return;
+    dragging = false;
+    splitter.classList.remove('dragging');
+    document.body.classList.remove('split-resizing');
+    refreshChartSize();
+  });
+
+  // Touch support
+  splitter.addEventListener('touchstart', (e) => {
+    if (!document.body.classList.contains('split-layout')) return;
+    dragging = true;
+    splitter.classList.add('dragging');
+    document.body.classList.add('split-resizing');
+    e.preventDefault();
+  }, { passive: false });
+
+  window.addEventListener('touchmove', (e) => {
+    if (!dragging || !e.touches.length) return;
+    onMove(e.touches[0].clientX);
+  }, { passive: true });
+
+  window.addEventListener('touchend', () => {
+    if (!dragging) return;
+    dragging = false;
+    splitter.classList.remove('dragging');
+    document.body.classList.remove('split-resizing');
+    refreshChartSize();
+  });
+
+  // Double-click splitter to reset to 60/40
+  splitter.addEventListener('dblclick', () => {
+    main.style.setProperty('--split-pct', '60%');
+    refreshChartSize();
+  });
+}
+
+function toggleChartTitle() {
+  const btn = document.getElementById('title-toggle');
+  const hidden = document.body.classList.toggle('hide-titles');
+  if (btn) {
+    btn.classList.toggle('active', hidden);
+    btn.textContent = hidden ? '👁 Hiện tiêu đề' : '👁 Ẩn tiêu đề';
+  }
+  void document.body.offsetWidth;
+  refreshChartSize();
+}
+
+function toggleDataset(index) {
+  if (!chartInstance) return;
+  const meta = chartInstance.getDatasetMeta(index);
+  meta.hidden = meta.hidden === null ? !chartInstance.data.datasets[index].hidden : null;
+  chartInstance.update();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  initChart();
+  initSplitter();
+  window.addEventListener('resize', () => { if (chartInstance) chartInstance.resize(); });
+});
+</script>
+</body>
+</html>

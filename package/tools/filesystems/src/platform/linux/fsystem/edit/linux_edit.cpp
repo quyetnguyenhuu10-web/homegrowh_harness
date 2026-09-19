@@ -4,180 +4,305 @@
 #include "detail/replace_transaction.h"
 #include "detail/source_stream.h"
 #include "detail/temp_writer.h"
+#include "../watcher/edit_watcher.h"
 
 #include <fsystem/edit/edit_detail.h>
 
-#include <atomic>
 #include <cerrno>
 #include <cstdint>
-#include <exception>
-#include <string_view>
+#include <span>
+#include <utility>
+#include <vector>
 
 namespace fsystem::linux
 {
+    namespace
+    {
+        struct edit_item_outcome
+        {
+            EditResult result;
+            bool replaced = false;
+        };
+
+        edit_item_outcome edit_one(
+            const EditRequest& request,
+            edit_watcher& watcher_thread
+        )
+        {
+            edit_item_outcome outcome{};
+            EditResult& edit_result = outcome.result;
+            edit_result.path = request.path;
+
+            auto& watcher_state = watcher_thread.state();
+            bool edit_committed = false;
+
+            const auto apply_watcher_timeout = [&]() noexcept
+                -> bool
+            {
+                if (
+                    edit_committed ||
+                    !watcher_thread.timed_out() ||
+                    watcher_thread.file_changed() ||
+                    edit_result.error != 0 ||
+                    edit_result.note != EditNote::none
+                )
+                {
+                    return false;
+                }
+
+                edit_result.error = ETIMEDOUT;
+                edit_result.note = EditNote::timeout;
+                return true;
+            };
+
+            detail::source_file source;
+
+            if (std::uint32_t error = 0;
+                !source.open(request.path, error))
+            {
+                edit_result.error = error;
+                return outcome;
+            }
+
+            if (detail::cancellation_requested(watcher_state))
+            {
+                if (apply_watcher_timeout())
+                    return outcome;
+
+                edit_result.note = EditNote::file_changed;
+                return outcome;
+            }
+
+            fsystem::detail::chunk_matcher matcher(
+                request.old_content
+            );
+
+            if (!source.for_each_chunk(
+                    [&](std::uint64_t offset, std::string_view chunk)
+                    {
+                        if (
+                            detail::cancellation_requested(
+                                watcher_state
+                            )
+                        )
+                        {
+                            return false;
+                        }
+
+                        return matcher.consume(offset, chunk);
+                    },
+                    watcher_state,
+                    edit_result.error
+                ))
+            {
+                if (apply_watcher_timeout())
+                    return outcome;
+
+                if (detail::cancellation_requested(watcher_state))
+                {
+                    edit_result.note = EditNote::file_changed;
+                    return outcome;
+                }
+
+                return outcome;
+            }
+
+            if (detail::cancellation_requested(watcher_state))
+            {
+                if (apply_watcher_timeout())
+                    return outcome;
+
+                edit_result.note = EditNote::file_changed;
+                return outcome;
+            }
+
+            matcher.finish(source.size());
+
+            if (matcher.invalid())
+            {
+                edit_result.error = EINVAL;
+                return outcome;
+            }
+
+            edit_result.note = matcher.note();
+
+            if (edit_result.note != EditNote::none)
+                return outcome;
+
+            detail::temporary_file temp;
+
+            const bool prepared = detail::prepare_temp_file(
+                request.path,
+                source,
+                matcher.first_occurrence(),
+                request.old_content.size(),
+                request.new_content,
+                watcher_state,
+                temp,
+                edit_result.error
+            );
+
+            if (prepared)
+            {
+                outcome.replaced = detail::commit_replace(
+                    request.path,
+                    source,
+                    temp,
+                    watcher_state,
+                    edit_result.replace_attempted,
+                    edit_result.error
+                );
+
+                edit_committed = outcome.replaced;
+            }
+
+            if (!edit_committed)
+                (void)apply_watcher_timeout();
+
+            if (!outcome.replaced)
+            {
+                if (
+                    edit_result.note == EditNote::none &&
+                    (
+                        watcher_thread.cancellation_requested() ||
+                        watcher_thread.file_changed()
+                    )
+                )
+                {
+                    edit_result.note = EditNote::file_changed;
+                }
+            }
+
+            return outcome;
+        }
+
+        void finalize_watcher_result(
+            const edit_watcher& watcher_thread,
+            std::vector<edit_item_outcome>& outcomes
+        )
+        {
+            for (edit_item_outcome& outcome : outcomes)
+            {
+                EditResult& edit_result = outcome.result;
+
+                if (watcher_thread.has_exception())
+                {
+                    edit_result.error =
+                        watcher_thread_exception_error;
+                    continue;
+                }
+
+                if (
+                    watcher_thread.result().error != 0 &&
+                    !watcher_thread.cleanup_timed_out() &&
+                    !(
+                        outcome.replaced &&
+                        watcher_thread.result().error ==
+                            static_cast<std::uint32_t>(ETIMEDOUT)
+                    )
+                )
+                {
+                    if (edit_result.error == 0)
+                    {
+                        edit_result.error =
+                            watcher_thread.result().error;
+                    }
+
+                    continue;
+                }
+
+                if (
+                    !outcome.replaced &&
+                    edit_result.note == EditNote::none &&
+                    watcher_thread.result().event_status ==
+                        EventStatus::HasEvent
+                )
+                {
+                    edit_result.note = EditNote::file_changed;
+                }
+            }
+        }
+    }
+
+    EditResults edit_file(const EditRequests& requests)
+    {
+        EditResults results;
+
+        if (requests.empty())
+            return results;
+
+        std::vector<std::filesystem::path> watched_paths;
+        watched_paths.reserve(requests.size());
+
+        for (const EditRequest& request : requests)
+            watched_paths.push_back(request.path);
+
+        edit_watcher watcher_thread(
+            std::span<const std::filesystem::path>(
+                watched_paths.data(),
+                watched_paths.size()
+            )
+        );
+
+        std::vector<edit_item_outcome> outcomes;
+        outcomes.reserve(requests.size());
+
+        if (watcher_thread.finished_before_ready())
+        {
+            for (const EditRequest& request : requests)
+            {
+                edit_item_outcome outcome{};
+                outcome.result.path = request.path;
+
+                if (watcher_thread.has_exception())
+                {
+                    outcome.result.error =
+                        watcher_thread_exception_error;
+                }
+                else if (!watcher_thread.cleanup_timed_out())
+                {
+                    outcome.result.error =
+                        watcher_thread.result().error;
+                }
+
+                outcomes.push_back(std::move(outcome));
+            }
+        }
+        else
+        {
+            for (const EditRequest& request : requests)
+            {
+                outcomes.push_back(edit_one(request, watcher_thread));
+                detail::prepare_next_edit(watcher_thread.state());
+            }
+        }
+
+        /* One cancellation/cleanup for the complete batch. */
+        watcher_thread.stop();
+        finalize_watcher_result(watcher_thread, outcomes);
+
+        results.reserve(outcomes.size());
+
+        for (edit_item_outcome& outcome : outcomes)
+            results.push_back(std::move(outcome.result));
+
+        return results;
+    }
+
     EditResult edit_file(
         const std::filesystem::path& path,
         const std::string& old_data,
         const std::string& new_data
     )
     {
-        EditResult edit_result{};
+        const EditRequests requests{
+            EditRequest{path, old_data, new_data}
+        };
 
-        fsystem::WatcherState watcher_state;
-        fsystem::WatcherResult watcher_result{};
-        std::exception_ptr watcher_exception;
+        EditResults results = edit_file(requests);
 
-        fsystem::detail::watcher_thread_guard watcher_thread(
-            path,
-            watcher_state,
-            watcher_result,
-            watcher_exception
-        );
-
-        /* Preserve the early-stop-before-ready handling. */
-        if (
-            watcher_state.finished.load(std::memory_order_acquire) &&
-            !watcher_state.ready.load(std::memory_order_acquire)
-        )
-        {
-            watcher_thread.stop();
-
-            edit_result.error = watcher_exception != nullptr
-                ? fsystem::detail::watcher_thread_exception_error
-                : watcher_result.error;
-
-            return edit_result;
-        }
-
-        detail::source_file source;
-
-        if (std::uint32_t error = 0;
-            !source.open(path, error))
-        {
-            watcher_thread.stop();
-            edit_result.error = error;
-            return edit_result;
-        }
-
-        /* The watcher may have detected a change while opening the source. */
-        if (detail::cancellation_requested(watcher_state))
-        {
-            watcher_thread.stop();
-            edit_result.note = EditNote::file_changed;
-            return edit_result;
-        }
-
-        fsystem::detail::chunk_matcher matcher(old_data);
-
-        if (!source.for_each_chunk(
-                [&](std::uint64_t offset, std::string_view chunk)
-                {
-                    if (detail::cancellation_requested(watcher_state))
-                        return false;
-
-                    return matcher.consume(offset, chunk);
-                },
-                watcher_state,
-                edit_result.error
-            ))
-        {
-            watcher_thread.stop();
-
-            if (detail::cancellation_requested(watcher_state))
-            {
-                edit_result.note = EditNote::file_changed;
-                return edit_result;
-            }
-
-            return edit_result;
-        }
-
-        /* A change can arrive after the last chunk and before finalization. */
-        if (detail::cancellation_requested(watcher_state))
-        {
-            watcher_thread.stop();
-            edit_result.note = EditNote::file_changed;
-            return edit_result;
-        }
-
-        matcher.finish(source.size());
-
-        if (matcher.invalid())
-        {
-            watcher_thread.stop();
-            edit_result.error = EINVAL;
-            return edit_result;
-        }
-
-        edit_result.note = matcher.note();
-
-        if (edit_result.note != EditNote::none)
-        {
-            watcher_thread.stop();
-            return edit_result;
-        }
-
-        detail::temporary_file temp;
-
-        const bool prepared = detail::prepare_temp_file(
-            path,
-            source,
-            matcher.first_occurrence(),
-            old_data.size(),
-            new_data,
-            watcher_state,
-            temp,
-            edit_result.error
-        );
-
-        bool replaced = false;
-
-        if (prepared)
-        {
-            replaced = detail::commit_replace(
-                path,
-                source,
-                temp,
-                watcher_state,
-                edit_result.replace_attempted,
-                edit_result.error
-            );
-        }
-
-        /* Keep the watcher alive through the complete commit attempt. */
-        watcher_thread.stop();
-
-        if (watcher_exception != nullptr)
-        {
-            edit_result.error =
-                fsystem::detail::watcher_thread_exception_error;
-            return edit_result;
-        }
-
-        if (watcher_result.error != 0)
-        {
-            edit_result.error = watcher_result.error;
-            return edit_result;
-        }
-
-        if (!replaced)
-        {
-            if (
-                watcher_state.cancel_requested.load(
-                    std::memory_order_acquire
-                ) ||
-                watcher_state.file_changed.load(
-                    std::memory_order_acquire
-                ) ||
-                watcher_result.event_status == EventStatus::HasEvent
-            )
-            {
-                edit_result.note = EditNote::file_changed;
-            }
-
-            return edit_result;
-        }
-
-        return edit_result;
+        return results.empty()
+            ? EditResult{path}
+            : std::move(results.front());
     }
 }

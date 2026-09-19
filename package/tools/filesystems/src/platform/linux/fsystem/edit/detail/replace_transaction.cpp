@@ -12,7 +12,7 @@ namespace fsystem::linux::detail
         const std::filesystem::path& path,
         source_file& source,
         temporary_file& temp,
-        fsystem::WatcherState& watcher_state,
+        watcher_state& watcher_state,
         bool& replace_attempted,
         std::uint32_t& error
     )
@@ -33,6 +33,13 @@ namespace fsystem::linux::detail
             return false;
         }
 
+        /* Timeout and commit race through one atomic final gate. */
+        if (!begin_commit(watcher_state))
+        {
+            temp.discard();
+            return false;
+        }
+
         /* Both handles are closed before the irreversible rename. */
         temp.close();
         source.reset();
@@ -46,6 +53,8 @@ namespace fsystem::linux::detail
             return false;
         }
 
+        /* rename succeeded: this is the edit linearization point. */
+        mark_committed(watcher_state);
         temp.commit_success();
         return true;
     }

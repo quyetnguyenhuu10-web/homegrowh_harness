@@ -83,7 +83,7 @@ namespace fsystem::windows::detail
         char* buffer,
         std::size_t requested,
         std::size_t& filled,
-        fsystem::WatcherState& watcher_state,
+        watcher_state& watcher_state,
         std::uint32_t& error
     )
     {

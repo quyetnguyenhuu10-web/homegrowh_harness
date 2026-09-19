@@ -10,7 +10,7 @@ namespace fsystem::windows::detail
         const std::filesystem::path& path,
         source_file& source,
         temporary_file& temp,
-        fsystem::WatcherState& watcher_state,
+        watcher_state& watcher_state,
         bool& replace_attempted,
         std::uint32_t& error
     )
@@ -26,6 +26,13 @@ namespace fsystem::windows::detail
         }
 
         if (cancellation_requested(watcher_state))
+        {
+            temp.discard();
+            return false;
+        }
+
+        /* Timeout and commit race through one atomic final gate. */
+        if (!begin_commit(watcher_state))
         {
             temp.discard();
             return false;
@@ -51,6 +58,8 @@ namespace fsystem::windows::detail
             return false;
         }
 
+        /* ReplaceFileW succeeded: this is the edit linearization point. */
+        mark_committed(watcher_state);
         temp.commit_success();
         return true;
     }
