@@ -1,8 +1,0 @@
-{
-  "input": "D:\\homegrowh_harness\\package\\tools\\filesystems\\tests\\artifacts\\windows-edit-stress-results\\results.csv",
-  "output": "D:\\homegrowh_harness\\package\\tools\\filesystems\\tests\\artifacts\\windows-edit-stress-results\\report.html",
-  "total": 37,
-  "pass": 36,
-  "fail": 0,
-  "inconclusive": 1
-}

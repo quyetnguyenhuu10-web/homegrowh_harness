@@ -1,0 +1,69 @@
+/* Dropup chọn model. Tiền tố ct- để không đụng CSS host.
+   Inline vào JS bằng `?inline` nên bundle nhúng vẫn 1 file (xem PickerModel.tsx).
+   Panel mở ngược lên trên vì composer neo đáy màn hình. */
+.ct-modelpick {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.ct-modelpick__btn {
+  max-width: 148px;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+  background: #f9fafb;
+  outline: none;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ct-modelpick__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ct-modelpick__panel {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  min-width: 180px;
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 20;
+}
+
+.ct-modelpick__item {
+  display: block;
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  text-align: left;
+  color: #111827;
+  background: transparent;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.ct-modelpick__item:hover {
+  background: #f3f4f6;
+}
+
+.ct-modelpick__item--active {
+  font-weight: 700;
+  color: #2563eb;
+  background: #eff6ff;
+}

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.log
+# File .db runtime (mỗi id 1 file)
+*.db
+*.db-wal
+*.db-shm
+*.db-journal

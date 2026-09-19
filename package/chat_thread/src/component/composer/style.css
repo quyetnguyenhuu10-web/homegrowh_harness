@@ -1,0 +1,47 @@
+/* Composer styles. Tiền tố ct- để không đụng CSS host.
+   File này được inline vào JS bằng `?inline` nên bundle nhúng
+   vẫn 1 file duy nhất (xem Composer.tsx). */
+.ct-composer {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  width: min(640px, calc(100% - 32px));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 16px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  box-sizing: border-box;
+  z-index: 10;
+}
+
+.ct-composer__input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  font-size: 14px;
+  background: transparent;
+  color: #111827;
+}
+
+.ct-composer__send {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 999px;
+  padding: 8px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+  background: #2563eb;
+  cursor: pointer;
+}
+
+.ct-composer__send:disabled {
+  background: #9ca3af;
+  cursor: default;
+}

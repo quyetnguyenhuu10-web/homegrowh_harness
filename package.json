@@ -1,0 +1,34 @@
+{
+  "name": "homegrowh_harness",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/quyetnguyenhuu10-web/homegrowh_harness.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/quyetnguyenhuu10-web/homegrowh_harness/issues"
+  },
+  "homepage": "https://github.com/quyetnguyenhuu10-web/homegrowh_harness#readme",
+  "dependencies": {
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "electron": "^44.4.3",
+    "typescript": "^7.0.2"
+  }
+}

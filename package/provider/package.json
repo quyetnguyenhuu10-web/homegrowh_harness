@@ -1,0 +1,31 @@
+{
+  "name": "@homegrowh/provider",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Router provider LLM thống nhất (OpenAI, DeepSeek) — một API duy nhất, router theo provider + api key",
+  "type": "module",
+  "main": "./dist/src/register.js",
+  "types": "./dist/src/register.d.ts",
+  "exports": {
+    ".": "./dist/src/register.js",
+    "./models": "./dist/src/models.js",
+    "./openai": "./dist/src/openai/index.js",
+    "./deepseek": "./dist/src/deepseek/index.js",
+    "./ollama": "./dist/src/local/ollama/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:cli": "node ./dist/tests/cli.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

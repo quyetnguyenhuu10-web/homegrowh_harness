@@ -1,0 +1,46 @@
+/* Chat container styles. Tiền tố ct- để không đụng CSS host.
+   Inline vào JS bằng `?inline` nên bundle nhúng vẫn 1 file (xem ChatContainer.tsx).
+   Hình học (top/height) do TSX tính inline; file này chỉ lo nhìn. */
+.ct-chat {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.ct-chat__total {
+  position: relative;
+  width: 100%;
+}
+
+.ct-chat__panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.ct-chat__msg {
+  flex-shrink: 0;
+  display: flex;
+  box-sizing: border-box;
+}
+
+.ct-chat__msg--user {
+  justify-content: flex-end;
+}
+
+.ct-chat__msg--assistant {
+  justify-content: flex-start;
+}
+
+.ct-chat__bubble {
+  border-radius: 12px;
+  background: #f3f4f6;
+}
+
+.ct-chat__msg--user .ct-chat__bubble {
+  background: #dbeafe;
+}

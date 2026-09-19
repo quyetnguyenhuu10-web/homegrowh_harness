@@ -1,0 +1,14 @@
+/* Bỏ thanh scroll toàn cục: trang đứng yên, không cuộn body. */
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+#root {
+  height: 100%;
+  overflow: hidden;
+}

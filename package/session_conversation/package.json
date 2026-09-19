@@ -1,0 +1,23 @@
+{
+  "name": "@homegrowh/session-conversation",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Phiên hội thoại thống nhất — một API cho user/assistant/tool_call/tool_result, socket chỉ đóng khi gọi close()",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
