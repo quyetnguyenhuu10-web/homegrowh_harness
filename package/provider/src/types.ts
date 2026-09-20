@@ -1,13 +1,38 @@
 // Kiểu dùng chung cho API LLM thống nhất.
 
-export type ProviderName = "openai" | "deepseek" | "ollama";
+export type ProviderName = "openai" | "deepseek" | "ollama" | "custom";
 
-export type ChatRole = "system" | "user" | "assistant";
+export type ChatRole = "system" | "user" | "assistant" | "tool";
+
+export type JsonObject = Record<string, unknown>;
+export type JsonArguments = JsonObject | JsonObject[];
+
+export interface ChatToolCall {
+  id: string;
+  type: "function";
+  function: {
+    name: string;
+    arguments: JsonArguments;
+  };
+}
+
+export interface ChatToolDefinition {
+  type: "function";
+  function: {
+    name: string;
+    description?: string;
+    parameters: Record<string, unknown>;
+  };
+}
 
 export interface ChatMessage {
   role: ChatRole;
-  content: string;
+  content: string | null;
+  /** OpenAI-compatible reasoning channel của assistant history. */
+  reasoning_content?: string;
   name?: string;
+  tool_calls?: ChatToolCall[];
+  tool_call_id?: string;
 }
 
 /** Một khuôn gọi duy nhất — router chọn provider + key từ đây. */
@@ -15,6 +40,8 @@ export interface ChatOptions {
   /** Khóa router: chọn implementation của provider nào. */
   provider: ProviderName;
   messages: ChatMessage[];
+  /** Function tools gửi nguyên theo OpenAI-compatible chat completions schema. */
+  tools?: ChatToolDefinition[];
   /**
    * Field BẮT BUỘC chọn model cho lần gọi. Id lấy trong registry
    * models.ts (xem listModels()). API không có model mặc định.
@@ -27,20 +54,16 @@ export interface ChatOptions {
   temperature?: number;
   maxTokens?: number;
   timeoutMs?: number;
+  /** Hủy request đang chạy từ caller. */
+  signal?: AbortSignal;
 }
 
 export interface ChatUsage {
   promptTokens?: number;
   completionTokens?: number;
+  /** Token nội bộ dành cho reasoning. */
+  reasoningTokens?: number;
   totalTokens?: number;
-}
-
-export interface ChatResult {
-  provider: ProviderName;
-  model: string;
-  content: string;
-  usage: ChatUsage;
-  raw: unknown;
 }
 
 /**
@@ -53,6 +76,8 @@ export interface StreamDelta {
   model: string;
   /** Mẩu text trong chunk này (có thể rỗng ở chunk chỉ báo finish/usage). */
   delta: string;
+  /** Mẩu reasoning provider có expose qua OpenAI-compatible delta. Không dùng làm answer text. */
+  reasoningDelta?: string;
   /** JSON gốc của SSE chunk (null ở sự kiện done). */
   raw: unknown;
   finishReason?: string | null;
@@ -82,11 +107,8 @@ export class LlmError extends Error {
 export interface LlmProvider {
   name: ProviderName;
   defaultBaseUrl: string;
-  chat(
-    input: Omit<ChatOptions, "provider"> & { apiKey: string; baseUrl?: string },
-  ): Promise<ChatResult>;
-  /** Stream delta thô (SSE), giữ nguyên thứ tự + JSON gốc từng chunk. */
-  chatStream(
+  /** Một model invocation duy nhất, stream delta thô theo thứ tự upstream. */
+  call(
     input: Omit<ChatOptions, "provider"> & { apiKey: string; baseUrl?: string },
   ): AsyncIterable<StreamDelta>;
 }

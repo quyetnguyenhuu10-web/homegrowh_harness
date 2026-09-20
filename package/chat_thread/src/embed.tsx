@@ -6,11 +6,6 @@
 import { createRoot, type Root } from "react-dom/client";
 import App from "./App";
 
-/** Tùy chọn nhúng (giữ chỗ để mở rộng sau, hiện chưa dùng). */
-export interface ChatThreadOptions {
-  [key: string]: unknown;
-}
-
 const roots = new WeakMap<HTMLElement, Root>();
 
 function resolveTarget(target: HTMLElement | string): HTMLElement {
@@ -23,9 +18,7 @@ function resolveTarget(target: HTMLElement | string): HTMLElement {
 /** Gắn app vào 1 element bất kỳ, trả về hàm gỡ. Gọi lại cùng element sẽ mount lại sạch. */
 export function mountChatThread(
   target: HTMLElement | string,
-  _options: ChatThreadOptions = {},
 ): () => void {
-  void _options;
   const el = resolveTarget(target);
   unmountChatThread(el);
   const root = createRoot(el);

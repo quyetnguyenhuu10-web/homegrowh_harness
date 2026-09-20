@@ -1,182 +1,199 @@
 #include <fsystem>
-#include <iostream>
-#include <string>
-#include <filesystem>
-#include <vector>
+
 #include <CLI/CLI.hpp>
 #include <nlohmann/json.hpp>
 
+#include <filesystem>
+#include <iostream>
+#include <string>
+#include <utility>
+
+#include "toolcall_protocol.h"
+
 using json = nlohmann::json;
 
-const char* to_string(fsystem::EditNote note)
+namespace
 {
-    switch (note)
+    constexpr const char* tool_name = "edit_file";
+
+    const char* to_string(fsystem::EditNote note)
     {
-        case fsystem::EditNote::none:
-            return "none";
-
-        case fsystem::EditNote::old_data_not_found:
-            return "old_data_not_found";
-
-        case fsystem::EditNote::old_data_appears_more_than_once:
-            return "old_data_appears_more_than_once";
-
-        case fsystem::EditNote::file_changed:
-            return "file_changed";
-
-        case fsystem::EditNote::old_data_occurrences_overlap:
-            return "old_data_occurrences_overlap";
-
-        case fsystem::EditNote::timeout:
-            return "timeout";
-    }
-
-    return "unknown";
-}
-
-// Một item phải có đủ 3 trường chuỗi: path / old_content / new_content.
-bool parse_item(
-    const json& item,
-    fsystem::EditRequest& out,
-    std::string& error
-)
-{
-    for (const char* key : {"path", "old_content", "new_content"})
-    {
-        if (!item.contains(key) || !item.at(key).is_string())
+        switch (note)
         {
-            error = std::string("Thiếu trường chuỗi: ") + key;
-            return false;
+            case fsystem::EditNote::none:
+                return "none";
+            case fsystem::EditNote::old_data_not_found:
+                return "old_data_not_found";
+            case fsystem::EditNote::old_data_appears_more_than_once:
+                return "old_data_appears_more_than_once";
+            case fsystem::EditNote::file_changed:
+                return "file_changed";
+            case fsystem::EditNote::old_data_occurrences_overlap:
+                return "old_data_occurrences_overlap";
+            case fsystem::EditNote::timeout:
+                return "timeout";
         }
+
+        return "unknown";
     }
 
-    out.path = item.at("path").get<std::string>();
-    out.old_content = item.at("old_content").get<std::string>();
-    out.new_content = item.at("new_content").get<std::string>();
+    bool parse_item(
+        const json& item,
+        fsystem::EditRequest& out,
+        std::string& error
+    )
+    {
+        for (const char* key : {"path", "old_content", "new_content"})
+        {
+            if (!item.contains(key) || !item.at(key).is_string())
+            {
+                error = std::string("Thiếu trường chuỗi: ") + key;
+                return false;
+            }
+        }
 
-    return true;
+        out.path = item.at("path").get<std::string>();
+        out.old_content = item.at("old_content").get<std::string>();
+        out.new_content = item.at("new_content").get<std::string>();
+        return true;
+    }
+
+    int fail(
+        const json& call_id,
+        const std::string& code,
+        const std::string& message,
+        int exit_code = 2
+    )
+    {
+        std::cout
+            << toolcall_protocol::make_error_response(
+                tool_name,
+                call_id,
+                code,
+                message
+            ).dump()
+            << '\n';
+        return exit_code;
+    }
 }
 
 int main(int argc, char* argv[])
 {
-    CLI::App edit{};
+    CLI::App app{"Batch file edit tool executable"};
+    std::filesystem::path toolcall_path;
 
-    std::filesystem::path path_toolcall;
-    edit.add_option(
+    app.add_option(
         "--toolcall",
-        path_toolcall,
-        "Nhận đường dẫn json chứa hướng dẫn sửa file (1 object hoặc 1 mảng)"
+        toolcall_path,
+        "Đường dẫn JSON tool call"
     );
-    CLI11_PARSE(edit, argc, argv);
+    CLI11_PARSE(app, argc, argv);
 
-    if (path_toolcall.empty())
+    if (toolcall_path.empty())
+        return fail(nullptr, "missing_argument", "Thiếu --toolcall <path>");
+
+    const fsystem::ReadResult input = fsystem::read(toolcall_path);
+    if (input.error != 0)
     {
-        std::cerr << "Thiếu --toolcall <đường dẫn json>\n";
-        return 1;
+        return fail(
+            nullptr,
+            "toolcall_read_failed",
+            "Không đọc được file tool call, mã lỗi: " +
+                std::to_string(input.error)
+        );
     }
 
-    // 1. Đọc toàn bộ file json hướng dẫn.
-    const fsystem::ReadResult read_result = fsystem::read(path_toolcall);
-
-    if (read_result.error != 0)
-    {
-        std::cerr
-            << "Không đọc được file json, mã lỗi: "
-            << read_result.error
-            << '\n';
-
-        return 1;
-    }
-
-    // 2. Parse toàn bộ json (chấp nhận 1 object hoặc 1 mảng object).
-    json workflow;
-
+    json root;
     try
     {
-        workflow = json::parse(read_result.content);
+        root = json::parse(input.content);
     }
-    catch (const std::exception& e)
+    catch (const std::exception& exception)
     {
-        std::cerr << "JSON lỗi: " << e.what() << '\n';
-        return 1;
+        return fail(nullptr, "invalid_json", exception.what());
     }
 
-    // 3. Dựng TOÀN BỘ requests trước, chưa gọi edit.
+    toolcall_protocol::Invocation invocation;
+    std::string parse_error;
+
+    if (!toolcall_protocol::parse_invocation(
+            root,
+            tool_name,
+            invocation,
+            parse_error
+        ))
+    {
+        const json call_id =
+            root.is_object() && root.contains("call_id")
+                ? root.at("call_id")
+                : json(nullptr);
+        return fail(call_id, "invalid_toolcall", parse_error);
+    }
+
+    if (invocation.requests.empty())
+        return fail(invocation.call_id, "empty_requests", "Không có request nào");
+
     fsystem::EditRequests requests;
+    requests.reserve(invocation.requests.size());
 
-    if (workflow.is_array())
-        requests.reserve(workflow.size());
-
-    const auto append_item = [&](const json& item) -> bool
+    for (std::size_t index = 0; index < invocation.requests.size(); ++index)
     {
         fsystem::EditRequest request;
         std::string error;
 
-        if (!parse_item(item, request, error))
+        if (!parse_item(invocation.requests[index], request, error))
         {
-            std::cerr << "Item lỗi: " << error << '\n';
-            return false;
+            return fail(
+                invocation.call_id,
+                "invalid_request",
+                "requests[" + std::to_string(index) + "]: " + error
+            );
         }
 
         requests.push_back(std::move(request));
-        return true;
-    };
-
-    if (workflow.is_array())
-    {
-        for (const json& item : workflow)
-        {
-            if (!item.is_object() || !append_item(item))
-                return 1;
-        }
-    }
-    else if (workflow.is_object())
-    {
-        if (!append_item(workflow))
-            return 1;
-    }
-    else
-    {
-        std::cerr << "JSON phải là object hoặc mảng object\n";
-        return 1;
     }
 
-    if (requests.empty())
-    {
-        std::cerr << "Không có request nào để sửa\n";
-        return 1;
-    }
-
-    // 4. Gọi edit ĐÚNG 1 LẦN với tất cả phần tử.
     const fsystem::EditResults edit_results = fsystem::edit(requests);
+    json results = json::array();
+    bool all_ok = edit_results.size() == requests.size();
 
-    // 5. In kết quả JSON (1 mảng, cùng thứ tự requests).
-    json output = json::array();
-
-    for (std::size_t i = 0; i < requests.size(); ++i)
+    for (std::size_t index = 0; index < requests.size(); ++index)
     {
-        if (i < edit_results.size())
+        if (index >= edit_results.size())
         {
-            const fsystem::EditResult& r = edit_results[i];
-
-            output.push_back({
-                {"path", r.path.string()},
-                {"error", r.error},
-                {"note", to_string(r.note)},
-                {"replace_attempted", r.replace_attempted}
-            });
-        }
-        else
-        {
-            output.push_back({
-                {"path", requests[i].path.string()},
+            all_ok = false;
+            results.push_back({
+                {"path", requests[index].path.string()},
+                {"ok", false},
                 {"error", 0},
                 {"note", "missing_result"},
                 {"replace_attempted", false}
             });
+            continue;
         }
+
+        const fsystem::EditResult& result = edit_results[index];
+        const bool item_ok =
+            result.error == 0 && result.note == fsystem::EditNote::none;
+        all_ok = all_ok && item_ok;
+
+        results.push_back({
+            {"path", result.path.string()},
+            {"ok", item_ok},
+            {"error", result.error},
+            {"note", to_string(result.note)},
+            {"replace_attempted", result.replace_attempted}
+        });
     }
 
-    std::cout << output.dump(4) << '\n';
+    std::cout
+        << toolcall_protocol::make_response(
+            invocation,
+            all_ok,
+            std::move(results)
+        ).dump()
+        << '\n';
+
+    // Request hợp lệ đã được xử lý: per-item filesystem errors nằm trong JSON.
     return 0;
 }

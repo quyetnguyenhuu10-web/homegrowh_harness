@@ -14,16 +14,37 @@ homegrowh_harness/
 │   │   │   │   ├── composer
 │   │   │   │   │   ├── Composer.tsx
 │   │   │   │   │   └── style.css
+│   │   │   │   ├── conversation_navigator
+│   │   │   │   │   ├── ConversationNavigator.tsx
+│   │   │   │   │   ├── index.ts
+│   │   │   │   │   └── style.css
+│   │   │   │   ├── history_conversation
+│   │   │   │   │   ├── projects
+│   │   │   │   │   ├── desktop_bridge.ts
+│   │   │   │   │   ├── index.ts
+│   │   │   │   │   ├── repository.ts
+│   │   │   │   │   ├── store.ts
+│   │   │   │   │   └── types.ts
 │   │   │   │   ├── picker_model
 │   │   │   │   │   ├── PickerModel.tsx
 │   │   │   │   │   └── style.css
-│   │   │   │   ├── sessions
+│   │   │   │   ├── session_conversation
+│   │   │   │   │   ├── index.ts
+│   │   │   │   │   ├── llm.ts
+│   │   │   │   │   ├── session_websocket.ts
+│   │   │   │   │   ├── session.ts
+│   │   │   │   │   ├── types.ts
+│   │   │   │   │   └── websocket_types.ts
 │   │   │   │   ├── view_history
 │   │   │   │   │   ├── index.ts
 │   │   │   │   │   ├── style.css
 │   │   │   │   │   └── ViewHistory.tsx
 │   │   │   │   └── style_tag.ts
 │   │   │   ├── App.tsx
+│   │   │   ├── desktop
+│   │   │   │   ├── app.ts
+│   │   │   │   ├── main.ts
+│   │   │   │   └── preload.ts
 │   │   │   ├── embed.tsx
 │   │   │   ├── index.css
 │   │   │   ├── main.tsx
@@ -34,6 +55,7 @@ homegrowh_harness/
 │   │   ├── package.json
 │   │   ├── tsconfig.json
 │   │   ├── vite.config.ts
+│   │   ├── vite.desktop.config.ts
 │   │   └── vite.embed.config.ts
 │   ├── compaction
 │   │   ├── src
@@ -42,17 +64,6 @@ homegrowh_harness/
 │   │   ├── package.json
 │   │   └── tsconfig.json
 │   ├── event_store
-│   ├── history_conversation
-│   │   ├── src
-│   │   │   ├── output
-│   │   │   ├── index.ts
-│   │   │   ├── store.ts
-│   │   │   └── types.ts
-│   │   ├── tests
-│   │   ├── .gitignore
-│   │   ├── package-lock.json
-│   │   ├── package.json
-│   │   └── tsconfig.json
 │   ├── provider
 │   │   ├── src
 │   │   │   ├── deepseek
@@ -71,17 +82,6 @@ homegrowh_harness/
 │   │   │   └── cli.ts
 │   │   ├── .env
 │   │   ├── .env.example
-│   │   ├── .gitignore
-│   │   ├── package-lock.json
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   ├── session_conversation
-│   │   ├── src
-│   │   │   ├── index.ts
-│   │   │   ├── llm.ts
-│   │   │   ├── session.ts
-│   │   │   └── types.ts
-│   │   ├── tests
 │   │   ├── .gitignore
 │   │   ├── package-lock.json
 │   │   ├── package.json

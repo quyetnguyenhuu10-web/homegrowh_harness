@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "conversations": {
+    "c23beaa6-806f-4d0d-a70e-d6b3afd38180": {
+      "conversationId": "c23beaa6-806f-4d0d-a70e-d6b3afd38180",
+      "provider": "ollama",
+      "model": "qwen3:4b",
+      "characters": 733,
+      "estimatedTokens": 184,
+      "contextLimitTokens": 64000,
+      "contextLimitCharacters": 256000,
+      "usageRatio": 0.00286328125,
+      "API_sessions": "86043b5a-d8b9-45ad-b151-8238a4b04aed",
+      "trigger": "user",
+      "reasoningHistory": {
+        "mode": "recent",
+        "requestCount": 5
+      },
+      "updatedAt": 1789906635318
+    },
+    "420ea018-d78c-441e-83d7-e7a5e71cae89": {
+      "conversationId": "420ea018-d78c-441e-83d7-e7a5e71cae89",
+      "provider": "ollama",
+      "model": "qwen3:4b",
+      "characters": 2,
+      "estimatedTokens": 1,
+      "contextLimitTokens": 64000,
+      "contextLimitCharacters": 256000,
+      "usageRatio": 0.0000078125,
+      "API_sessions": "81db4500-522f-4587-be0a-816a6b405518",
+      "trigger": "user",
+      "reasoningHistory": {
+        "mode": "recent",
+        "requestCount": 5
+      },
+      "updatedAt": 1789906651178
+    }
+  }
+}

@@ -1,9 +1,12 @@
 // Provider Ollama local (endpoint /v1 tương thích OpenAI).
 // Không cần key: Ollama local bỏ qua auth (để trống vẫn chạy).
-import { chatCompletions, pickUsage, streamCompletions } from "../../shared/http.js";
+import {
+  pickReasoningDelta,
+  pickUsage,
+  streamCompletions,
+} from "../../shared/http.js";
 import type {
   ChatMessage,
-  ChatResult,
   LlmProvider,
   ProviderName,
   StreamDelta,
@@ -25,22 +28,7 @@ export function createOllamaClient(opts: OllamaClientOptions = {}): LlmProvider 
   return {
     name,
     defaultBaseUrl,
-    async chat(input): Promise<ChatResult> {
-      const model = input.model;
-      const messages: ChatMessage[] = input.messages;
-      const out = await chatCompletions({
-        provider: name,
-        baseUrl: input.baseUrl ?? defaultBaseUrl,
-        apiKey: input.apiKey || apiKey,
-        model,
-        messages,
-        temperature: input.temperature,
-        maxTokens: input.maxTokens,
-        timeoutMs: input.timeoutMs,
-      });
-      return { provider: name, model, ...out };
-    },
-    async *chatStream(input): AsyncIterable<StreamDelta> {
+    async *call(input): AsyncIterable<StreamDelta> {
       const model = input.model;
       for await (const chunk of streamCompletions({
         provider: name,
@@ -48,9 +36,11 @@ export function createOllamaClient(opts: OllamaClientOptions = {}): LlmProvider 
         apiKey: input.apiKey || apiKey,
         model,
         messages: input.messages as ChatMessage[],
+        tools: input.tools,
         temperature: input.temperature,
         maxTokens: input.maxTokens,
         timeoutMs: input.timeoutMs,
+        signal: input.signal,
       })) {
         if (chunk.done) {
           yield { provider: name, model, delta: "", raw: null, finishReason: null, usage: {}, done: true };
@@ -72,6 +62,7 @@ export function createOllamaClient(opts: OllamaClientOptions = {}): LlmProvider 
           provider: name,
           model,
           delta: deltaText,
+          reasoningDelta: pickReasoningDelta(chunk.json),
           raw: chunk.json,
           finishReason: finish,
           usage: pickUsage(chunk.json),

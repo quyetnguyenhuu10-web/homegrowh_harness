@@ -1,0 +1,349 @@
+.ct-empty-conversation {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 8;
+  display: flex;
+  width: min(620px, calc(100% - 48px));
+  box-sizing: border-box;
+  flex-direction: column;
+  align-items: center;
+  transform: translate(-50%, -62%);
+  font-family: "Segoe WPC", "Segoe UI", sans-serif;
+}
+
+.ct-empty-conversation__title {
+  margin: 0;
+  color: #202124;
+  font-size: 32px;
+  font-weight: 560;
+  line-height: 1.22;
+  letter-spacing: -0.018em;
+  text-align: center;
+}
+
+.ct-empty-conversation__project-trigger {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 7px;
+  margin-top: 12px;
+  padding: 4px 2px;
+  border: 0;
+  color: #747b84;
+  background: transparent;
+  font: 14.5px/20px "Segoe WPC", "Segoe UI", sans-serif;
+  cursor: pointer;
+}
+
+.ct-empty-conversation__project-trigger > span {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.ct-empty-conversation__project-trigger:hover,
+.ct-empty-conversation__project-trigger[aria-expanded="true"] {
+  color: #3e434a;
+  background: transparent;
+}
+
+.ct-empty-conversation__project-trigger:hover > span,
+.ct-empty-conversation__project-trigger[aria-expanded="true"] > span {
+  text-decoration-style: solid;
+}
+
+.ct-empty-conversation__project-trigger:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ct-empty-conversation__project-trigger > svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+.ct-empty-conversation__popup {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  z-index: 20;
+  width: min(390px, calc(100vw - 48px));
+  max-height: min(410px, calc(100vh - 250px));
+  box-sizing: border-box;
+  overflow: hidden auto;
+  transform: translateX(-50%);
+  padding: 6px;
+  border: 1px solid #dfe3e8;
+  border-radius: 13px;
+  color: #202124;
+  background: #ffffff;
+  box-shadow:
+    0 24px 60px rgba(18, 24, 40, 0.14),
+    0 4px 14px rgba(18, 24, 40, 0.08);
+  scrollbar-width: thin;
+  scrollbar-color: #d7dbe0 transparent;
+}
+
+.ct-empty-conversation__status {
+  padding: 14px 12px;
+  color: #8a919b;
+  font-size: 12.5px;
+  line-height: 18px;
+  text-align: center;
+}
+
+.ct-empty-conversation__empty-repositories {
+  display: grid;
+  min-height: 112px;
+  place-items: center;
+}
+
+.ct-empty-conversation__empty-repositories-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.ct-empty-conversation__add-repository {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  padding: 0;
+  border: 1px dashed #aeb5bd;
+  border-radius: 12px;
+  color: #777f89;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ct-empty-conversation__add-repository:hover:not(:disabled) {
+  border-color: #747c86;
+  color: #30343a;
+}
+
+.ct-empty-conversation__add-repository:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.ct-empty-conversation__add-repository > svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ct-empty-conversation__add-repository-label {
+  color: #202124;
+  font-size: 15.5px;
+  line-height: 18px;
+}
+
+.ct-empty-conversation__repositories {
+  min-width: 0;
+}
+
+.ct-empty-conversation__popup-toolbar {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) 28px;
+  min-height: 34px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 2px 6px;
+}
+
+.ct-empty-conversation__add-repository--corner {
+  width: 26px;
+  height: 26px;
+  justify-self: center;
+  border-radius: 6px;
+}
+
+.ct-empty-conversation__add-repository--corner > svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ct-empty-conversation__search-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  color: #7b828c;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ct-empty-conversation__search-button:hover {
+  color: #30343a;
+  background: #f3f5f7;
+}
+
+.ct-empty-conversation__search-button:active {
+  background: #eceff2;
+}
+
+.ct-empty-conversation__search-button > svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ct-empty-conversation__search-input {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 7px;
+  outline: none;
+  color: #30343a;
+  background: transparent;
+  box-shadow: inset 0 0 0 1px #dfe3e8;
+  font: 13px/18px "Segoe WPC", "Segoe UI", sans-serif;
+}
+
+.ct-empty-conversation__search-input::placeholder {
+  color: #8a919b;
+}
+
+.ct-empty-conversation__search-input:focus {
+  background: #f3f5f7;
+  box-shadow: inset 0 0 0 1px #c8ced6;
+}
+
+.ct-empty-conversation__search-input::-webkit-search-cancel-button {
+  opacity: 0.65;
+}
+
+.ct-empty-conversation__repository-list {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ct-empty-conversation__repository + .ct-empty-conversation__repository {
+  padding-top: 6px;
+  border-top: 1px solid #edf0f2;
+}
+
+.ct-empty-conversation__repository-row {
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 0 7px;
+}
+
+.ct-empty-conversation__repository-name {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  color: #202124;
+  font-size: 13.5px;
+  line-height: 18px;
+}
+
+.ct-empty-conversation__repository-name > svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+
+.ct-empty-conversation__repository-name > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ct-empty-conversation__new-chat {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  color: #7b828c;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ct-empty-conversation__new-chat:hover:not(:disabled) {
+  color: #202124;
+  background: #f3f5f7;
+}
+
+.ct-empty-conversation__new-chat:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ct-empty-conversation__new-chat > svg {
+  width: 14px;
+  height: 14px;
+}
+
+.ct-empty-conversation__conversation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ct-empty-conversation__conversation {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  box-sizing: border-box;
+  padding: 0 9px 0 31px;
+  border: 0;
+  border-radius: 8px;
+  color: #5f6368;
+  background: transparent;
+  font: 13px/18px "Segoe WPC", "Segoe UI", sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ct-empty-conversation__conversation:hover {
+  color: #30343a;
+  background: #f3f5f7;
+}
+
+.ct-empty-conversation__conversation > svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.ct-empty-conversation__conversation > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .ct-empty-conversation {
+    width: calc(100% - 32px);
+  }
+
+  .ct-empty-conversation__title {
+    font-size: 28px;
+  }
+}

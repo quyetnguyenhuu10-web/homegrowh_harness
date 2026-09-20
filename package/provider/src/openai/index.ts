@@ -1,8 +1,11 @@
 // Provider OpenAI (endpoint /chat/completions tương thích OpenAI).
-import { chatCompletions, pickUsage, streamCompletions } from "../shared/http.js";
+import {
+  pickReasoningDelta,
+  pickUsage,
+  streamCompletions,
+} from "../shared/http.js";
 import type {
   ChatMessage,
-  ChatResult,
   LlmProvider,
   ProviderName,
   StreamDelta,
@@ -13,31 +16,18 @@ export const OPENAI_DEFAULT_BASE_URL = "https://api.openai.com/v1";
 export interface OpenAIClientOptions {
   apiKey: string;
   baseUrl?: string;
+  /** Cho endpoint OpenAI-compatible custom dùng chung transport này. */
+  provider?: ProviderName;
 }
 
 export function createOpenAIClient(opts: OpenAIClientOptions): LlmProvider {
-  const name: ProviderName = "openai";
+  const name: ProviderName = opts.provider ?? "openai";
   const defaultBaseUrl = opts.baseUrl ?? OPENAI_DEFAULT_BASE_URL;
 
   return {
     name,
     defaultBaseUrl,
-    async chat(input): Promise<ChatResult> {
-      const model = input.model;
-      const messages: ChatMessage[] = input.messages;
-      const out = await chatCompletions({
-        provider: name,
-        baseUrl: input.baseUrl ?? defaultBaseUrl,
-        apiKey: input.apiKey,
-        model,
-        messages,
-        temperature: input.temperature,
-        maxTokens: input.maxTokens,
-        timeoutMs: input.timeoutMs,
-      });
-      return { provider: name, model, ...out };
-    },
-    async *chatStream(input): AsyncIterable<StreamDelta> {
+    async *call(input): AsyncIterable<StreamDelta> {
       const model = input.model;
       for await (const chunk of streamCompletions({
         provider: name,
@@ -45,9 +35,11 @@ export function createOpenAIClient(opts: OpenAIClientOptions): LlmProvider {
         apiKey: input.apiKey,
         model,
         messages: input.messages as ChatMessage[],
+        tools: input.tools,
         temperature: input.temperature,
         maxTokens: input.maxTokens,
         timeoutMs: input.timeoutMs,
+        signal: input.signal,
       })) {
         if (chunk.done) {
           yield { provider: name, model, delta: "", raw: null, finishReason: null, usage: {}, done: true };
@@ -69,6 +61,7 @@ export function createOpenAIClient(opts: OpenAIClientOptions): LlmProvider {
           provider: name,
           model,
           delta: deltaText,
+          reasoningDelta: pickReasoningDelta(chunk.json),
           raw: chunk.json,
           finishReason: finish,
           usage: pickUsage(chunk.json),

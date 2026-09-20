@@ -1,16 +1,20 @@
 #include "linux_reader.h"
 
 #include "../../../../config/reader_config.h"
+#include "fsystem/read/read_detail.h"
 
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <fcntl.h>
+#include <limits>
 #include <memory>
-#include <span>
+#include <string_view>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <utility>
+#include <vector>
 
 namespace fsystem::linux
 {
@@ -79,101 +83,156 @@ namespace fsystem::linux
         };
 
         using unique_fd = std::unique_ptr<int, fd_deleter>;
+
+        ReadResult read_one(const ReadRequest& request)
+        {
+            ReadResult result{};
+            result.path = request.path;
+            result.start_line = request.start_line;
+            result.end_line = request.end_line;
+
+            if (
+                request.start_line == 0 ||
+                request.end_line < request.start_line
+            )
+            {
+                result.error = EINVAL;
+                return result;
+            }
+
+            constexpr std::uint32_t block_size =
+                fsystem::config::kReadBlockSize;
+
+            unique_fd handle{fd_handle{::open(request.path.c_str(), O_RDONLY)}};
+
+            if (!handle)
+            {
+                result.error = static_cast<std::uint32_t>(errno);
+                return result;
+            }
+
+            struct stat file_status{};
+
+            if (::fstat(handle.get().get(), &file_status) < 0)
+            {
+                result.error = static_cast<std::uint32_t>(errno);
+                return result;
+            }
+
+            if (file_status.st_size < 0)
+            {
+                result.error = EOVERFLOW;
+                return result;
+            }
+
+            const off_t file_size = file_status.st_size;
+
+            if (file_size == 0)
+                return result;
+
+            std::vector<char> buffer(block_size);
+            detail::line_range_collector collector(
+                request.start_line,
+                request.end_line,
+                result.content
+            );
+
+            off_t position = 0;
+
+            while (position < file_size)
+            {
+                const off_t remaining = file_size - position;
+                const std::size_t chunk_size =
+                    remaining < static_cast<off_t>(block_size)
+                        ? static_cast<std::size_t>(remaining)
+                        : static_cast<std::size_t>(block_size);
+
+                const ssize_t bytes_read = ::pread(
+                    handle.get().get(),
+                    buffer.data(),
+                    chunk_size,
+                    position
+                );
+
+                if (bytes_read < 0)
+                {
+                    if (errno == EINTR)
+                        continue;
+
+                    result.error = static_cast<std::uint32_t>(errno);
+                    result.content.clear();
+                    return result;
+                }
+
+                if (
+                    bytes_read == 0 ||
+                    static_cast<std::size_t>(bytes_read) < chunk_size
+                )
+                {
+                    result.error = EIO;
+                    result.content.clear();
+                    return result;
+                }
+
+                const bool continue_reading = collector.consume(
+                    std::string_view(
+                        buffer.data(),
+                        static_cast<std::size_t>(bytes_read)
+                    )
+                );
+
+                if (!continue_reading)
+                {
+                    if (collector.overflowed())
+                    {
+                        result.error = EFBIG;
+                        result.content.clear();
+                    }
+
+                    return result;
+                }
+
+                position += static_cast<off_t>(bytes_read);
+            }
+
+            return result;
+        }
     }
 
-    ReadResult read_file(std::filesystem::path path)
+    ReadResults read_file(const ReadRequests& requests)
     {
-        ReadResult result{};
+        ReadResults results;
+        results.reserve(requests.size());
 
-        constexpr std::uint32_t block_size =
-            fsystem::config::kReadBlockSize;
+        for (const ReadRequest& request : requests)
+            results.push_back(read_one(request));
 
-        unique_fd handle{fd_handle{::open(path.c_str(), O_RDONLY)}};
+        return results;
+    }
 
-        if (!handle)
-        {
-            result.error = static_cast<std::uint32_t>(errno);
-            return result;
-        }
+    ReadResult read_file(
+        const std::filesystem::path& path,
+        std::uint64_t start_line,
+        std::uint64_t end_line
+    )
+    {
+        const ReadRequests requests{
+            ReadRequest{path, start_line, end_line}
+        };
 
-        struct stat file_status{};
+        ReadResults results = read_file(requests);
 
-        if (::fstat(handle.get().get(), &file_status) < 0)
-        {
-            result.error = static_cast<std::uint32_t>(errno);
-            return result;
-        }
+        return results.empty()
+            ? ReadResult{path, start_line, end_line}
+            : std::move(results.front());
+    }
 
-        if (file_status.st_size < 0)
-        {
-            result.error = EOVERFLOW;
-            return result;
-        }
-
-        const std::uintmax_t file_size_for_allocation =
-            static_cast<std::uintmax_t>(file_status.st_size);
-
-        if (file_size_for_allocation >
-            static_cast<std::uintmax_t>(result.content.max_size()))
-        {
-            result.error = EFBIG;
-            return result;
-        }
-
-        result.content.resize(
-            static_cast<std::size_t>(file_size_for_allocation)
+    ReadResult read_file(const std::filesystem::path& path)
+    {
+        return read_file(
+            path,
+            1,
+            std::numeric_limits<std::uint64_t>::max()
         );
-
-        const std::size_t block_size_bytes = block_size;
-        const off_t file_size = file_status.st_size;
-        off_t position = 0;
-
-        if (file_size == 0)
-            return result;
-
-        while (position < file_size)
-        {
-            const off_t remaining = file_size - position;
-
-            const std::size_t chunk_size =
-                remaining < static_cast<off_t>(block_size_bytes)
-                    ? static_cast<std::size_t>(remaining)
-                    : block_size_bytes;
-
-            std::span<char> destination(
-                result.content.data() +
-                    static_cast<std::size_t>(position),
-                chunk_size
-            );
-
-            const ssize_t bytes_read = ::pread(
-                handle.get().get(),
-                destination.data(),
-                destination.size(),
-                position
-            );
-
-            if (bytes_read < 0)
-            {
-                if (errno == EINTR)
-                    continue;
-
-                result.error = static_cast<std::uint32_t>(errno);
-                result.content.clear();
-                return result;
-            }
-
-            if (bytes_read == 0 ||
-                static_cast<std::size_t>(bytes_read) < chunk_size)
-            {
-                result.error = EIO;
-                result.content.clear();
-                return result;
-            }
-
-            position += static_cast<off_t>(bytes_read);
-        }
-
-        return result;
     }
 }

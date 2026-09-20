@@ -6,7 +6,21 @@
 
 namespace fsystem
 {
-    ReadResult read(std::filesystem::path path)
+    ReadResults read(const ReadRequests& requests)
+    {
+        return windows::read_file(requests);
+    }
+
+    ReadResult read(
+        const std::filesystem::path& path,
+        std::uint64_t start_line,
+        std::uint64_t end_line
+    )
+    {
+        return windows::read_file(path, start_line, end_line);
+    }
+
+    ReadResult read(const std::filesystem::path& path)
     {
         return windows::read_file(path);
     }
@@ -18,7 +32,21 @@ namespace fsystem
 
 namespace fsystem
 {
-    ReadResult read(std::filesystem::path path)
+    ReadResults read(const ReadRequests& requests)
+    {
+        return linux::read_file(requests);
+    }
+
+    ReadResult read(
+        const std::filesystem::path& path,
+        std::uint64_t start_line,
+        std::uint64_t end_line
+    )
+    {
+        return linux::read_file(path, start_line, end_line);
+    }
+
+    ReadResult read(const std::filesystem::path& path)
     {
         return linux::read_file(path);
     }

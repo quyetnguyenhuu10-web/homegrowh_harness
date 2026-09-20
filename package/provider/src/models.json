@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "defaultModel": {
+    "provider": "openai",
+    "model": "gpt-4o-mini"
+  },
+  "groups": [
+    {
+      "provider": "openai",
+      "label": "OpenAI",
+      "models": [
+        {
+          "id": "gpt-4o-mini",
+          "label": "GPT-4o mini",
+          "note": "nhanh, rẻ, mặc định",
+          "contextWindowTokens": 64000
+        },
+        {
+          "id": "gpt-4o",
+          "label": "GPT-4o",
+          "note": "mạnh, đa modal",
+          "contextWindowTokens": 64000
+        },
+        {
+          "id": "gpt-4.1-mini",
+          "label": "GPT-4.1 mini",
+          "note": "rẻ, context dài",
+          "contextWindowTokens": 64000
+        },
+        {
+          "id": "gpt-4.1",
+          "label": "GPT-4.1",
+          "note": "code tốt, context dài",
+          "contextWindowTokens": 64000
+        },
+        {
+          "id": "gpt-5-mini",
+          "label": "GPT-5 mini",
+          "note": "thế hệ mới, cân bằng",
+          "contextWindowTokens": 64000
+        },
+        {
+          "id": "gpt-5",
+          "label": "GPT-5",
+          "note": "mạnh nhất",
+          "contextWindowTokens": 64000
+        }
+      ]
+    },
+    {
+      "provider": "deepseek",
+      "label": "DeepSeek",
+      "models": [
+        {
+          "id": "deepseek-chat",
+          "label": "DeepSeek V3",
+          "note": "chat tổng quát, mặc định",
+          "contextWindowTokens": 64000
+        },
+        {
+          "id": "deepseek-reasoner",
+          "label": "DeepSeek R1",
+          "note": "suy luận sâu (reasoning)",
+          "contextWindowTokens": 64000
+        }
+      ]
+    },
+    {
+      "provider": "ollama",
+      "label": "Ollama",
+      "models": [
+        {
+          "id": "qwen3:4b",
+          "label": "Qwen3 4B",
+          "note": "chạy local qua Ollama",
+          "contextWindowTokens": 64000
+        }
+      ]
+    }
+  ]
+}

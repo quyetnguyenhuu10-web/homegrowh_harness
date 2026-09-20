@@ -1,0 +1,389 @@
+/*
+ * Geometry ported from D:\md_ai ChatComposer.
+ * This package currently uses the composer as a visual shell only.
+ */
+
+.ct-composer {
+  position: absolute;
+  right: calc(max(20px, 4%) + 61px);
+  bottom: 14px;
+  left: calc(max(20px, 4%) + 61px);
+  z-index: 10;
+
+  display: flex;
+  flex-direction: column;
+  min-height: 100px;
+  box-sizing: border-box;
+  padding: 12px 12px 10px;
+
+  border: 1px solid #e4e7eb;
+  border-radius: 16px;
+  color: #202124;
+  background: #ffffff;
+  box-shadow:
+    0 10px 28px rgba(18, 24, 40, 0.1),
+    0 1px 2px rgba(18, 24, 40, 0.04);
+}
+
+.ct-composer:focus-within {
+  border-color: #d6dae0;
+  box-shadow:
+    0 12px 30px rgba(18, 24, 40, 0.12),
+    0 1px 2px rgba(18, 24, 40, 0.04);
+}
+
+.ct-composer__input {
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  max-height: 192px;
+  box-sizing: border-box;
+  resize: none;
+  padding: 1px 4px;
+  overflow-y: auto;
+
+  border: 0;
+  outline: 0;
+  color: #202124;
+  background: transparent;
+  caret-color: #202124;
+  font: 14px/1.5 "Segoe WPC", "Segoe UI", sans-serif;
+  letter-spacing: -0.006em;
+  scrollbar-width: thin;
+  scrollbar-color: #d7dbe0 transparent;
+}
+
+.ct-composer__input::placeholder {
+  color: #8c939d;
+}
+
+.ct-composer__input::-webkit-scrollbar {
+  width: 7px;
+}
+
+.ct-composer__input::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ct-composer__input::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: #d7dbe0;
+  background-clip: padding-box;
+}
+
+.ct-composer__footer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.ct-composer__add,
+.ct-composer__send {
+  font-family: "Segoe WPC", "Segoe UI", sans-serif;
+}
+
+.ct-composer__tools {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.ct-composer__add {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  padding: 0;
+
+  border: 0;
+  border-radius: 50%;
+  color: #666d76;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ct-composer__add > svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 1.8;
+}
+
+.ct-composer__tools-panel {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 4px);
+  z-index: 40;
+  width: auto;
+  box-sizing: border-box;
+  padding: 6px;
+  border: 1px solid #dfe3e8;
+  border-radius: 12px;
+  color: #202124;
+  background: #ffffff;
+  box-shadow:
+    0 18px 44px rgba(18, 24, 40, 0.13),
+    0 3px 10px rgba(18, 24, 40, 0.06);
+}
+
+.ct-composer__tools-item {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 46px;
+  align-items: center;
+  gap: 12px;
+  box-sizing: border-box;
+  padding: 7px 8px;
+  border: 0;
+  border-radius: 8px;
+  color: #30343a;
+  background: transparent;
+  font-family: "Segoe WPC", "Segoe UI", sans-serif;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ct-composer__tools-item:hover {
+  background: #f3f5f7;
+}
+
+.ct-composer__tools-item-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ct-composer__tools-item-title {
+  font-size: 13.5px;
+  line-height: 18px;
+}
+
+.ct-composer__tools-item-description {
+  color: #8a919b;
+  font-size: 11.5px;
+  line-height: 16px;
+}
+
+.ct-composer__tools-switch {
+  position: relative;
+  width: 30px;
+  height: 18px;
+  flex: 0 0 30px;
+  border-radius: 999px;
+  background: #d7dbe0;
+  transition: background-color 120ms ease;
+}
+
+.ct-composer__tools-switch.is-on {
+  background: #303236;
+}
+
+.ct-composer__tools-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(18, 24, 40, 0.18);
+  transition: transform 120ms ease;
+}
+
+.ct-composer__tools-switch.is-on .ct-composer__tools-switch-thumb {
+  transform: translateX(12px);
+}
+
+.ct-composer__reasoning-history {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  box-sizing: border-box;
+  margin-top: 4px;
+  padding: 9px 8px 8px;
+  border-top: 1px solid #eceff2;
+}
+
+.ct-composer__reasoning-history-copy {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.ct-composer__reasoning-history-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.ct-composer__reasoning-history-option {
+  display: inline-flex;
+  height: 30px;
+  align-items: center;
+  gap: 5px;
+  box-sizing: border-box;
+  padding: 0 9px;
+  border: 1px solid #dfe3e8;
+  border-radius: 8px;
+  color: #626973;
+  background: #ffffff;
+  font: 12px/1 "Segoe WPC", "Segoe UI", sans-serif;
+  cursor: pointer;
+}
+
+.ct-composer__reasoning-history-option.is-active {
+  border-color: #bfc5cc;
+  color: #202124;
+  background: #f3f5f7;
+}
+
+.ct-composer__reasoning-history-option:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.ct-composer__reasoning-history-input {
+  width: 42px;
+  height: 22px;
+  box-sizing: border-box;
+  padding: 0 4px;
+  border: 1px solid #d8dde3;
+  border-radius: 5px;
+  outline: 0;
+  color: #202124;
+  background: #ffffff;
+  font: 12px/1 "Segoe WPC", "Segoe UI", sans-serif;
+}
+
+.ct-composer__reasoning-history-input:focus {
+  border-color: #aeb5bd;
+}
+
+.ct-composer__reasoning-history-input:disabled {
+  color: #8a919b;
+  background: #f5f6f7;
+}
+
+.ct-composer__model-cluster {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  height: 34px;
+  max-width: min(62%, 280px);
+  box-sizing: border-box;
+  padding: 0 5px 0 2px;
+  margin-left: auto;
+
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+}
+
+.ct-composer__context-meter {
+  --context-progress: 0;
+
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  color: #7a828c;
+  opacity: 0.9;
+}
+
+.ct-composer__context-meter svg {
+  display: block;
+  width: 17px;
+  height: 17px;
+  overflow: visible;
+}
+
+.ct-composer__context-meter-track,
+.ct-composer__context-meter-value {
+  fill: none;
+  stroke-width: 2.2;
+}
+
+.ct-composer__context-meter-track {
+  stroke: #e1e4e8;
+}
+
+.ct-composer__context-meter-value {
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: calc(100 - var(--context-progress));
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+}
+
+.ct-composer__send {
+  display: grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  flex: 0 0 auto;
+  padding: 0;
+
+  border: 0;
+  border-radius: 50%;
+  color: #ffffff;
+  background: #202124;
+  box-shadow: 0 3px 8px rgba(18, 24, 40, 0.16);
+  cursor: default;
+}
+
+.ct-composer__send > svg {
+  display: block;
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.ct-composer__send > .ct-composer__cancel-icon rect {
+  fill: currentColor;
+  stroke: none;
+}
+
+@media (hover: hover) {
+  .ct-composer__add:hover {
+    background: #f3f5f7;
+  }
+
+  .ct-composer__send:hover {
+    background: #303236;
+  }
+}
+
+@media (max-width: 760px) {
+  .ct-composer {
+    right: 16px;
+    bottom: 10px;
+    left: 16px;
+    padding: 10px 10px 9px;
+    border-radius: 14px;
+  }
+
+  .ct-composer__model-cluster {
+    max-width: calc(100% - 48px);
+    flex: 1 1 auto;
+  }
+}

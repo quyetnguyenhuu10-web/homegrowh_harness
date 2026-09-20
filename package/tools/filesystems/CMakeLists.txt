@@ -38,7 +38,9 @@ FetchContent_MakeAvailable(
 add_library(filesystems
     src/config/edit_config.h
     src/config/reader_config.h
+    src/fsystem/read/read_detail.h
     src/fsystem/read/reader.cpp
+    src/fsystem/write/writer.cpp
     src/fsystem/edit/edit.cpp
     src/fsystem/watcher/watcher.cpp
 )
@@ -52,6 +54,7 @@ if(WIN32)
     target_sources(filesystems
         PRIVATE
             src/platform/windows/fsystem/reader/windows_reader.cpp
+            src/platform/windows/fsystem/write/windows_writer.cpp
             src/platform/windows/fsystem/edit/windows_edit.cpp
             src/platform/windows/fsystem/edit/detail/edit_context.h
             src/platform/windows/fsystem/edit/detail/windows_handle.h
@@ -80,6 +83,7 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(filesystems
         PRIVATE
             src/platform/linux/fsystem/reader/linux_reader.cpp
+            src/platform/linux/fsystem/write/linux_writer.cpp
             src/platform/linux/fsystem/edit/linux_edit.cpp
             src/platform/linux/fsystem/edit/detail/edit_context.h
             src/platform/linux/fsystem/edit/detail/linux_handle.h
@@ -178,9 +182,34 @@ target_link_libraries(filesystems
 
 add_executable(edit_file
     executables/edit_file.cpp
+    executables/toolcall_protocol.h
 )
 
 target_link_libraries(edit_file
+    PRIVATE
+        filesystems
+        CLI11::CLI11
+        nlohmann_json::nlohmann_json
+)
+
+add_executable(read_file
+    executables/read_file.cpp
+    executables/toolcall_protocol.h
+)
+
+target_link_libraries(read_file
+    PRIVATE
+        filesystems
+        CLI11::CLI11
+        nlohmann_json::nlohmann_json
+)
+
+add_executable(write_file
+    executables/write_file.cpp
+    executables/toolcall_protocol.h
+)
+
+target_link_libraries(write_file
     PRIVATE
         filesystems
         CLI11::CLI11
@@ -208,6 +237,10 @@ if(FILESYSTEMS_BUILD_TESTS)
         tests/cross_platform/fsystem/read/reader_test.cpp
     )
 
+    add_executable(file_writer
+        tests/cross_platform/fsystem/write/write_test.cpp
+    )
+
     add_executable(file_edit
         tests/cross_platform/fsystem/edit/edit_test.cpp
     )
@@ -225,6 +258,11 @@ if(FILESYSTEMS_BUILD_TESTS)
             ${FILESYSTEMS_TEST_INCLUDE_DIR}
     )
 
+    target_include_directories(file_writer
+        PRIVATE
+            ${FILESYSTEMS_TEST_INCLUDE_DIR}
+    )
+
     target_include_directories(file_edit
         PRIVATE
             ${FILESYSTEMS_TEST_INCLUDE_DIR}
@@ -236,6 +274,11 @@ if(FILESYSTEMS_BUILD_TESTS)
     )
 
     target_link_libraries(file_reader
+        PRIVATE
+            filesystems
+    )
+
+    target_link_libraries(file_writer
         PRIVATE
             filesystems
     )
@@ -259,6 +302,11 @@ if(FILESYSTEMS_BUILD_TESTS)
     add_test(
         NAME file_reader_test
         COMMAND file_reader
+    )
+
+    add_test(
+        NAME file_writer_test
+        COMMAND file_writer
     )
 
     add_test(

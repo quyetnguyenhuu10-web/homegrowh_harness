@@ -5,8 +5,14 @@
   "main": "index.js",
   "scripts": {
     "dev": "vite",
+    "renderer": "vite",
     "build": "vite build",
     "build:embed": "vite build --config vite.embed.config.ts",
+    "build:desktop": "npm --prefix ../provider run build && vite build --config vite.desktop.config.ts",
+    "build:plugin": "npm run build:embed && npm run build:desktop",
+    "electron": "node scripts/electron-dev.mjs",
+    "dist": "npm run build && npm run build:desktop && electron dist/desktop/app.cjs",
+    "start": "npm run electron",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -15,6 +21,11 @@
   "author": "",
   "license": "ISC",
   "type": "module",
+  "exports": {
+    "./embed": "./dist/embed/chat-thread.js",
+    "./desktop": "./dist/desktop/main.cjs",
+    "./preload": "./dist/desktop/preload.cjs"
+  },
   "devDependencies": {
     "@types/node": "^26.6.2",
     "@types/react": "^19.3.0",
@@ -26,7 +37,8 @@
   },
   "dependencies": {
     "@homegrowh/provider": "file:../provider",
-    "@homegrowh/session-conversation": "file:../session_conversation",
+    "electron": "^44.4.3",
+    "lucide-react": "^1.47.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   }

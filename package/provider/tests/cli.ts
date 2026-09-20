@@ -1,9 +1,9 @@
-﻿// Test CLI: stream token ra terminal qua API thống nhất.
+// Test CLI: stream token ra terminal qua API thống nhất.
 // Chạy: npm run test:cli -- --provider deepseek --prompt "Xin chào"
 //   --provider  openai | deepseek (bắt buộc)
 //   --prompt    câu hỏi (bắt buộc, hoặc PIPE qua stdin)
 //   --model, --api-key, --base-url, --temperature, --max-tokens (tùy chọn)
-import { chatStream, type ProviderName } from "../src/register.js";
+import { callProvider, type ProviderName } from "../src/index.js";
 
 function helpText(): string {
   return [
@@ -58,7 +58,9 @@ function fail(message: string): never {
 }
 
 // Default CHỈ nằm ở test: test luôn gọi API kèm model rõ ràng.
-const TEST_DEFAULT_MODEL: Record<ProviderName, string> = {
+type CliProviderName = Exclude<ProviderName, "custom">;
+
+const TEST_DEFAULT_MODEL: Record<CliProviderName, string> = {
   openai: "gpt-4o-mini",
   deepseek: "deepseek-chat",
   ollama: "qwen3:4b",
@@ -95,13 +97,13 @@ async function main(): Promise<void> {
   let usage: { totalTokens?: number } = {};
 
   try {
-    for await (const ev of chatStream({
-      provider: provider as ProviderName,
+    for await (const ev of callProvider({
+      provider: provider as CliProviderName,
       messages: [{ role: "user", content: prompt }],
       model:
         typeof args.model === "string" && args.model
           ? args.model
-          : TEST_DEFAULT_MODEL[provider as ProviderName],
+          : TEST_DEFAULT_MODEL[provider as CliProviderName],
       ...(typeof args["api-key"] === "string" ? { apiKey: args["api-key"] } : {}),
       ...(typeof args["base-url"] === "string" ? { baseUrl: args["base-url"] } : {}),
       ...(num("temperature") !== undefined ? { temperature: num("temperature") } : {}),
