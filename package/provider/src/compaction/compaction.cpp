@@ -18,6 +18,7 @@ namespace provider
     {
         struct CompactionModel
         {
+            Provider provider;
             std::string endpoint;
             std::string api_key;
         };
@@ -36,11 +37,10 @@ namespace provider
 
             const nlohmann::json* selected = nullptr;
             const nlohmann::json* selected_provider = nullptr;
+            std::string selected_provider_name;
 
             for (const auto& [provider_name, provider_entry] : catalog.items())
             {
-                (void)provider_name;
-
                 if (!provider_entry.is_object())
                 {
                     throw std::runtime_error(
@@ -70,6 +70,7 @@ namespace provider
 
                     selected = &model;
                     selected_provider = &provider_entry;
+                    selected_provider_name = provider_name;
                 }
             }
 
@@ -80,6 +81,7 @@ namespace provider
             }
 
             return CompactionModel{
+                provider_from_name(selected_provider_name),
                 selected_provider->at("endpoint").get<std::string>(),
                 selected_provider->at("api_key").get<std::string>()};
         }
@@ -165,6 +167,7 @@ namespace provider
             return CompactionResult{
                 messages,
                 request(
+                    model.provider,
                     model.endpoint,
                     model.api_key,
                     body,
@@ -204,6 +207,7 @@ namespace provider
         if (raw_response != nullptr && !has_current_sessions)
         {
             usage = request(
+                model.provider,
                 model.endpoint,
                 model.api_key,
                 summary_body,
@@ -225,6 +229,7 @@ namespace provider
                 try
                 {
                     internal_usage = request(
+                        model.provider,
                         model.endpoint,
                         model.api_key,
                         summary_body,
@@ -312,6 +317,7 @@ namespace provider
             }
 
             usage = request(
+                model.provider,
                 model.endpoint,
                 model.api_key,
                 request_body,

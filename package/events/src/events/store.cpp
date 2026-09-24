@@ -17,60 +17,63 @@ namespace events
 
     Store& Store::operator=(Store&&) noexcept = default;
 
-    std::int64_t Store::append(const EventInput& event)
+    std::int64_t append(Store& store, const EventInput& event)
     {
-        if (impl_ == nullptr)
+        if (store.impl_ == nullptr)
         {
             throw std::logic_error("events: store has been moved from");
         }
 
-        std::lock_guard lock(impl_->mutex);
-        return impl_->repository.append(event);
+        std::lock_guard lock(store.impl_->mutex);
+        return store.impl_->repository.append(event);
     }
 
-    bool Store::erase(std::int64_t row_position)
+    bool erase(Store& store, std::int64_t row_position)
     {
-        if (impl_ == nullptr)
+        if (store.impl_ == nullptr)
         {
             throw std::logic_error("events: store has been moved from");
         }
 
-        std::lock_guard lock(impl_->mutex);
-        return impl_->repository.erase(row_position);
+        std::lock_guard lock(store.impl_->mutex);
+        return store.impl_->repository.erase(row_position);
     }
 
-    std::vector<Event> Store::query() const
+    std::vector<Event> query(const Store& store)
     {
-        if (impl_ == nullptr)
+        if (store.impl_ == nullptr)
         {
             throw std::logic_error("events: store has been moved from");
         }
 
-        std::lock_guard lock(impl_->mutex);
-        return impl_->repository.query();
+        std::lock_guard lock(store.impl_->mutex);
+        return store.impl_->repository.query();
     }
 
-    std::vector<Event> Store::query(const std::string& session_id) const
+    std::vector<Event> query(
+        const Store& store,
+        const std::string& session_id)
     {
-        if (impl_ == nullptr)
+        if (store.impl_ == nullptr)
         {
             throw std::logic_error("events: store has been moved from");
         }
 
-        std::lock_guard lock(impl_->mutex);
-        return impl_->repository.query(session_id);
+        std::lock_guard lock(store.impl_->mutex);
+        return store.impl_->repository.query(session_id);
     }
 
-    std::int64_t Store::insert_after(
+    std::int64_t insert_after(
+        Store& store,
         std::int64_t row_position,
         const EventInput& event)
     {
-        if (impl_ == nullptr)
+        if (store.impl_ == nullptr)
         {
             throw std::logic_error("events: store has been moved from");
         }
 
-        std::lock_guard lock(impl_->mutex);
-        return impl_->repository.insert_after(row_position, event);
+        std::lock_guard lock(store.impl_->mutex);
+        return store.impl_->repository.insert_after(row_position, event);
     }
 }

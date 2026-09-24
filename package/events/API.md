@@ -43,6 +43,18 @@ Các cột trong bảng SQLite là row_position, events, create_at, Session_ID, 
 
 ## Store
 
+### create
+
+~~~cpp
+Store create(
+    const std::string& id,
+    const std::filesystem::path& path);
+~~~
+
+Tạo database mới tại `path/<id>.db`, khởi tạo schema Events và trả về `Store`
+đang mở trên database vừa tạo. `id` phải là tên file đơn, không được chứa path.
+Nếu database đã tồn tại, API ném `std::filesystem::filesystem_error`.
+
 ### Khởi tạo và quyền sở hữu
 
 ~~~cpp
@@ -51,12 +63,12 @@ explicit Store(const std::filesystem::path& database_path);
 
 Mở hoặc tạo database tại database_path, sau đó khởi tạo bảng events và chỉ mục theo session. Nếu thư mục cha chưa tồn tại, thư viện sẽ tạo thư mục đó. Dùng đường dẫn :memory: để tạo database trong bộ nhớ.
 
-Store sở hữu kết nối SQLite. Store không thể sao chép nhưng có thể di chuyển. Gọi API trên Store đã bị move sẽ ném std::logic_error. Các lời gọi qua cùng một Store được tuần tự hóa.
+Store chỉ giữ resource/state SQLite. Store không thể sao chép nhưng có thể di chuyển. Gọi API với Store đã bị move sẽ ném std::logic_error. Các lời gọi qua cùng một Store được tuần tự hóa.
 
 ### append
 
 ~~~cpp
-std::int64_t append(const EventInput& event);
+std::int64_t append(Store& store, const EventInput& event);
 ~~~
 
 Thêm event vào cuối danh sách và trả về row_position được gán. Vị trí bắt đầu từ 0 và luôn liền nhau nếu dữ liệu được thao tác qua API này. Thao tác insert chạy trong một SQLite transaction.
@@ -64,7 +76,7 @@ Thêm event vào cuối danh sách và trả về row_position được gán. V�
 ### erase
 
 ~~~cpp
-bool erase(std::int64_t row_position);
+bool erase(Store& store, std::int64_t row_position);
 ~~~
 
 Xóa hàng tại row_position. Các hàng phía sau giảm vị trí đi 1 để danh sách tiếp tục liền nhau. Trả về false nếu không có hàng tại vị trí đó; nếu xóa thành công thì trả về true. Việc xóa và cập nhật lại vị trí chạy trong cùng một SQLite transaction.
@@ -74,8 +86,8 @@ API dùng tên erase vì delete là từ khóa của C++.
 ### query
 
 ~~~cpp
-std::vector<Event> query() const;
-std::vector<Event> query(const std::string& session_id) const;
+std::vector<Event> query(const Store& store);
+std::vector<Event> query(const Store& store, const std::string& session_id);
 ~~~
 
 Overload không tham số trả về tất cả các hàng, sắp xếp theo row_position. Overload nhận session_id chỉ trả về các hàng có Session_ID khớp chính xác với session_id, cũng theo thứ tự row_position. Nếu không có hàng phù hợp, kết quả là vector rỗng.
@@ -84,6 +96,7 @@ Overload không tham số trả về tất cả các hàng, sắp xếp theo row
 
 ~~~cpp
 std::int64_t insert_after(
+    Store& store,
     std::int64_t row_position,
     const EventInput& event);
 ~~~
@@ -95,7 +108,7 @@ Chèn event ngay sau row_position đang tồn tại và trả về vị trí m�
 ~~~cpp
 #include <events>
 
-events::Store store("events.sqlite");
+events::Store store = events::create("events", ".");
 
 events::EventInput input{
     .events = R"({"type":"message"})",
@@ -104,10 +117,10 @@ events::EventInput input{
     .model = "gpt-5.6-sol"
 };
 
-const std::int64_t first = store.append(input);
-const std::int64_t inserted = store.insert_after(first, input);
-const std::vector<events::Event> rows = store.query("session-1");
-const bool removed = store.erase(inserted);
+const std::int64_t first = events::append(store, input);
+const std::int64_t inserted = events::insert_after(store, first, input);
+const std::vector<events::Event> rows = events::query(store, "session-1");
+const bool removed = events::erase(store, inserted);
 ~~~
 
 Lỗi SQLite được báo bằng std::runtime_error. Lỗi filesystem khi tạo thư mục database được báo bằng std::filesystem::filesystem_error.

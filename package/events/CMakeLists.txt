@@ -5,6 +5,8 @@ project(events LANGUAGES CXX)
 find_package(SQLite3 REQUIRED)
 
 add_library(events
+    src/events/events.h
+    src/events/create.cpp
     src/events/store.cpp
     src/events/repository.cpp
     src/events/append.cpp
@@ -22,7 +24,6 @@ target_compile_features(events PUBLIC cxx_std_20)
 target_include_directories(events
     PUBLIC
         include
-    PRIVATE
         src
 )
 

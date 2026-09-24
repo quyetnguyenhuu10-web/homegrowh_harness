@@ -29,3 +29,22 @@ export function wasFileRead(
       ?.has(path) ?? false
   );
 }
+
+export function readFilesFor(
+  conversationId?: string,
+  requestId?: string,
+): string[] {
+  return [
+    ...(readFilesByConversation.get(stateKey(conversationId, requestId)) ?? []),
+  ];
+}
+
+export function mergeReadFiles(
+  paths: readonly string[],
+  conversationId?: string,
+  requestId?: string,
+): void {
+  for (const path of paths) {
+    markFileRead(path, conversationId, requestId);
+  }
+}

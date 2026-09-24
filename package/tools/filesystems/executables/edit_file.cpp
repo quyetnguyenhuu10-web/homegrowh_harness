@@ -83,32 +83,57 @@ int main(int argc, char* argv[])
 {
     CLI::App app{"Batch file edit tool executable"};
     std::filesystem::path toolcall_path;
+    bool toolcall_stdin = false;
 
     app.add_option(
         "--toolcall",
         toolcall_path,
         "Đường dẫn JSON tool call"
     );
+    app.add_flag(
+        "--toolcall-stdin",
+        toolcall_stdin,
+        "Đọc JSON tool call từ stdin"
+    );
     CLI11_PARSE(app, argc, argv);
 
-    if (toolcall_path.empty())
-        return fail(nullptr, "missing_argument", "Thiếu --toolcall <path>");
-
-    std::ifstream input_stream(toolcall_path, std::ios::binary);
-    if (!input_stream)
+    if (toolcall_path.empty() == !toolcall_stdin)
     {
         return fail(
             nullptr,
-            "toolcall_read_failed",
-            "Không đọc được file tool call"
+            "invalid_argument",
+            "Chọn đúng một trong --toolcall <path> hoặc --toolcall-stdin"
         );
     }
-    const std::string input{
-        std::istreambuf_iterator<char>(input_stream),
-        std::istreambuf_iterator<char>()
-    };
-    if (input_stream.bad())
-        return fail(nullptr, "toolcall_read_failed", "Lỗi khi đọc file tool call");
+
+    std::string input;
+    if (toolcall_stdin)
+    {
+        input.assign(
+            std::istreambuf_iterator<char>(std::cin),
+            std::istreambuf_iterator<char>()
+        );
+        if (std::cin.bad())
+            return fail(nullptr, "toolcall_read_failed", "Lỗi khi đọc stdin");
+    }
+    else
+    {
+        std::ifstream input_stream(toolcall_path, std::ios::binary);
+        if (!input_stream)
+        {
+            return fail(
+                nullptr,
+                "toolcall_read_failed",
+                "Không đọc được file tool call"
+            );
+        }
+        input.assign(
+            std::istreambuf_iterator<char>(input_stream),
+            std::istreambuf_iterator<char>()
+        );
+        if (input_stream.bad())
+            return fail(nullptr, "toolcall_read_failed", "Lỗi khi đọc file tool call");
+    }
 
     json root;
     try

@@ -1,8 +1,6 @@
 #pragma once
 
-#include "bonsai.h"
-#include "deepseek.h"
-#include "openai.h"
+#include <provider_types.generated.h>
 
 #include <atomic>
 #include <cstddef>
@@ -10,23 +8,11 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include <variant>
 #include <vector>
 #include <nlohmann/json.hpp>
 
 namespace provider
 {
-    enum class UsageState
-    {
-        unavailable
-    };
-
-    using RequestUsage = std::variant<
-        OpenAIUsage,
-        DeepSeekUsage,
-        BonsaiUsage,
-        UsageState>;
-
     struct CompactionResult;
 
     enum class CompletionType
@@ -47,6 +33,7 @@ namespace provider
 
         friend class CompletionPort;
         friend RequestUsage request(
+            Provider,
             const std::string&,
             const std::string&,
             const nlohmann::json&,
@@ -93,6 +80,7 @@ namespace provider
     };
 
     RequestUsage request(
+        Provider provider,
         const std::string& url,
         const std::string& api_key,
         const nlohmann::json& body,

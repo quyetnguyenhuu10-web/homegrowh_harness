@@ -17,13 +17,15 @@ export const editFileToolDefinition = toolDefinition(EDIT_FILE_TOOL_NAME);
 
 export function executeEditFileToolCall(
   toolCall: OpenAIFunctionToolCall,
-  _context: ToolExecutionContext,
+  context: ToolExecutionContext,
 ): Promise<OpenAIToolResultMessage> {
   return runOpenAIExecutableTool({
     toolName: EDIT_FILE_TOOL_NAME,
     executableRelativePath: EDIT_FILE_EXECUTABLE,
     moduleUrl: import.meta.url,
     toolCall,
+    context,
+    filesystemAccess: "read_modify",
   });
 }
 

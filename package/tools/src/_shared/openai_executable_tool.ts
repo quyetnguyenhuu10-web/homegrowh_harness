@@ -1,9 +1,14 @@
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import {
+  DEFAULT_TOOL_PROCESS_TIMEOUT_MS,
+  processFailure,
+  runProcess,
+  type SandboxFilesystemAccess,
+} from "../_runtime/process_runner.js";
+import type { ToolExecutionContext } from "./native_tool.js";
 
 export interface OpenAIFunctionToolCall {
   id: string;
@@ -35,19 +40,16 @@ interface RunExecutableToolOptions {
   executableRelativePath: string;
   moduleUrl: string;
   toolCall: OpenAIFunctionToolCall;
+  context: ToolExecutionContext;
+  filesystemAccess: SandboxFilesystemAccess;
 }
 
-interface ProcessResult {
-  code: number | null;
-  stdout: string;
-  stderr: string;
-}
-
-function errorPayload(
+export function errorPayload(
   tool: string,
   callId: string,
   code: string,
   message: string,
+  details: Record<string, unknown> = {},
 ): Record<string, unknown> {
   return {
     version: 1,
@@ -55,11 +57,11 @@ function errorPayload(
     call_id: callId,
     ok: false,
     results: [],
-    error: { code, message },
+    error: { code, message, ...details },
   };
 }
 
-function toolResult(
+export function toolResult(
   toolCallId: string,
   payload: unknown,
 ): OpenAIToolResultMessage {
@@ -68,40 +70,6 @@ function toolResult(
     tool_call_id: toolCallId,
     content: JSON.stringify(payload),
   };
-}
-
-function runProcess(
-  executableRelativePath: string,
-  cwd: string,
-  toolcallPath: string,
-): Promise<ProcessResult> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      executableRelativePath,
-      ["--toolcall", toolcallPath],
-      {
-        cwd,
-        windowsHide: true,
-        stdio: ["ignore", "pipe", "pipe"],
-      },
-    );
-
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    child.once("error", reject);
-    child.once("close", (code) => {
-      resolve({ code, stdout, stderr });
-    });
-  });
 }
 
 function executableWorkingDirectory(
@@ -228,62 +196,74 @@ export async function runOpenAIExecutableTool(
       ),
     );
   }
-  const tempDir = await mkdtemp(join(tmpdir(), `homegrowh-${toolName}-`));
-  const toolcallPath = join(tempDir, "toolcall.json");
+  const envelope = JSON.stringify({
+    version: 1,
+    tool: toolName,
+    call_id: toolCall.id,
+    arguments: { requests },
+  });
+  const executablePath = resolve(moduleDir, executableRelativePath);
+
+  let processResult;
+  try {
+    processResult = await runProcess({
+      executable: executablePath,
+      args: ["--toolcall-stdin"],
+      cwd: options.context.repositoryPath,
+      stdin: envelope,
+      timeoutMs: DEFAULT_TOOL_PROCESS_TIMEOUT_MS,
+      refresh: false,
+      sandbox: {
+        filesystem: [
+          { path: options.context.repositoryPath, access: options.filesystemAccess },
+          { path: executablePath, access: "read_only" },
+        ],
+        network: "none",
+      },
+      signal: options.context.signal,
+    });
+  } catch (error) {
+    return toolResult(
+      toolCall.id,
+      errorPayload(
+        toolName,
+        toolCall.id,
+        "executable_start_failed",
+        error instanceof Error ? error.message : String(error),
+      ),
+    );
+  }
+
+  const failure = processFailure(processResult);
+  if (failure) {
+    return toolResult(
+      toolCall.id,
+      errorPayload(toolName, toolCall.id, failure.code, failure.message, {
+        os_error: failure.osError,
+        path_errors: failure.pathErrors,
+      }),
+    );
+  }
 
   try {
-    await writeFile(
-      toolcallPath,
-      JSON.stringify({
-        version: 1,
-        tool: toolName,
-        call_id: toolCall.id,
-        arguments: { requests },
-      }),
-      "utf8",
-    );
-
-    let processResult: ProcessResult;
-    try {
-      processResult = await runProcess(
-        executableRelativePath,
-        moduleDir,
-        toolcallPath,
-      );
-    } catch (error) {
-      return toolResult(
+    const payload = parseExecutableOutput(processResult.stdout);
+    return toolResult(toolCall.id, payload);
+  } catch (error) {
+    const detail = processResult.stderr.trim();
+    return toolResult(
+      toolCall.id,
+      errorPayload(
+        toolName,
         toolCall.id,
-        errorPayload(
-          toolName,
-          toolCall.id,
-          "executable_start_failed",
+        "invalid_executable_output",
+        [
+          `exit_code=${String(processResult.code)}`,
           error instanceof Error ? error.message : String(error),
-        ),
-      );
-    }
-
-    try {
-      const payload = parseExecutableOutput(processResult.stdout);
-      return toolResult(toolCall.id, payload);
-    } catch (error) {
-      const detail = processResult.stderr.trim();
-      return toolResult(
-        toolCall.id,
-        errorPayload(
-          toolName,
-          toolCall.id,
-          "invalid_executable_output",
-          [
-            `exit_code=${String(processResult.code)}`,
-            error instanceof Error ? error.message : String(error),
-            detail ? `stderr=${detail}` : "",
-          ]
-            .filter(Boolean)
-            .join("; "),
-        ),
-      );
-    }
-  } finally {
-    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+          detail ? `stderr=${detail}` : "",
+        ]
+          .filter(Boolean)
+          .join("; "),
+      ),
+    );
   }
 }

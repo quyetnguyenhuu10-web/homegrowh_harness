@@ -35,18 +35,22 @@ namespace provider
 namespace provider
 {
     RequestUsage request(
+        Provider provider,
         const std::string& url,
         const std::string& api_key,
         const nlohmann::json& body,
         RawResponse* raw_response)
     {
         const std::string model_id = body.at("model").get<std::string>();
-        const UsageProvider usage_provider = provider_for_model(model_id);
+        if (model_id.empty())
+        {
+            throw std::invalid_argument("provider: model id must not be empty");
+        }
 
         nlohmann::json request_body = body;
 
         if (
-            usage_provider != UsageProvider::bonsai &&
+            provider != Provider::bonsai &&
             request_body.value("stream", false))
         {
             request_body["stream_options"]["include_usage"] = true;
@@ -95,7 +99,7 @@ namespace provider
                 request_body,
                 raw_response,
                 completion_port,
-                usage_provider);
+                provider);
 
             if (raw_response != nullptr)
             {

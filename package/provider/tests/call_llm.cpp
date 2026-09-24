@@ -193,6 +193,7 @@ int main()
             try
             {
                 usage = provider::request(
+                    provider::Provider::bonsai,
                     url,
                     api_key,
                     body,

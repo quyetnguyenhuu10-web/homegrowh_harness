@@ -1,0 +1,82 @@
+{
+  "providers": [
+    {
+      "id": "openai",
+      "usage_type": "OpenAIUsage",
+      "usage_key": "usage",
+      "fields": [
+        { "name": "completion_tokens", "type": "uint64" },
+        { "name": "prompt_tokens", "type": "uint64" },
+        { "name": "total_tokens", "type": "uint64" },
+        {
+          "name": "prompt_tokens_details",
+          "type": "PromptTokensDetails",
+          "optional": true,
+          "fields": [
+            { "name": "audio_tokens", "type": "uint64", "optional": true },
+            { "name": "cache_write_tokens", "type": "uint64", "optional": true },
+            { "name": "cached_tokens", "type": "uint64", "optional": true },
+            { "name": "image_tokens", "type": "uint64", "optional": true },
+            { "name": "text_tokens", "type": "uint64", "optional": true }
+          ]
+        },
+        {
+          "name": "completion_tokens_details",
+          "type": "CompletionTokensDetails",
+          "optional": true,
+          "fields": [
+            { "name": "accepted_prediction_tokens", "type": "uint64", "optional": true },
+            { "name": "audio_tokens", "type": "uint64", "optional": true },
+            { "name": "reasoning_tokens", "type": "uint64", "optional": true },
+            { "name": "rejected_prediction_tokens", "type": "uint64", "optional": true },
+            { "name": "text_tokens", "type": "uint64", "optional": true }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "deepseek",
+      "usage_type": "DeepSeekUsage",
+      "usage_key": "usage",
+      "fields": [
+        { "name": "completion_tokens", "type": "uint64" },
+        { "name": "prompt_tokens", "type": "uint64" },
+        {
+          "name": "prompt_tokens_details",
+          "type": "PromptTokensDetails",
+          "optional": true,
+          "fields": [
+            { "name": "cached_tokens", "type": "uint64", "optional": true }
+          ]
+        },
+        { "name": "prompt_cache_hit_tokens", "type": "uint64" },
+        { "name": "prompt_cache_miss_tokens", "type": "uint64" },
+        { "name": "total_tokens", "type": "uint64" },
+        {
+          "name": "completion_tokens_details",
+          "type": "CompletionTokensDetails",
+          "optional": true,
+          "fields": [
+            { "name": "reasoning_tokens", "type": "uint64", "optional": true }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "bonsai",
+      "usage_type": "BonsaiUsage",
+      "usage_key": "timings",
+      "fields": [
+        { "name": "cache_n", "type": "uint64" },
+        { "name": "prompt_n", "type": "uint64" },
+        { "name": "prompt_ms", "type": "double" },
+        { "name": "prompt_per_token_ms", "type": "double" },
+        { "name": "prompt_per_second", "type": "double" },
+        { "name": "predicted_n", "type": "uint64" },
+        { "name": "predicted_ms", "type": "double" },
+        { "name": "predicted_per_token_ms", "type": "double" },
+        { "name": "predicted_per_second", "type": "double" }
+      ]
+    }
+  ]
+}

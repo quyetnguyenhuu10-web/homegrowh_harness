@@ -1,0 +1,96 @@
+cmake_minimum_required(VERSION 3.20)
+
+project(homegrowh_sandbox LANGUAGES CXX)
+
+add_library(sandbox STATIC
+    process/src/process/process.cpp
+    registry/src/filesystem/filesystem.cpp
+    registry/src/filesystem/filesystem.h
+    registry/src/registry/registry.cpp
+)
+
+target_include_directories(sandbox
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/process/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/registry/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/registry/src
+)
+
+target_compile_features(sandbox PUBLIC cxx_std_20)
+
+if(WIN32)
+    target_sources(sandbox PRIVATE
+        process/src/platform/windows/process/windows_process.cpp
+        process/src/platform/windows/process/windows_process.h
+        process/src/platform/windows/process/windows_process_appcontainer.cpp
+        process/src/platform/windows/process/windows_process_appcontainer.h
+        process/src/platform/windows/process/windows_process_job.cpp
+        process/src/platform/windows/process/windows_process_job.h
+        process/src/platform/windows/process/windows_process_raii.h
+        registry/src/platform/windows/filesystem/windows_filesystem.cpp
+        registry/src/platform/windows/filesystem/windows_filesystem.h
+        registry/src/platform/windows/filesystem/windows_filesystem_acl.cpp
+        registry/src/platform/windows/filesystem/windows_filesystem_acl.h
+        registry/src/platform/windows/filesystem/windows_filesystem_identity.cpp
+        registry/src/platform/windows/filesystem/windows_filesystem_identity.h
+        registry/src/platform/windows/filesystem/windows_filesystem_state.cpp
+        registry/src/platform/windows/filesystem/windows_filesystem_state.h
+        registry/src/platform/windows/filesystem/windows_filesystem_error.h
+    )
+    target_link_libraries(sandbox PRIVATE
+        Advapi32
+        Bcrypt
+        Userenv
+    )
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(sandbox PRIVATE
+        process/src/platform/linux/process/linux_process.cpp
+        process/src/platform/linux/process/linux_process.h
+        process/src/platform/linux/process/linux_process_landlock.cpp
+        process/src/platform/linux/process/linux_process_landlock.h
+        registry/src/platform/linux/filesystem/linux_filesystem.cpp
+        registry/src/platform/linux/filesystem/linux_filesystem.h
+        registry/src/platform/linux/filesystem/linux_filesystem_identity.cpp
+        registry/src/platform/linux/filesystem/linux_filesystem_identity.h
+        registry/src/platform/linux/filesystem/linux_filesystem_state.cpp
+        registry/src/platform/linux/filesystem/linux_filesystem_state.h
+    )
+endif()
+
+add_executable(sandbox_process
+    executable/process/process_broker.cpp
+    executable/process/process_broker.h
+    executable/process/process_path.h
+    executable/process/process_protocol.cpp
+    executable/process/process_protocol.h
+)
+
+if(WIN32)
+    target_sources(sandbox_process PRIVATE
+        executable/platform/windows/process/process_path.cpp
+        executable/platform/windows/process/sandbox_process.cpp
+    )
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(sandbox_process PRIVATE
+        executable/platform/linux/process/process_path.cpp
+        executable/platform/linux/process/sandbox_process.cpp
+    )
+endif()
+
+target_link_libraries(sandbox_process PRIVATE sandbox)
+target_compile_features(sandbox_process PRIVATE cxx_std_20)
+
+option(SANDBOX_BUILD_TESTS "Build sandbox tests" ON)
+
+if(SANDBOX_BUILD_TESTS)
+    add_executable(sandbox_registry_test
+        registry/tests/registry_test.cpp
+    )
+    target_link_libraries(sandbox_registry_test PRIVATE sandbox)
+
+    add_executable(sandbox_process_test
+        tests/process_test.cpp
+    )
+    target_link_libraries(sandbox_process_test PRIVATE sandbox)
+endif()

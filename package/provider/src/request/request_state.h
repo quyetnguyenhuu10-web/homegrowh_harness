@@ -1,9 +1,7 @@
 #pragma once
 
-#include "catalog.h"
 #include "requests.h"
 #include "sse.h"
-#include "usage.h"
 
 #include <deque>
 #include <optional>
@@ -23,7 +21,7 @@ namespace provider
                 const nlohmann::json& body,
                 RawResponse* response,
                 std::uintptr_t completion_port,
-                UsageProvider provider)
+                Provider provider)
             {
                 response_ = response;
                 completion_port_ = completion_port;
@@ -85,13 +83,10 @@ namespace provider
 
                 if (!payload.is_discarded())
                 {
-                    const auto usage = self->provider_ == UsageProvider::bonsai
-                        ? payload.find("timings")
-                        : payload.find("usage");
-
-                    if (usage != payload.end() && !usage->is_null())
+                    if (auto usage = usage_from_event(
+                            self->provider_, payload))
                     {
-                        self->usage_ = *usage;
+                        self->usage_ = std::move(*usage);
                     }
                 }
 
@@ -155,7 +150,7 @@ namespace provider
             RawResponse* response_ = nullptr;
             std::uintptr_t completion_port_ = 0;
             std::deque<std::string> deltas_;
-            UsageProvider provider_ = UsageProvider::openai;
+            Provider provider_ = Provider::openai;
             std::vector<std::size_t> event_sizes_;
             std::optional<nlohmann::json> usage_;
             std::uint32_t error_ = 0;
