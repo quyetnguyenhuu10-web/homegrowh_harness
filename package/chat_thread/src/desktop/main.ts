@@ -7,27 +7,26 @@ import {
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import * as database from "@hh/database";
+import type {
+  ActiveConversation,
+  ContextUsageRecord,
+  ConversationRecord,
+  ConversationRef,
+  ConversationScope,
+  RepositoryRecord,
+} from "@hh/database";
+import { model as providerModel } from "@hh/provider";
+import type { ProviderName } from "@hh/provider";
+import * as session from "@hh/session";
+import type { SessionEvent, SessionSnapshot } from "@hh/session";
+
 import {
-  addConversation,
-  addRepository,
-  deleteConversation,
-  getActiveConversation,
-  getSelectedModel,
-  listConversations,
-  listRepositories,
-  readConversationContextUsage,
-  readConversation,
-  readConversationRow,
-  setSelectedModel,
-  setActiveConversation,
-  type AddRepositoryOptions,
-  type HistoryActiveConversation,
-  type HistoryRepository,
-  type HistorySelectedModel,
   CHAT_THREAD_ADD_CONVERSATION_CHANNEL,
   CHAT_THREAD_ADD_REPOSITORY_CHANNEL,
   CHAT_THREAD_CANCEL_CHAT_REQUEST_CHANNEL,
   CHAT_THREAD_CONVERSATION_ROW_EVENT,
+  CHAT_THREAD_COMPACTION_DEBUG_EVENT,
   CHAT_THREAD_CONTEXT_USAGE_UPDATED_EVENT,
   CHAT_THREAD_DELETE_CONVERSATION_CHANNEL,
   CHAT_THREAD_GET_ACTIVE_CONVERSATION_CHANNEL,
@@ -40,198 +39,302 @@ import {
   CHAT_THREAD_READ_CONVERSATION_CHANNEL,
   CHAT_THREAD_READ_CONVERSATION_ROW_CHANNEL,
   CHAT_THREAD_REQUEST_STATE_EVENT,
+  CHAT_THREAD_SEND_CHAT_REQUEST_CHANNEL,
   CHAT_THREAD_SET_ACTIVE_CONVERSATION_CHANNEL,
   CHAT_THREAD_SET_SELECTED_MODEL_CHANNEL,
-  CHAT_THREAD_SEND_CHAT_REQUEST_CHANNEL,
+  type ConversationSessionSnapshot,
   type SendChatRequestInput,
   type SendChatRequestResult,
-} from "../component/history_conversation/main";
+} from "../component/history_conversation/desktop_contract";
+import type {
+  HistoryActiveConversation,
+  HistoryContextUsage,
+  HistoryConversationRecord,
+  HistoryRepository,
+  HistorySelectedModel,
+} from "../component/history_conversation/history_contract";
+import { NORMAL_CONVERSATION_SCOPE } from "../component/history_conversation/scope";
 import {
-  getSessionConversationRuntime,
-  startSessionConversationRuntime,
-  stopSessionConversationRuntime,
-  type SessionConversationRuntimeOptions,
-} from "../component/session_conversation/main";
-import {
-  addCustomModel,
-  listModelRegistry,
   CHAT_THREAD_ADD_CUSTOM_MODEL_CHANNEL,
+  CHAT_THREAD_DELETE_CUSTOM_MODEL_CHANNEL,
+  CHAT_THREAD_GET_CUSTOM_MODEL_CHANNEL,
   CHAT_THREAD_LIST_MODEL_REGISTRY_CHANNEL,
+  CHAT_THREAD_UPDATE_CUSTOM_MODEL_CHANNEL,
   type AddCustomModelInput,
+  type CustomModelEditableConfig,
+  type DeleteCustomModelInput,
+  type GetCustomModelInput,
   type ModelRegistryItem,
   type ModelRegistrySnapshot,
-} from "../component/picker_model/main";
+  type UpdateCustomModelInput,
+} from "../component/picker_model/model_registry_contract";
 
-export interface RegisterChatThreadDesktopOptions extends AddRepositoryOptions {
+export interface RegisterChatThreadDesktopOptions {
   dialogTitle?: string;
   dialogButtonLabel?: string;
 }
 
 export interface ChatThreadDesktopInstallation {
-  /** Preload đã build sẵn của plugin để gắn vào BrowserWindow. */
   preloadPath: string;
-  /** Gỡ IPC handler của plugin. */
   dispose(): void;
 }
 
 let registered = false;
 
+function scopeFromRepositoryPath(repositoryPath: string): ConversationScope {
+  return repositoryPath === NORMAL_CONVERSATION_SCOPE
+    ? { kind: "normal" }
+    : { kind: "repository", repositoryPath };
+}
+
+function repositoryPathFromScope(scope: ConversationScope): string {
+  return scope.kind === "normal"
+    ? NORMAL_CONVERSATION_SCOPE
+    : scope.repositoryPath;
+}
+
+function conversationRef(
+  repositoryPath: string,
+  conversationId: string,
+): ConversationRef {
+  return {
+    scope: scopeFromRepositoryPath(repositoryPath),
+    conversationId,
+  };
+}
+
+function toHistoryConversation(
+  record: ConversationRecord,
+): HistoryConversationRecord {
+  return {
+    id: record.id,
+    createdAt: record.createdAt,
+    active: record.active,
+  };
+}
+
+function toHistoryRepository(record: RepositoryRecord): HistoryRepository {
+  return {
+    name: record.name,
+    repositoryPath: record.repositoryPath,
+    conversations: database.conversation
+      .list({ kind: "repository", repositoryPath: record.repositoryPath })
+      .map(toHistoryConversation),
+  };
+}
+
+function toHistoryActive(
+  active: ActiveConversation | null,
+): HistoryActiveConversation | null {
+  if (!active) return null;
+  return {
+    repositoryPath: repositoryPathFromScope(active.scope),
+    conversationId: active.conversationId,
+  };
+}
+
+function toHistoryUsage(
+  usage: ContextUsageRecord | null,
+): HistoryContextUsage | null {
+  if (!usage) return null;
+  return {
+    ...usage,
+    provider: usage.provider as ProviderName,
+    reasoningHistory: usage.reasoningHistory as HistoryContextUsage["reasoningHistory"],
+  };
+}
+
 function broadcast(channel: string, payload: unknown): void {
   for (const window of BrowserWindow.getAllWindows()) {
-    if (!window.isDestroyed()) {
-      window.webContents.send(channel, payload);
-    }
+    if (!window.isDestroyed()) window.webContents.send(channel, payload);
   }
 }
 
-/**
- * Đăng ký phần desktop của chat_thread đúng một lần trong Electron main process.
- * Renderer không cần được truyền repositoryApi hay biết history_conversation.
- */
+function sessionSnapshotForRenderer(
+  sessionSnapshot: SessionSnapshot,
+): ConversationSessionSnapshot {
+  return {
+    sessionId: sessionSnapshot.sessionId,
+    repositoryPath: repositoryPathFromScope(sessionSnapshot.target.scope),
+    conversationId: sessionSnapshot.target.conversationId,
+  };
+}
+
+function forwardSessionEvent(event: SessionEvent): void {
+  if (event.type === "row") {
+    broadcast(CHAT_THREAD_CONVERSATION_ROW_EVENT, {
+      repositoryPath: repositoryPathFromScope(event.target.scope),
+      conversationId: event.target.conversationId,
+      ...(event.sessionId ? { sessionId: event.sessionId } : {}),
+      ...(event.requestId ? { requestId: event.requestId } : {}),
+      rowPosition: event.rowPosition,
+      row: event.row,
+    });
+    return;
+  }
+
+  if (event.type === "session") {
+    broadcast(
+      CHAT_THREAD_REQUEST_STATE_EVENT,
+      event.active
+        ? {
+            active: true,
+            session: sessionSnapshotForRenderer(event.session),
+          }
+        : {
+            active: false,
+            sessionId: event.sessionId,
+            repositoryPath: repositoryPathFromScope(event.target.scope),
+            conversationId: event.target.conversationId,
+          },
+    );
+    return;
+  }
+
+  if (event.type === "contextUsage") {
+    broadcast(CHAT_THREAD_CONTEXT_USAGE_UPDATED_EVENT, {
+      repositoryPath: repositoryPathFromScope(event.target.scope),
+      conversationId: event.target.conversationId,
+      sessionId: event.sessionId,
+      requestId: event.requestId,
+    });
+    return;
+  }
+
+  if (event.type === "compactionDebug") {
+    broadcast(CHAT_THREAD_COMPACTION_DEBUG_EVENT, {
+      repositoryPath: repositoryPathFromScope(event.target.scope),
+      conversationId: event.target.conversationId,
+      sessionId: event.sessionId,
+      requestId: event.requestId,
+      phase: event.phase,
+      ...(event.delta !== undefined ? { delta: event.delta } : {}),
+    });
+    return;
+  }
+
+  broadcast(CHAT_THREAD_PROVIDER_ERROR_NOTICE_EVENT, {
+    repositoryPath: repositoryPathFromScope(event.target.scope),
+    conversationId: event.target.conversationId,
+    sessionId: event.sessionId,
+    message: event.message,
+  });
+}
+
 export function registerChatThreadDesktop(
   options: RegisterChatThreadDesktopOptions = {},
 ): () => void {
   if (registered) return () => {};
   registered = true;
-
-  const runtimeOptions: SessionConversationRuntimeOptions = {
-    projectsDir: options.projectsDir,
-    onPersistedRow: (event) => {
-      broadcast(CHAT_THREAD_CONVERSATION_ROW_EVENT, event);
-    },
-    onRequestState: (event) => {
-      broadcast(CHAT_THREAD_REQUEST_STATE_EVENT, event);
-    },
-    onContextUsageUpdated: (event) => {
-      broadcast(CHAT_THREAD_CONTEXT_USAGE_UPDATED_EVENT, event);
-    },
-    onProviderError: (event) => {
-      broadcast(CHAT_THREAD_PROVIDER_ERROR_NOTICE_EVENT, event);
-    },
-    onError: (error, event) => {
-      console.error("[chat_thread] session conversation failed", event, error);
-    },
-  };
-  const startSessionRuntime = () =>
-    startSessionConversationRuntime(runtimeOptions);
-
-  void startSessionRuntime().catch((error) => {
-    console.error("[chat_thread] session runtime start failed", error);
-  });
+  const unsubscribeSession = session.subscribe(forwardSessionEvent);
 
   ipcMain.handle(
     CHAT_THREAD_LIST_MODEL_REGISTRY_CHANNEL,
-    (): ModelRegistrySnapshot =>
-      listModelRegistry({
-        projectsDir: options.projectsDir,
-      }),
+    (): ModelRegistrySnapshot => providerModel.list(),
   );
-
   ipcMain.handle(
     CHAT_THREAD_ADD_CUSTOM_MODEL_CHANNEL,
     (_event, input: AddCustomModelInput): ModelRegistryItem =>
-      addCustomModel(input, {
-        projectsDir: options.projectsDir,
+      providerModel.addCustom({
+        apiKey: input.apiKey,
+        endpoint: input.endpoint,
+        model: input.model,
+        contextWindowTokens: input.maxContextWindowTokens,
       }),
   );
-
+  ipcMain.handle(
+    CHAT_THREAD_DELETE_CUSTOM_MODEL_CHANNEL,
+    (_event, input: DeleteCustomModelInput): boolean =>
+      providerModel.deleteCustom(input.model),
+  );
+  ipcMain.handle(
+    CHAT_THREAD_GET_CUSTOM_MODEL_CHANNEL,
+    (_event, input: GetCustomModelInput): CustomModelEditableConfig =>
+      providerModel.getCustom(input.model),
+  );
+  ipcMain.handle(
+    CHAT_THREAD_UPDATE_CUSTOM_MODEL_CHANNEL,
+    (_event, input: UpdateCustomModelInput): ModelRegistryItem =>
+      providerModel.updateCustom({
+        originalModel: input.originalModel,
+        apiKey: input.apiKey,
+        endpoint: input.endpoint,
+        model: input.model,
+        contextWindowTokens: input.maxContextWindowTokens,
+      }),
+  );
   ipcMain.handle(
     CHAT_THREAD_GET_SELECTED_MODEL_CHANNEL,
-    (): HistorySelectedModel | null =>
-      getSelectedModel({
-        projectsDir: options.projectsDir,
-      }),
+    (): HistorySelectedModel | null => providerModel.getSelected(),
   );
-
   ipcMain.handle(
     CHAT_THREAD_SET_SELECTED_MODEL_CHANNEL,
     (_event, selection: HistorySelectedModel): HistorySelectedModel =>
-      setSelectedModel(selection, {
-        projectsDir: options.projectsDir,
-      }),
+      providerModel.setSelected(selection),
   );
 
   ipcMain.handle(
     CHAT_THREAD_LIST_ACTIVE_REQUESTS_CHANNEL,
-    async () => {
-      const sessionRuntime = await startSessionRuntime();
-      return sessionRuntime.listActiveRequests();
-    },
+    () => session.active().map(sessionSnapshotForRenderer),
   );
-
   ipcMain.handle(
     CHAT_THREAD_LIST_CONVERSATIONS_CHANNEL,
-    () =>
-      listConversations({
-        projectsDir: options.projectsDir,
-      }),
+    (): HistoryConversationRecord[] =>
+      database.conversation.list({ kind: "normal" }).map(toHistoryConversation),
   );
-
   ipcMain.handle(
     CHAT_THREAD_LIST_REPOSITORIES_CHANNEL,
-    (): HistoryRepository[] =>
-      listRepositories({
-        projectsDir: options.projectsDir,
-      }),
+    (): HistoryRepository[] => database.repository.list().map(toHistoryRepository),
   );
-
   ipcMain.handle(
     CHAT_THREAD_ADD_CONVERSATION_CHANNEL,
-    (_event, repositoryPath: string) =>
-      addConversation(repositoryPath, {
-        projectsDir: options.projectsDir,
-      }),
+    (_event, repositoryPath: string): HistoryConversationRecord =>
+      toHistoryConversation(
+        database.conversation.create(scopeFromRepositoryPath(repositoryPath)),
+      ),
   );
-
   ipcMain.handle(
     CHAT_THREAD_DELETE_CONVERSATION_CHANNEL,
-    (_event, repositoryPath: string, conversationId: string) =>
-      deleteConversation(repositoryPath, conversationId, {
-        projectsDir: options.projectsDir,
-      }),
+    (_event, repositoryPath: string, conversationId: string): boolean =>
+      database.conversation.delete(
+        conversationRef(repositoryPath, conversationId),
+      ),
   );
-
   ipcMain.handle(
     CHAT_THREAD_READ_CONVERSATION_CHANNEL,
     (_event, repositoryPath: string, conversationId: string) =>
-      readConversation(repositoryPath, conversationId, {
-        projectsDir: options.projectsDir,
-      }),
+      database.conversation.read(conversationRef(repositoryPath, conversationId)),
   );
-
   ipcMain.handle(
     CHAT_THREAD_READ_CONVERSATION_ROW_CHANNEL,
-    (_event, repositoryPath: string, conversationId: string, rowId: number) =>
-      readConversationRow(repositoryPath, conversationId, rowId, {
-        projectsDir: options.projectsDir,
-      }),
+    (_event, repositoryPath: string, conversationId: string, rowPosition: number) =>
+      database.conversation.readRow(
+        conversationRef(repositoryPath, conversationId),
+        rowPosition,
+      ),
   );
-
   ipcMain.handle(
     CHAT_THREAD_READ_CONTEXT_USAGE_CHANNEL,
     (_event, repositoryPath: string, conversationId: string) =>
-      readConversationContextUsage(repositoryPath, conversationId, {
-        projectsDir: options.projectsDir,
-      }),
+      toHistoryUsage(
+        database.contextUsage.get(
+          conversationRef(repositoryPath, conversationId),
+        ),
+      ),
   );
-
   ipcMain.handle(
     CHAT_THREAD_GET_ACTIVE_CONVERSATION_CHANNEL,
     (): HistoryActiveConversation | null =>
-      getActiveConversation({
-        projectsDir: options.projectsDir,
-      }),
+      toHistoryActive(database.conversation.getActive()),
   );
-
   ipcMain.handle(
     CHAT_THREAD_SET_ACTIVE_CONVERSATION_CHANNEL,
     (_event, repositoryPath: string, conversationId: string): void => {
-      setActiveConversation(repositoryPath, conversationId, {
-        projectsDir: options.projectsDir,
-      });
+      database.conversation.setActive(
+        conversationRef(repositoryPath, conversationId),
+      );
     },
   );
-
   ipcMain.handle(
     CHAT_THREAD_ADD_REPOSITORY_CHANNEL,
     async (event): Promise<HistoryRepository | null> => {
@@ -241,75 +344,65 @@ export function registerChatThreadDesktop(
         buttonLabel: options.dialogButtonLabel ?? "Add repository",
         properties: ["openDirectory"],
       };
-
       const result = browserWindow
         ? await dialog.showOpenDialog(browserWindow, dialogOptions)
         : await dialog.showOpenDialog(dialogOptions);
-
       if (result.canceled || result.filePaths.length === 0) return null;
-
-      return addRepository(result.filePaths[0], {
-        projectsDir: options.projectsDir,
-      });
+      return toHistoryRepository(database.repository.add(result.filePaths[0]));
     },
   );
 
   ipcMain.handle(
     CHAT_THREAD_SEND_CHAT_REQUEST_CHANNEL,
-    async (_event, input: SendChatRequestInput): Promise<SendChatRequestResult> => {
-      const sessionRuntime = await startSessionRuntime();
-      return {
-        requestId: await sessionRuntime.sendChatRequest(input),
-      };
-    },
+    async (_event, input: SendChatRequestInput): Promise<SendChatRequestResult> => ({
+      sessionId: await session.send(
+        conversationRef(input.repositoryPath, input.conversationId),
+        input.prompt,
+        { reasoningHistory: input.reasoningHistory },
+      ),
+    }),
   );
-
   ipcMain.handle(
     CHAT_THREAD_CANCEL_CHAT_REQUEST_CHANNEL,
-    async (_event, requestId: string): Promise<void> => {
-      const sessionRuntime = await startSessionRuntime();
-      sessionRuntime.cancelChatRequest(requestId);
-    },
+    (_event, sessionId: string): void => session.cancel(sessionId),
   );
 
   return () => {
     if (!registered) return;
     registered = false;
-    ipcMain.removeHandler(CHAT_THREAD_LIST_MODEL_REGISTRY_CHANNEL);
-    ipcMain.removeHandler(CHAT_THREAD_ADD_CUSTOM_MODEL_CHANNEL);
-    ipcMain.removeHandler(CHAT_THREAD_READ_CONVERSATION_CHANNEL);
-    ipcMain.removeHandler(CHAT_THREAD_GET_ACTIVE_CONVERSATION_CHANNEL);
-    ipcMain.removeHandler(CHAT_THREAD_SET_ACTIVE_CONVERSATION_CHANNEL);
-    ipcMain.removeHandler(CHAT_THREAD_GET_SELECTED_MODEL_CHANNEL);
-    ipcMain.removeHandler(CHAT_THREAD_SET_SELECTED_MODEL_CHANNEL);
-    ipcMain.removeHandler(CHAT_THREAD_DELETE_CONVERSATION_CHANNEL);
-    ipcMain.removeHandler(CHAT_THREAD_ADD_CONVERSATION_CHANNEL);
-    ipcMain.removeHandler(CHAT_THREAD_LIST_ACTIVE_REQUESTS_CHANNEL);
-    ipcMain.removeHandler(CHAT_THREAD_LIST_CONVERSATIONS_CHANNEL);
-    ipcMain.removeHandler(CHAT_THREAD_LIST_REPOSITORIES_CHANNEL);
-    ipcMain.removeHandler(CHAT_THREAD_ADD_REPOSITORY_CHANNEL);
-    ipcMain.removeHandler(CHAT_THREAD_SEND_CHAT_REQUEST_CHANNEL);
-    ipcMain.removeHandler(CHAT_THREAD_CANCEL_CHAT_REQUEST_CHANNEL);
-    void stopSessionConversationRuntime().catch((error) => {
-      console.error("[chat_thread] session runtime stop failed", error);
-    });
+    for (const channel of [
+      CHAT_THREAD_LIST_MODEL_REGISTRY_CHANNEL,
+      CHAT_THREAD_ADD_CUSTOM_MODEL_CHANNEL,
+      CHAT_THREAD_DELETE_CUSTOM_MODEL_CHANNEL,
+      CHAT_THREAD_GET_CUSTOM_MODEL_CHANNEL,
+      CHAT_THREAD_UPDATE_CUSTOM_MODEL_CHANNEL,
+      CHAT_THREAD_READ_CONVERSATION_CHANNEL,
+      CHAT_THREAD_READ_CONVERSATION_ROW_CHANNEL,
+      CHAT_THREAD_READ_CONTEXT_USAGE_CHANNEL,
+      CHAT_THREAD_GET_ACTIVE_CONVERSATION_CHANNEL,
+      CHAT_THREAD_SET_ACTIVE_CONVERSATION_CHANNEL,
+      CHAT_THREAD_GET_SELECTED_MODEL_CHANNEL,
+      CHAT_THREAD_SET_SELECTED_MODEL_CHANNEL,
+      CHAT_THREAD_DELETE_CONVERSATION_CHANNEL,
+      CHAT_THREAD_ADD_CONVERSATION_CHANNEL,
+      CHAT_THREAD_LIST_ACTIVE_REQUESTS_CHANNEL,
+      CHAT_THREAD_LIST_CONVERSATIONS_CHANNEL,
+      CHAT_THREAD_LIST_REPOSITORIES_CHANNEL,
+      CHAT_THREAD_ADD_REPOSITORY_CHANNEL,
+      CHAT_THREAD_SEND_CHAT_REQUEST_CHANNEL,
+      CHAT_THREAD_CANCEL_CHAT_REQUEST_CHANNEL,
+    ]) {
+      ipcMain.removeHandler(channel);
+    }
+    unsubscribeSession();
+    for (const activeSession of session.active()) session.cancel(activeSession.sessionId);
   };
 }
-
-export {
-  getSessionConversationRuntime,
-  startSessionConversationRuntime,
-  stopSessionConversationRuntime,
-} from "../component/session_conversation/main";
 
 export function getChatThreadPreloadPath(): string {
   return join(dirname(fileURLToPath(import.meta.url)), "preload.cjs");
 }
 
-/**
- * Entry desktop cấp plugin: host gọi một lần ở main process để nhận toàn bộ
- * phần desktop cần thiết của chat_thread.
- */
 export function installChatThreadDesktop(
   options: RegisterChatThreadDesktopOptions = {},
 ): ChatThreadDesktopInstallation {

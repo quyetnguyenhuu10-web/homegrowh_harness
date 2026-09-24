@@ -1,6 +1,9 @@
 /* ChatContainer owns shell + viewport/paging geometry. Message geometry lives in ViewHistory. */
 
 .ct-chat-shell {
+  --ct-chat-shell-font-family: "Segoe UI Variable Text", "Segoe UI Variable",
+    "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+
   position: absolute;
   inset: 0;
   display: flex;
@@ -8,6 +11,7 @@
   min-height: 0;
   overflow: hidden;
   background: #ffffff;
+  font-family: var(--ct-chat-shell-font-family);
 }
 
 .ct-chat-shell__navigator {

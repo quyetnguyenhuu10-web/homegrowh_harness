@@ -1,4 +1,9 @@
-import { useLayoutEffect } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 
 import { acquireStyleTag, releaseStyleTag } from "../../style_tag/renderer";
 
@@ -9,10 +14,12 @@ export interface HistoryEntry {
   type: string;
   role: string | null;
   text?: string;
-  apiSession?: string | null;
+  sessionId?: string | null;
+  requestId?: string | null;
   eventIndex?: number | null;
-  sourceRowIds: number[];
+  sourceRowPositions: number[];
   streaming?: boolean;
+  label?: string;
   /** Entry này nối sát entry kế tiếp về mặt ngữ nghĩa, dù bị chia khác panel. */
   compactAfter?: boolean;
 }
@@ -47,11 +54,100 @@ function normalizeEntryType(type: string): string {
 function getVisualKind(entry: HistoryEntry): ViewHistoryVisualKind {
   const type = normalizeEntryType(entry.type);
 
-  if (type === "thinking" || type === "reasoning") return "thinking";
+  if (type === "thinking" || type === "reasoning" || type === "compactiondebug") {
+    return "thinking";
+  }
   if (type === "toolcall") return "tool-call";
   if (type === "toolresult" || type === "toolresults") return "tool-result";
   if (entry.role === "user") return "user";
   return "assistant";
+}
+
+interface ThinkingBubbleProps {
+  text: string;
+  streaming: boolean;
+  label?: string;
+}
+
+function ThinkingBubble({
+  text,
+  streaming,
+  label = "Thinking",
+}: ThinkingBubbleProps) {
+  const contentRef = useRef<HTMLDivElement>(null);
+  const bottomSentinelRef = useRef<HTMLDivElement>(null);
+  const [autoScroll, setAutoScroll] = useState(false);
+
+  useEffect(() => {
+    const content = contentRef.current;
+    const sentinel = bottomSentinelRef.current;
+    if (!content || !sentinel) {
+      setAutoScroll(false);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        setAutoScroll(Boolean(entry?.isIntersecting && entry.intersectionRatio === 1));
+      },
+      {
+        root: content,
+        threshold: 1,
+      },
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!autoScroll) return;
+    const content = contentRef.current;
+    if (!content) return;
+
+    content.scrollTop = content.scrollHeight;
+  }, [autoScroll, text]);
+
+  return (
+    <details
+      className={
+        streaming
+          ? "ct-view-history__thinking-bubble ct-view-history__thinking--streaming"
+          : "ct-view-history__thinking-bubble"
+      }
+      open
+    >
+      <summary className="ct-view-history__thinking-summary">
+        <svg
+          className="ct-view-history__thinking-chevron"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path d="m9 18 6-6-6-6" />
+        </svg>
+        <span
+          className="ct-view-history__thinking-title"
+          data-text={label}
+        >
+          {label}
+        </span>
+      </summary>
+      <div
+        ref={contentRef}
+        className="ct-view-history__thinking-content"
+        data-auto-scroll={autoScroll ? "true" : "false"}
+      >
+        <div className="ct-view-history__thinking-body">
+          {text}
+        </div>
+        <div
+          ref={bottomSentinelRef}
+          className="ct-view-history__thinking-bottom-sentinel"
+          aria-hidden="true"
+        />
+      </div>
+    </details>
+  );
 }
 
 /**
@@ -104,35 +200,11 @@ export default function ViewHistory({
             ) : entry.role === "assistant" ? (
               visualKind === "thinking" ? (
                 entry.text ? (
-                  <details
-                    className={
-                      entry.streaming
-                        ? "ct-view-history__thinking-bubble ct-view-history__thinking--streaming"
-                        : "ct-view-history__thinking-bubble"
-                    }
-                    open
-                  >
-                    <summary className="ct-view-history__thinking-summary">
-                      <svg
-                        className="ct-view-history__thinking-chevron"
-                        viewBox="0 0 24 24"
-                        aria-hidden="true"
-                      >
-                        <path d="m9 18 6-6-6-6" />
-                      </svg>
-                      <span
-                        className="ct-view-history__thinking-title"
-                        data-text="Thinking"
-                      >
-                        Thinking
-                      </span>
-                    </summary>
-                    <div className="ct-view-history__thinking-content">
-                      <div className="ct-view-history__thinking-body">
-                        {entry.text}
-                      </div>
-                    </div>
-                  </details>
+                  <ThinkingBubble
+                    text={entry.text}
+                    streaming={Boolean(entry.streaming)}
+                    label={entry.label}
+                  />
                 ) : (
                   <div className="ct-view-history__assistant-thinking ct-view-history__thinking--streaming">
                     <span

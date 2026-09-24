@@ -8,6 +8,7 @@ export {
   CHAT_THREAD_ADD_REPOSITORY_CHANNEL,
   CHAT_THREAD_CANCEL_CHAT_REQUEST_CHANNEL,
   CHAT_THREAD_CONVERSATION_ROW_EVENT,
+  CHAT_THREAD_COMPACTION_DEBUG_EVENT,
   CHAT_THREAD_CONTEXT_USAGE_UPDATED_EVENT,
   CHAT_THREAD_DELETE_CONVERSATION_CHANNEL,
   CHAT_THREAD_DESKTOP_BRIDGE_KEY,
@@ -27,10 +28,11 @@ export {
 } from "../desktop_contract";
 export type {
   ChatThreadDesktopBridge,
+  CompactionDebugEvent,
   ConversationContextUsageUpdatedEvent,
   ConversationRowAppendedEvent,
-  ConversationRequestSnapshot,
-  ConversationRequestStateEvent,
+  ConversationSessionSnapshot,
+  ConversationSessionStateEvent,
   ProviderErrorNoticeEvent,
   SendChatRequestInput,
   SendChatRequestResult,

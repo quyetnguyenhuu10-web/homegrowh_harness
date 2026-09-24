@@ -15,3 +15,6 @@ node_modules/
 /package/tools/filesystems/tests/platform/linux/fsystem/edit/linux_edit_stress/index.html
 /package/tools/filesystems/tests/platform/linux/fsystem/edit/linux_edit_stress/**/report.html
 /package/tools/filesystems/tests/platform/linux/fsystem/edit/linux_edit_stress/**/results/
+
+# Local custom model credentials
+/package/chat_thread/src/data/history_conversation/projects/.custom_models.json

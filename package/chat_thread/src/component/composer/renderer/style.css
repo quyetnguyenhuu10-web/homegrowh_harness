@@ -4,6 +4,9 @@
  */
 
 .ct-composer {
+  --ct-composer-font-family: "Segoe UI Variable Text", "Segoe UI Variable",
+    "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+
   position: absolute;
   right: calc(max(20px, 4%) + 61px);
   bottom: 14px;
@@ -20,6 +23,7 @@
   border-radius: 16px;
   color: #202124;
   background: #ffffff;
+  font-family: var(--ct-composer-font-family);
   box-shadow:
     0 10px 28px rgba(18, 24, 40, 0.1),
     0 1px 2px rgba(18, 24, 40, 0.04);
@@ -47,7 +51,7 @@
   color: #202124;
   background: transparent;
   caret-color: #202124;
-  font: 14px/1.5 "Segoe WPC", "Segoe UI", sans-serif;
+  font: 14px/1.5 var(--ct-composer-font-family);
   letter-spacing: -0.006em;
   scrollbar-width: thin;
   scrollbar-color: #d7dbe0 transparent;
@@ -82,7 +86,7 @@
 
 .ct-composer__add,
 .ct-composer__send {
-  font-family: "Segoe WPC", "Segoe UI", sans-serif;
+  font-family: var(--ct-composer-font-family);
 }
 
 .ct-composer__tools {
@@ -146,7 +150,7 @@
   border-radius: 8px;
   color: #30343a;
   background: transparent;
-  font-family: "Segoe WPC", "Segoe UI", sans-serif;
+  font-family: var(--ct-composer-font-family);
   text-align: left;
   cursor: pointer;
 }
@@ -240,7 +244,7 @@
   border-radius: 8px;
   color: #626973;
   background: #ffffff;
-  font: 12px/1 "Segoe WPC", "Segoe UI", sans-serif;
+  font: 12px/1 var(--ct-composer-font-family);
   cursor: pointer;
 }
 
@@ -265,7 +269,7 @@
   outline: 0;
   color: #202124;
   background: #ffffff;
-  font: 12px/1 "Segoe WPC", "Segoe UI", sans-serif;
+  font: 12px/1 var(--ct-composer-font-family);
 }
 
 .ct-composer__reasoning-history-input:focus {

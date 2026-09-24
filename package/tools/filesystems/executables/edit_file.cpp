@@ -4,7 +4,9 @@
 #include <nlohmann/json.hpp>
 
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <utility>
 
@@ -92,21 +94,26 @@ int main(int argc, char* argv[])
     if (toolcall_path.empty())
         return fail(nullptr, "missing_argument", "Thiếu --toolcall <path>");
 
-    const fsystem::ReadResult input = fsystem::read(toolcall_path);
-    if (input.error != 0)
+    std::ifstream input_stream(toolcall_path, std::ios::binary);
+    if (!input_stream)
     {
         return fail(
             nullptr,
             "toolcall_read_failed",
-            "Không đọc được file tool call, mã lỗi: " +
-                std::to_string(input.error)
+            "Không đọc được file tool call"
         );
     }
+    const std::string input{
+        std::istreambuf_iterator<char>(input_stream),
+        std::istreambuf_iterator<char>()
+    };
+    if (input_stream.bad())
+        return fail(nullptr, "toolcall_read_failed", "Lỗi khi đọc file tool call");
 
     json root;
     try
     {
-        root = json::parse(input.content);
+        root = json::parse(input);
     }
     catch (const std::exception& exception)
     {

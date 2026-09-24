@@ -9,6 +9,7 @@ import {
   CHAT_THREAD_GET_ACTIVE_CONVERSATION_CHANNEL,
   CHAT_THREAD_GET_SELECTED_MODEL_CHANNEL,
   CHAT_THREAD_CONVERSATION_ROW_EVENT,
+  CHAT_THREAD_COMPACTION_DEBUG_EVENT,
   CHAT_THREAD_CONTEXT_USAGE_UPDATED_EVENT,
   CHAT_THREAD_LIST_ACTIVE_REQUESTS_CHANNEL,
   CHAT_THREAD_LIST_CONVERSATIONS_CHANNEL,
@@ -21,27 +22,37 @@ import {
   CHAT_THREAD_SET_ACTIVE_CONVERSATION_CHANNEL,
   CHAT_THREAD_SET_SELECTED_MODEL_CHANNEL,
   CHAT_THREAD_SEND_CHAT_REQUEST_CHANNEL,
-  type ConversationRequestSnapshot,
-  type ConversationRequestStateEvent,
+  type ConversationSessionSnapshot,
+  type ConversationSessionStateEvent,
   type ConversationContextUsageUpdatedEvent,
+  type CompactionDebugEvent,
   type ConversationRowAppendedEvent,
   type ProviderErrorNoticeEvent,
   type ChatThreadDesktopBridge,
   type SendChatRequestInput,
   type SendChatRequestResult,
-  type HistoryActiveConversation,
-  type HistoryConversationRecord,
-  type HistoryContextUsage,
-  type HistoryRepository,
-  type HistoryRow,
-  type HistorySelectedModel,
-} from "../component/history_conversation/main";
+} from "../component/history_conversation/desktop_contract";
+import type {
+  HistoryActiveConversation,
+  HistoryConversationRecord,
+  HistoryContextUsage,
+  HistoryRepository,
+  HistoryRow,
+  HistorySelectedModel,
+} from "../component/history_conversation/history_contract";
 import {
   CHAT_THREAD_ADD_CUSTOM_MODEL_CHANNEL,
+  CHAT_THREAD_DELETE_CUSTOM_MODEL_CHANNEL,
+  CHAT_THREAD_GET_CUSTOM_MODEL_CHANNEL,
   CHAT_THREAD_LIST_MODEL_REGISTRY_CHANNEL,
+  CHAT_THREAD_UPDATE_CUSTOM_MODEL_CHANNEL,
   type AddCustomModelInput,
+  type CustomModelEditableConfig,
+  type DeleteCustomModelInput,
+  type GetCustomModelInput,
   type ModelRegistryItem,
   type ModelRegistrySnapshot,
+  type UpdateCustomModelInput,
 } from "../component/picker_model/model_registry_contract";
 
 const bridge: ChatThreadDesktopBridge = {
@@ -54,6 +65,27 @@ const bridge: ChatThreadDesktopBridge = {
   addCustomModel(input: AddCustomModelInput): Promise<ModelRegistryItem> {
     return ipcRenderer.invoke(
       CHAT_THREAD_ADD_CUSTOM_MODEL_CHANNEL,
+      input,
+    ) as Promise<ModelRegistryItem>;
+  },
+
+  deleteCustomModel(input: DeleteCustomModelInput): Promise<boolean> {
+    return ipcRenderer.invoke(
+      CHAT_THREAD_DELETE_CUSTOM_MODEL_CHANNEL,
+      input,
+    ) as Promise<boolean>;
+  },
+
+  getCustomModel(input: GetCustomModelInput): Promise<CustomModelEditableConfig> {
+    return ipcRenderer.invoke(
+      CHAT_THREAD_GET_CUSTOM_MODEL_CHANNEL,
+      input,
+    ) as Promise<CustomModelEditableConfig>;
+  },
+
+  updateCustomModel(input: UpdateCustomModelInput): Promise<ModelRegistryItem> {
+    return ipcRenderer.invoke(
+      CHAT_THREAD_UPDATE_CUSTOM_MODEL_CHANNEL,
       input,
     ) as Promise<ModelRegistryItem>;
   },
@@ -123,13 +155,13 @@ const bridge: ChatThreadDesktopBridge = {
   readConversationRow(
     repositoryPath: string,
     conversationId: string,
-    rowId: number,
+    rowPosition: number,
   ): Promise<HistoryRow | null> {
     return ipcRenderer.invoke(
       CHAT_THREAD_READ_CONVERSATION_ROW_CHANNEL,
       repositoryPath,
       conversationId,
-      rowId,
+      rowPosition,
     ) as Promise<HistoryRow | null>;
   },
 
@@ -168,25 +200,25 @@ const bridge: ChatThreadDesktopBridge = {
     ) as Promise<SendChatRequestResult>;
   },
 
-  cancelChatRequest(requestId: string): Promise<void> {
+  cancelChatSession(sessionId: string): Promise<void> {
     return ipcRenderer.invoke(
       CHAT_THREAD_CANCEL_CHAT_REQUEST_CHANNEL,
-      requestId,
+      sessionId,
     ) as Promise<void>;
   },
 
-  listActiveChatRequests(): Promise<ConversationRequestSnapshot[]> {
+  listActiveChatSessions(): Promise<ConversationSessionSnapshot[]> {
     return ipcRenderer.invoke(
       CHAT_THREAD_LIST_ACTIVE_REQUESTS_CHANNEL,
-    ) as Promise<ConversationRequestSnapshot[]>;
+    ) as Promise<ConversationSessionSnapshot[]>;
   },
 
-  onChatRequestState(
-    listener: (event: ConversationRequestStateEvent) => void,
+  onChatSessionState(
+    listener: (event: ConversationSessionStateEvent) => void,
   ): () => void {
     const handler = (
       _event: Electron.IpcRendererEvent,
-      payload: ConversationRequestStateEvent,
+      payload: ConversationSessionStateEvent,
     ) => {
       listener(payload);
     };
@@ -221,6 +253,19 @@ const bridge: ChatThreadDesktopBridge = {
     ipcRenderer.on(CHAT_THREAD_CONTEXT_USAGE_UPDATED_EVENT, handler);
     return () =>
       ipcRenderer.removeListener(CHAT_THREAD_CONTEXT_USAGE_UPDATED_EVENT, handler);
+  },
+
+  onCompactionDebug(
+    listener: (event: CompactionDebugEvent) => void,
+  ): () => void {
+    const handler = (
+      _event: Electron.IpcRendererEvent,
+      payload: CompactionDebugEvent,
+    ) => {
+      listener(payload);
+    };
+    ipcRenderer.on(CHAT_THREAD_COMPACTION_DEBUG_EVENT, handler);
+    return () => ipcRenderer.removeListener(CHAT_THREAD_COMPACTION_DEBUG_EVENT, handler);
   },
 
   onConversationRow(

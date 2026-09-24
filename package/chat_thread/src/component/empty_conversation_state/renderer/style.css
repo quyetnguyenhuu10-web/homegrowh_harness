@@ -1,4 +1,7 @@
 .ct-empty-conversation {
+  --ct-empty-font-family: "Segoe UI Variable Text", "Segoe UI Variable",
+    "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+
   position: absolute;
   top: 50%;
   left: 50%;
@@ -9,7 +12,7 @@
   flex-direction: column;
   align-items: center;
   transform: translate(-50%, -62%);
-  font-family: "Segoe WPC", "Segoe UI", sans-serif;
+  font-family: var(--ct-empty-font-family);
 }
 
 .ct-empty-conversation__title {
@@ -32,7 +35,7 @@
   border: 0;
   color: #747b84;
   background: transparent;
-  font: 14.5px/20px "Segoe WPC", "Segoe UI", sans-serif;
+  font: 14.5px/20px var(--ct-empty-font-family);
   cursor: pointer;
 }
 
@@ -206,7 +209,7 @@
   color: #30343a;
   background: transparent;
   box-shadow: inset 0 0 0 1px #dfe3e8;
-  font: 13px/18px "Segoe WPC", "Segoe UI", sans-serif;
+  font: 13px/18px var(--ct-empty-font-family);
 }
 
 .ct-empty-conversation__search-input::placeholder {
@@ -315,7 +318,7 @@
   border-radius: 8px;
   color: #5f6368;
   background: transparent;
-  font: 13px/18px "Segoe WPC", "Segoe UI", sans-serif;
+  font: 13px/18px var(--ct-empty-font-family);
   text-align: left;
   cursor: pointer;
 }

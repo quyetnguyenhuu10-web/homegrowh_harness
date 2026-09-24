@@ -1,21 +1,21 @@
 {
-  "name": "chat_thread",
+  "name": "@hh/chat-thread",
   "version": "1.0.0",
-  "description": "",
+  "description": "Renderer and Electron adapter for Chat UI",
   "main": "index.js",
   "scripts": {
     "dev": "vite",
     "renderer": "vite",
     "build": "vite build",
     "build:embed": "vite build --config vite.embed.config.ts",
-    "build:desktop": "npm --prefix ../provider run build && vite build --config vite.desktop.config.ts",
+    "build:desktop": "npm --prefix ../database run build && npm --prefix ../provider run build && npm --prefix ../session run build && vite build --config vite.desktop.config.ts",
     "build:plugin": "npm run build:embed && npm run build:desktop",
     "electron": "node scripts/electron-dev.mjs",
     "dist": "npm run build && npm run build:desktop && electron dist/desktop/app.cjs",
     "start": "npm run electron",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "typecheck": "npm --prefix ../database run build && npm --prefix ../provider run build && npm --prefix ../session run build && tsc --noEmit -p tsconfig.json",
+    "test": "node ./test/history_order.mjs"
   },
   "keywords": [],
   "author": "",
@@ -31,12 +31,13 @@
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
-    "tsx": "^4.23.13",
     "typescript": "^7.0.2",
     "vite": "^8.3.0"
   },
   "dependencies": {
-    "@homegrowh/provider": "file:../provider",
+    "@hh/database": "file:../database",
+    "@hh/provider": "file:../provider",
+    "@hh/session": "file:../session",
     "electron": "^44.4.3",
     "lucide-react": "^1.47.0",
     "react": "^19.3.0",

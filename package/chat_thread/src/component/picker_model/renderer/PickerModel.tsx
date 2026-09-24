@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { Ellipsis, Trash2, X } from "lucide-react";
 
 import { getChatThreadDesktopBridge } from "../../history_conversation/renderer";
 import { acquireStyleTag, releaseStyleTag } from "../../style_tag/renderer";
@@ -95,6 +96,14 @@ export default function PickerModel({
   const [customForm, setCustomForm] = useState<CustomFormState>(EMPTY_CUSTOM_FORM);
   const [customError, setCustomError] = useState<string | null>(null);
   const [savingCustom, setSavingCustom] = useState(false);
+  const [editingCustomModel, setEditingCustomModel] = useState<string | null>(
+    null,
+  );
+  const [customMenuModel, setCustomMenuModel] = useState<string | null>(null);
+  const [loadingCustomEdit, setLoadingCustomEdit] = useState(false);
+  const [deletingCustomModel, setDeletingCustomModel] = useState<string | null>(
+    null,
+  );
   const rootRef = useRef<HTMLDivElement>(null);
 
   const refreshRegistry = useCallback(async (): Promise<ModelRegistrySnapshot> => {
@@ -124,6 +133,13 @@ export default function PickerModel({
     };
   }, [refreshRegistry]);
 
+  useEffect(() => {
+    if (!open) return;
+    void refreshRegistry().catch((error) => {
+      setRegistryError(error instanceof Error ? error.message : String(error));
+    });
+  }, [open, refreshRegistry]);
+
   const fallback = useMemo(() => {
     if (isRegistered(registry, defaultValue)) return defaultValue;
     if (isRegistered(registry, registry?.defaultModel)) {
@@ -145,21 +161,22 @@ export default function PickerModel({
   );
 
   useEffect(() => {
-    if (!registry || isRegistered(registry, value) || isRegistered(registry, inner)) {
-      return;
-    }
-    if (!fallback) return;
-    setInner(fallback);
-    onChange?.(fallback);
-  }, [fallback, inner, onChange, registry, value]);
-
-  useEffect(() => {
-    if (!open) return;
+    if (!open && !addingCustom && !customMenuModel) return;
 
     const onPointerDown = (event: PointerEvent) => {
-      if (rootRef.current && !rootRef.current.contains(event.target as Node)) {
+      if (
+        customMenuModel &&
+        event.target instanceof Element &&
+        !event.target.closest(".ct-modelpick__more-wrap")
+      ) {
+        setCustomMenuModel(null);
+      }
+      if (
+        open &&
+        rootRef.current &&
+        !rootRef.current.contains(event.target as Node)
+      ) {
         setOpen(false);
-        setAddingCustom(false);
       }
     };
 
@@ -167,7 +184,10 @@ export default function PickerModel({
       if (event.key === "Escape") {
         if (addingCustom) {
           setAddingCustom(false);
+          setEditingCustomModel(null);
           setCustomError(null);
+        } else if (customMenuModel) {
+          setCustomMenuModel(null);
         } else {
           setOpen(false);
         }
@@ -181,7 +201,7 @@ export default function PickerModel({
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [addingCustom, open]);
+  }, [addingCustom, customMenuModel, open]);
 
   const choose = (next: ModelSelection): void => {
     if (!sameSelection(next, selected)) {
@@ -189,6 +209,8 @@ export default function PickerModel({
       onChange?.(next);
     }
     setAddingCustom(false);
+    setEditingCustomModel(null);
+    setCustomMenuModel(null);
     setOpen(false);
   };
 
@@ -205,7 +227,11 @@ export default function PickerModel({
     }
 
     const bridge = getChatThreadDesktopBridge();
-    if (!bridge || typeof bridge.addCustomModel !== "function") {
+    if (
+      !bridge ||
+      typeof bridge.addCustomModel !== "function" ||
+      typeof bridge.updateCustomModel !== "function"
+    ) {
       setCustomError("Custom model bridge chưa sẵn sàng.");
       return;
     }
@@ -213,20 +239,113 @@ export default function PickerModel({
     setSavingCustom(true);
     setCustomError(null);
     try {
-      const created = await bridge.addCustomModel({
-        apiKey: customForm.apiKey,
-        endpoint: customForm.endpoint,
-        model: customForm.model,
-        maxContextWindowTokens,
-      });
+      const originalModel = editingCustomModel;
+      const created = originalModel
+        ? await bridge.updateCustomModel({
+            originalModel,
+            apiKey: customForm.apiKey || undefined,
+            endpoint: customForm.endpoint,
+            model: customForm.model,
+            maxContextWindowTokens,
+          })
+        : await bridge.addCustomModel({
+            apiKey: customForm.apiKey,
+            endpoint: customForm.endpoint,
+            model: customForm.model,
+            maxContextWindowTokens,
+          });
       await refreshRegistry();
       setCustomForm(EMPTY_CUSTOM_FORM);
       setAddingCustom(false);
-      choose({ provider: created.provider, model: created.model });
+      setEditingCustomModel(null);
+      if (originalModel) {
+        if (
+          selected?.provider === "custom" &&
+          selected.model === originalModel &&
+          created.model !== originalModel
+        ) {
+          const nextSelection = {
+            provider: created.provider,
+            model: created.model,
+          };
+          setInner(nextSelection);
+          onChange?.(nextSelection);
+        }
+      } else {
+        choose({ provider: created.provider, model: created.model });
+      }
     } catch (error) {
       setCustomError(error instanceof Error ? error.message : String(error));
     } finally {
       setSavingCustom(false);
+    }
+  };
+
+  const openCustomEditor = async (model: ModelRegistryItem): Promise<void> => {
+    if (!model.custom || loadingCustomEdit) return;
+
+    const bridge = getChatThreadDesktopBridge();
+    if (!bridge || typeof bridge.getCustomModel !== "function") {
+      setRegistryError("Custom model bridge chưa hỗ trợ tùy chỉnh.");
+      return;
+    }
+
+    setLoadingCustomEdit(true);
+    setRegistryError(null);
+    try {
+      const config = await bridge.getCustomModel({ model: model.model });
+      setCustomForm({
+        apiKey: "",
+        endpoint: config.endpoint,
+        model: config.model,
+        maxContextWindowTokens: String(config.contextWindowTokens),
+      });
+      setEditingCustomModel(model.model);
+      setCustomError(null);
+      setCustomMenuModel(null);
+      setOpen(false);
+      setAddingCustom(true);
+    } catch (error) {
+      setRegistryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setLoadingCustomEdit(false);
+    }
+  };
+
+  const deleteCustom = async (model: ModelRegistryItem): Promise<void> => {
+    if (!model.custom || deletingCustomModel !== null) return;
+
+    const bridge = getChatThreadDesktopBridge();
+    if (!bridge || typeof bridge.deleteCustomModel !== "function") {
+      setRegistryError("Custom model bridge chưa hỗ trợ xóa.");
+      return;
+    }
+
+    setDeletingCustomModel(model.model);
+    setRegistryError(null);
+    try {
+      const deleted = await bridge.deleteCustomModel({ model: model.model });
+      if (!deleted) {
+        throw new Error(`Custom model không tồn tại: ${model.model}`);
+      }
+
+      const nextRegistry = await refreshRegistry();
+      const deletedSelection: ModelSelection = {
+        provider: model.provider,
+        model: model.model,
+      };
+      if (sameSelection(deletedSelection, selected)) {
+        const nextSelection =
+          nextRegistry.defaultModel ?? firstModel(nextRegistry);
+        if (nextSelection) {
+          setInner(nextSelection);
+          onChange?.(nextSelection);
+        }
+      }
+    } catch (error) {
+      setRegistryError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setDeletingCustomModel(null);
     }
   };
 
@@ -270,7 +389,10 @@ export default function PickerModel({
                     aria-label="Thêm custom model"
                     title="Thêm custom model"
                     onClick={() => {
-                      setAddingCustom((current) => !current);
+                      setOpen(false);
+                      setEditingCustomModel(null);
+                      setCustomForm(EMPTY_CUSTOM_FORM);
+                      setAddingCustom(true);
                       setCustomError(null);
                     }}
                   >
@@ -278,97 +400,6 @@ export default function PickerModel({
                   </button>
                 )}
               </div>
-
-              {group.provider === "custom" && addingCustom && (
-                <form className="ct-modelpick__custom-form" onSubmit={submitCustom}>
-                  <label className="ct-modelpick__field">
-                    <span>API key</span>
-                    <input
-                      type="password"
-                      autoComplete="off"
-                      value={customForm.apiKey}
-                      onChange={(event) =>
-                        setCustomForm((current) => ({
-                          ...current,
-                          apiKey: event.currentTarget.value,
-                        }))
-                      }
-                      placeholder="sk-…"
-                      disabled={savingCustom}
-                    />
-                  </label>
-
-                  <label className="ct-modelpick__field">
-                    <span>Endpoint OpenAI-compatible</span>
-                    <input
-                      type="url"
-                      value={customForm.endpoint}
-                      onChange={(event) =>
-                        setCustomForm((current) => ({
-                          ...current,
-                          endpoint: event.currentTarget.value,
-                        }))
-                      }
-                      placeholder="https://host/v1"
-                      disabled={savingCustom}
-                    />
-                  </label>
-
-                  <label className="ct-modelpick__field">
-                    <span>Model name</span>
-                    <input
-                      type="text"
-                      value={customForm.model}
-                      onChange={(event) =>
-                        setCustomForm((current) => ({
-                          ...current,
-                          model: event.currentTarget.value,
-                        }))
-                      }
-                      placeholder="model-id"
-                      disabled={savingCustom}
-                    />
-                  </label>
-
-                  <label className="ct-modelpick__field">
-                    <span>Max context window</span>
-                    <input
-                      type="number"
-                      min={1}
-                      step={1}
-                      value={customForm.maxContextWindowTokens}
-                      onChange={(event) =>
-                        setCustomForm((current) => ({
-                          ...current,
-                          maxContextWindowTokens: event.currentTarget.value,
-                        }))
-                      }
-                      placeholder="64000"
-                      disabled={savingCustom}
-                    />
-                  </label>
-
-                  {customError && (
-                    <div className="ct-modelpick__custom-error">{customError}</div>
-                  )}
-
-                  <div className="ct-modelpick__custom-actions">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAddingCustom(false);
-                        setCustomError(null);
-                      }}
-                      disabled={savingCustom}
-                    >
-                      Hủy
-                    </button>
-                    <button type="submit" disabled={savingCustom}>
-                      {savingCustom ? "Đang lưu…" : "Lưu"}
-                    </button>
-                  </div>
-                </form>
-              )}
 
               {group.models.map((model) => {
                 const option: ModelSelection = {
@@ -378,32 +409,228 @@ export default function PickerModel({
                 const active = sameSelection(option, selected);
 
                 return (
-                  <button
+                  <div
+                    className="ct-modelpick__option-row"
                     key={`${model.provider}:${model.model}`}
-                    type="button"
-                    role="option"
-                    aria-selected={active}
-                    className={
-                      active
-                        ? "ct-modelpick__option ct-modelpick__option--active"
-                        : "ct-modelpick__option"
-                    }
-                    onClick={() => choose(option)}
                   >
-                    <span className="ct-modelpick__option-copy">
-                      <span className="ct-modelpick__option-label">
-                        {model.label}
+                    <button
+                      type="button"
+                      role="option"
+                      aria-selected={active}
+                      className={
+                        active
+                          ? "ct-modelpick__option ct-modelpick__option--active"
+                          : "ct-modelpick__option"
+                      }
+                      onClick={() => choose(option)}
+                    >
+                      <span className="ct-modelpick__option-copy">
+                        <span className="ct-modelpick__option-label">
+                          {model.label}
+                        </span>
                       </span>
-                    </span>
 
-                    <span className="ct-modelpick__check" aria-hidden="true">
-                      ✓
-                    </span>
-                  </button>
+                      <span className="ct-modelpick__check" aria-hidden="true">
+                        ✓
+                      </span>
+                    </button>
+
+                    {model.custom && (
+                      <>
+                        <div className="ct-modelpick__more-wrap">
+                          <button
+                            type="button"
+                            className="ct-modelpick__more"
+                            aria-label={`Tùy chọn cho ${model.label}`}
+                            title="Tùy chọn"
+                            aria-expanded={customMenuModel === model.model}
+                            onClick={() =>
+                              setCustomMenuModel((current) =>
+                                current === model.model ? null : model.model,
+                              )
+                            }
+                          >
+                            <Ellipsis aria-hidden="true" strokeWidth={1.8} />
+                          </button>
+
+                          {customMenuModel === model.model && (
+                            <div className="ct-modelpick__context-menu">
+                              <button
+                                type="button"
+                                disabled={loadingCustomEdit}
+                                onClick={() => void openCustomEditor(model)}
+                              >
+                                Tùy chỉnh
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        <button
+                          type="button"
+                          className="ct-modelpick__delete"
+                          aria-label={`Xóa custom model ${model.label}`}
+                          title="Xóa custom model"
+                          disabled={deletingCustomModel !== null}
+                          onClick={() => void deleteCustom(model)}
+                        >
+                          <Trash2 aria-hidden="true" strokeWidth={1.8} />
+                        </button>
+                      </>
+                    )}
+                  </div>
                 );
               })}
             </section>
           ))}
+        </div>
+      )}
+
+      {addingCustom && !disabled && (
+        <div
+          className="ct-modelpick__modal-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target !== event.currentTarget || savingCustom) return;
+            setAddingCustom(false);
+            setEditingCustomModel(null);
+            setCustomError(null);
+          }}
+        >
+          <div
+            className="ct-modelpick__modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="ct-modelpick-custom-title"
+          >
+            <div className="ct-modelpick__modal-header">
+              <div>
+                <div
+                  className="ct-modelpick__modal-title"
+                  id="ct-modelpick-custom-title"
+                >
+                  {editingCustomModel ? "Tùy chỉnh custom model" : "Add custom model"}
+                </div>
+                <div className="ct-modelpick__modal-subtitle">
+                  OpenAI-compatible endpoint
+                </div>
+              </div>
+              <button
+                type="button"
+                className="ct-modelpick__modal-close"
+                aria-label="Đóng"
+                title="Đóng"
+                disabled={savingCustom}
+                onClick={() => {
+                  setAddingCustom(false);
+                  setEditingCustomModel(null);
+                  setCustomError(null);
+                }}
+              >
+                <X aria-hidden="true" strokeWidth={1.8} />
+              </button>
+            </div>
+
+            <form className="ct-modelpick__custom-form" onSubmit={submitCustom}>
+              <label className="ct-modelpick__field">
+                <span>API key</span>
+                <input
+                  type="password"
+                  autoComplete="off"
+                  value={customForm.apiKey}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setCustomForm((current) => ({
+                      ...current,
+                      apiKey: value,
+                    }));
+                  }}
+                  placeholder={
+                    editingCustomModel ? "Để trống để giữ API key hiện tại" : "sk-…"
+                  }
+                  disabled={savingCustom}
+                />
+              </label>
+
+              <label className="ct-modelpick__field">
+                <span>Endpoint OpenAI-compatible</span>
+                <input
+                  type="url"
+                  value={customForm.endpoint}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setCustomForm((current) => ({
+                      ...current,
+                      endpoint: value,
+                    }));
+                  }}
+                  placeholder="https://host/v1"
+                  disabled={savingCustom}
+                />
+              </label>
+
+              <label className="ct-modelpick__field">
+                <span>Model name</span>
+                <input
+                  type="text"
+                  value={customForm.model}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setCustomForm((current) => ({
+                      ...current,
+                      model: value,
+                    }));
+                  }}
+                  placeholder="model-id"
+                  disabled={savingCustom}
+                />
+              </label>
+
+              <label className="ct-modelpick__field">
+                <span>Max context window</span>
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  value={customForm.maxContextWindowTokens}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setCustomForm((current) => ({
+                      ...current,
+                      maxContextWindowTokens: value,
+                    }));
+                  }}
+                  placeholder="64000"
+                  disabled={savingCustom}
+                />
+              </label>
+
+              {customError && (
+                <div className="ct-modelpick__custom-error">{customError}</div>
+              )}
+
+              <div className="ct-modelpick__custom-actions">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAddingCustom(false);
+                    setEditingCustomModel(null);
+                    setCustomError(null);
+                  }}
+                  disabled={savingCustom}
+                >
+                  Hủy
+                </button>
+                <button type="submit" disabled={savingCustom}>
+                  {savingCustom
+                    ? "Đang lưu…"
+                    : editingCustomModel
+                      ? "Lưu thay đổi"
+                      : "Lưu"}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
     </div>

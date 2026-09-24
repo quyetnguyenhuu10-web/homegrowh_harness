@@ -1,3 +1,4 @@
+import { compareHistoryRows } from "../../history_conversation/renderer/history_rows";
 import type { HistoryRow } from "../../history_conversation/renderer";
 
 import type { HistoryEntry } from "./ViewHistory";
@@ -50,8 +51,8 @@ function toolResultText(content: string): string {
 /**
  * Project DB rows -> logical UI entries.
  *
- * Delta rows with the same API_sessions + event_index form exactly one entry.
- * Their delta text is concatenated by DB id order. User/toolresult remain one
+ * Delta rows with the same requestId + eventIndex form exactly one entry.
+ * Their delta text is concatenated by Database logical order. User/toolresult remain one
  * full-content entry per DB row.
  */
 export function projectHistoryEntries(
@@ -61,31 +62,32 @@ export function projectHistoryEntries(
   const entries: HistoryEntry[] = [];
   const deltaEntries = new Map<string, HistoryEntry>();
 
-  for (const row of [...rows].sort((left, right) => left.id - right.id)) {
+  for (const row of [...rows].sort(compareHistoryRows)) {
     if (row.type === "error") continue;
 
     if (
       isDeltaEntryType(row.type) &&
       row.delta !== null &&
-      row.API_sessions !== null &&
-      row.event_index !== null
+      row.requestId !== null &&
+      row.eventIndex !== null
     ) {
-      const key = `${row.API_sessions}\u0000${row.event_index}`;
+      const key = `${row.requestId}\u0000${row.eventIndex}`;
       const existing = deltaEntries.get(key);
       if (existing) {
         existing.text = `${existing.text ?? ""}${row.delta}`;
-        existing.sourceRowIds.push(row.id);
+        existing.sourceRowPositions.push(row.rowPosition);
         continue;
       }
 
       const entry: HistoryEntry = {
-        id: `${conversationId}:entry:${row.API_sessions}:${row.event_index}`,
+        id: `${conversationId}:entry:${row.requestId}:${row.eventIndex}`,
         type: row.type,
         role: row.role,
         text: row.delta,
-        apiSession: row.API_sessions,
-        eventIndex: row.event_index,
-        sourceRowIds: [row.id],
+        sessionId: row.sessionId,
+        requestId: row.requestId,
+        eventIndex: row.eventIndex,
+        sourceRowPositions: [row.rowPosition],
       };
       deltaEntries.set(key, entry);
       entries.push(entry);
@@ -94,39 +96,42 @@ export function projectHistoryEntries(
 
     if (row.type === "user") {
       entries.push({
-        id: `${conversationId}:entry:row:${row.id}`,
+        id: `${conversationId}:entry:row:${row.rowPosition}`,
         type: "user",
         role: "user",
         text: row.content ?? "",
-        apiSession: row.API_sessions,
+        sessionId: row.sessionId,
+        requestId: row.requestId,
         eventIndex: null,
-        sourceRowIds: [row.id],
+        sourceRowPositions: [row.rowPosition],
       });
       continue;
     }
 
     if (row.type === "toolresult" || row.type === "toolresults") {
       entries.push({
-        id: `${conversationId}:entry:row:${row.id}`,
+        id: `${conversationId}:entry:row:${row.rowPosition}`,
         type: "toolresult",
         role: "tool",
         text: row.content === null ? "" : toolResultText(row.content),
-        apiSession: row.API_sessions,
+        sessionId: row.sessionId,
+        requestId: row.requestId,
         eventIndex: null,
-        sourceRowIds: [row.id],
+        sourceRowPositions: [row.rowPosition],
       });
       continue;
     }
 
     // Legacy/fallback row: still show it as one logical entry instead of losing it.
     entries.push({
-      id: `${conversationId}:entry:row:${row.id}`,
+      id: `${conversationId}:entry:row:${row.rowPosition}`,
       type: row.type,
       role: row.role,
       text: row.content ?? row.delta ?? "",
-      apiSession: row.API_sessions,
-      eventIndex: row.event_index,
-      sourceRowIds: [row.id],
+      sessionId: row.sessionId,
+      requestId: row.requestId,
+      eventIndex: row.eventIndex,
+      sourceRowPositions: [row.rowPosition],
     });
   }
 

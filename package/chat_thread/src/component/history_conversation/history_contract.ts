@@ -1,34 +1,21 @@
-import type { ProviderName } from "@homegrowh/provider";
+import type { ConversationRow } from "@hh/database";
+import type { ModelSelection, ProviderName } from "@hh/provider";
 
-export interface HistoryRow {
-  id: number;
-  type: string;
-  role: string | null;
-  content: string | null;
-  delta: string | null;
-  API_sessions: string | null;
-  request_id: string | null;
-  event_index: number | null;
-  created_at: number;
-}
+export type HistoryRow = ConversationRow;
 
 export interface HistoryConversationRecord {
   id: string;
   createdAt: number;
-  user: boolean;
+  active: boolean;
 }
 
 export interface HistoryRepository {
   name: string;
   repositoryPath: string;
-  historyBaseDir: string;
   conversations: HistoryConversationRecord[];
 }
 
-export interface HistorySelectedModel {
-  provider: ProviderName;
-  model: string;
-}
+export type HistorySelectedModel = ModelSelection & { provider: ProviderName };
 
 export interface HistoryActiveConversation {
   repositoryPath: string;
@@ -48,7 +35,8 @@ export interface HistoryContextUsage {
   contextLimitTokens: number;
   contextLimitCharacters: number;
   usageRatio: number;
-  API_sessions: string;
+  sessionId: string | null;
+  requestId: string;
   trigger: "user" | "toolresult";
   reasoningHistory: ReasoningHistoryPolicy;
   updatedAt: number;

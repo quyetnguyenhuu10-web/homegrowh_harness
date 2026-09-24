@@ -85,9 +85,6 @@ export interface ChatContainerProps {
 
 const STYLE_KEY = "chat-container";
 
-/** Sai số 1px cho scrollTop/scrollHeight có giá trị lẻ theo device scale. */
-const EDGE_EPSILON = 1;
-
 type ScrollDirection = ChatContainerScrollDirection;
 
 function chunk<T>(arr: readonly T[], size: number): T[][] {
@@ -140,6 +137,112 @@ export default function ChatContainer({
   const previousScrollTopRef = useRef(0);
   const initializedRef = useRef(false);
   const previousPanelCountRef = useRef(panels.length);
+  const previousKeepRef = useRef(keep);
+  const autoScrollRef = useRef(false);
+  const tailFollowTargetRef = useRef<number | null>(null);
+  const userScrollInputRef = useRef(false);
+  const pointerScrollInputRef = useRef(false);
+  const [autoScroll, setAutoScroll] = useState(false);
+
+  const updateAutoScroll = (next: boolean): void => {
+    autoScrollRef.current = next;
+    setAutoScroll((current) => (current === next ? current : next));
+  };
+
+  const isAtBottom = (viewport: HTMLDivElement): boolean => {
+    return (
+      Math.ceil(viewport.scrollTop + viewport.clientHeight) >=
+      viewport.scrollHeight
+    );
+  };
+
+  const beginTransientUserScrollInput = (): void => {
+    userScrollInputRef.current = true;
+  };
+
+  const isKeyboardScrollInput = (event: KeyboardEvent): boolean => {
+    if (
+      event.key !== "ArrowUp" &&
+      event.key !== "ArrowDown" &&
+      event.key !== "PageUp" &&
+      event.key !== "PageDown" &&
+      event.key !== "Home" &&
+      event.key !== "End" &&
+      event.key !== " "
+    ) {
+      return false;
+    }
+
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return true;
+    return !(
+      target.isContentEditable ||
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement
+    );
+  };
+
+  const beginPointerUserScrollInput = (
+    event: React.PointerEvent<HTMLDivElement>,
+  ): void => {
+    const viewport = scrollRef.current;
+    if (!viewport) return;
+
+    if (event.pointerType === "touch" || event.pointerType === "pen") {
+      pointerScrollInputRef.current = true;
+      userScrollInputRef.current = true;
+      return;
+    }
+
+    if (event.pointerType !== "mouse" || event.button !== 0) return;
+
+    const scrollbarWidth = viewport.offsetWidth - viewport.clientWidth;
+    const rect = viewport.getBoundingClientRect();
+    const direction = getComputedStyle(viewport).direction;
+    const onScrollbar =
+      scrollbarWidth > 0
+        ? direction === "rtl"
+          ? event.clientX < rect.left + scrollbarWidth
+          : event.clientX >= rect.right - scrollbarWidth
+        : event.target === viewport;
+
+    if (!onScrollbar) return;
+
+    pointerScrollInputRef.current = true;
+    userScrollInputRef.current = true;
+  };
+
+  useEffect(() => {
+    const viewport = scrollRef.current;
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (isKeyboardScrollInput(event)) beginTransientUserScrollInput();
+    };
+
+    const onScrollEnd = (): void => {
+      if (!pointerScrollInputRef.current) {
+        userScrollInputRef.current = false;
+      }
+    };
+
+    const endPointerUserScrollInput = (): void => {
+      pointerScrollInputRef.current = false;
+      userScrollInputRef.current = false;
+    };
+
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("pointerup", endPointerUserScrollInput);
+    window.addEventListener("pointercancel", endPointerUserScrollInput);
+    viewport?.addEventListener("scrollend", onScrollEnd);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("pointerup", endPointerUserScrollInput);
+      window.removeEventListener("pointercancel", endPointerUserScrollInput);
+      viewport?.removeEventListener("scrollend", onScrollEnd);
+    };
+  }, []);
 
   /**
    * Resident window là toàn bộ scroll space đang sống.
@@ -178,6 +281,8 @@ export default function ChatContainer({
       createRangeIds(residentStart, residentEnd),
     [residentEnd, residentStart, transitionResidentIds],
   );
+  const includesLastPanel =
+    panels.length > 0 && residentIds.has(panels.length - 1);
 
   const beginPageTransition = (nextStart: number): void => {
     if (nextStart === residentStart) return;
@@ -206,6 +311,28 @@ export default function ChatContainer({
 
     pendingResidentStartRef.current = nextStart;
     setTransitionResidentIds(union);
+  };
+
+  const beginTailFollow = (nextStart: number): void => {
+    tailFollowTargetRef.current = nextStart;
+
+    if (
+      nextStart === residentStart &&
+      transitionResidentIds === null &&
+      pendingResidentStartRef.current === null
+    ) {
+      const viewport = scrollRef.current;
+      if (viewport) {
+        viewport.scrollTop = viewport.scrollHeight;
+        previousScrollTopRef.current = viewport.scrollTop;
+      }
+      tailFollowTargetRef.current = null;
+      return;
+    }
+    if (pendingResidentStartRef.current !== null) return;
+    if (transitionResidentIds !== null) return;
+
+    beginPageTransition(nextStart);
   };
 
   /**
@@ -308,31 +435,68 @@ export default function ChatContainer({
     if (pendingResidentStartRef.current !== residentStart) return;
 
     pendingResidentStartRef.current = null;
+
+    const tailTarget = tailFollowTargetRef.current;
+    if (tailTarget === null) return;
+
+    if (tailTarget !== residentStart) {
+      beginPageTransition(tailTarget);
+      return;
+    }
+
+    const viewport = scrollRef.current;
+    if (viewport) {
+      viewport.scrollTop = viewport.scrollHeight;
+      previousScrollTopRef.current = viewport.scrollTop;
+    }
+    tailFollowTargetRef.current = null;
   }, [residentStart, transitionResidentIds]);
 
   /**
-   * Khi đổi dữ liệu/config, chỉ clamp resident window về range hợp lệ.
+   * Append không được hủy paging đang chạy.
+   *
+   * Nếu đang follow đáy thì resident window cũng follow tail mới. Nếu người dùng
+   * đã rời đáy thì giữ nguyên resident window; chỉ shrink/config change mới
+   * được phép clamp/reset transition state.
    */
   useLayoutEffect(() => {
     const previousPanelCount = previousPanelCountRef.current;
+    const previousKeep = previousKeepRef.current;
     previousPanelCountRef.current = panels.length;
+    previousKeepRef.current = keep;
 
     if (panels.length === 0) {
       initializedRef.current = false;
+      tailFollowTargetRef.current = null;
+      updateAutoScroll(false);
     } else if (previousPanelCount === 0) {
       initializedRef.current = false;
       setResidentStart(Math.max(0, panels.length - keep));
     }
 
     const maxStart = Math.max(0, panels.length - keep);
+    const grew = panels.length > previousPanelCount;
+    const shrank = panels.length < previousPanelCount;
+    const keepChanged = keep !== previousKeep;
+
+    if (grew && autoScrollRef.current) {
+      beginTailFollow(maxStart);
+      return;
+    }
+
+    if (shrank || keepChanged) {
+      tailFollowTargetRef.current = null;
+      setResidentStart((current) => Math.min(current, maxStart));
+      pendingResidentStartRef.current = null;
+      topPrependAnchorRef.current = null;
+      setTransitionResidentIds(null);
+      boundaryLoadInFlightRef.current = null;
+      boundaryLoadRequestRef.current += 1;
+      setBoundaryLoading(null);
+      return;
+    }
 
     setResidentStart((current) => Math.min(current, maxStart));
-    pendingResidentStartRef.current = null;
-    topPrependAnchorRef.current = null;
-    setTransitionResidentIds(null);
-    boundaryLoadInFlightRef.current = null;
-    boundaryLoadRequestRef.current += 1;
-    setBoundaryLoading(null);
   }, [keep, panels.length]);
 
   /**
@@ -353,7 +517,25 @@ export default function ChatContainer({
       viewport.scrollHeight - viewport.clientHeight,
     );
     previousScrollTopRef.current = viewport.scrollTop;
+    updateAutoScroll(true);
   }, [keep, panels.length, residentStart]);
+
+  /**
+   * Content growth never changes the follow flag. Only an actual scroll event
+   * can do that. This prevents streamed content from pushing the sentinel out
+   * for one frame and accidentally disabling autoscroll.
+   */
+  useLayoutEffect(() => {
+    if (!autoScroll) return;
+    if (tailFollowTargetRef.current !== null) return;
+    if (pendingResidentStartRef.current !== null) return;
+    if (transitionResidentIds !== null) return;
+    const viewport = scrollRef.current;
+    if (!viewport || !includesLastPanel) return;
+
+    viewport.scrollTop = viewport.scrollHeight;
+    previousScrollTopRef.current = viewport.scrollTop;
+  }, [autoScroll, bottomPad, entries, includesLastPanel, showThinking]);
 
   const onScroll = () => {
     const viewport = scrollRef.current;
@@ -363,8 +545,22 @@ export default function ChatContainer({
     const previousScrollTop = previousScrollTopRef.current;
     previousScrollTopRef.current = nextScrollTop;
 
+    const userScrollInput = userScrollInputRef.current;
+    if (userScrollInput) {
+      const atConversationBottom = includesLastPanel && isAtBottom(viewport);
+      updateAutoScroll(atConversationBottom);
+
+      if (!atConversationBottom && tailFollowTargetRef.current !== null) {
+        tailFollowTargetRef.current = null;
+      }
+    }
+
     if (pendingResidentStartRef.current !== null) return;
+    if (tailFollowTargetRef.current !== null) return;
+    if (transitionResidentIds !== null) return;
     if (boundaryLoadInFlightRef.current !== null) return;
+
+    if (!userScrollInput) return;
 
     const direction: ScrollDirection | null =
       nextScrollTop < previousScrollTop
@@ -375,17 +571,8 @@ export default function ChatContainer({
 
     if (direction === null) return;
 
-    /*
-     * Không có geometry lịch sử giả: scrollHeight hiện tại chỉ gồm panel đang
-     * resident trong RAM. Vì vậy 0 và maxScrollTop chính là trần/sàn vật lý của
-     * resident DOM, không cần wheel intent, timer hay anchor bookkeeping.
-     */
-    const maxScrollTop = Math.max(
-      0,
-      viewport.scrollHeight - viewport.clientHeight,
-    );
-    const hitTop = nextScrollTop <= EDGE_EPSILON;
-    const hitBottom = nextScrollTop >= maxScrollTop - EDGE_EPSILON;
+    const hitTop = nextScrollTop === 0;
+    const hitBottom = isAtBottom(viewport);
 
     if (direction === "up" && hitTop && residentStart > 0) {
       requestBoundaryLoad(
@@ -408,9 +595,6 @@ export default function ChatContainer({
     () => [...residentIds].sort((left, right) => left - right),
     [residentIds],
   );
-
-  const includesLastPanel =
-    panels.length > 0 && residentIds.has(panels.length - 1);
 
   return (
     <div className="ct-chat-shell">
@@ -438,11 +622,14 @@ export default function ChatContainer({
           className="ct-chat"
           ref={scrollRef}
           onScroll={onScroll}
+          onWheelCapture={beginTransientUserScrollInput}
+          onPointerDownCapture={beginPointerUserScrollInput}
           data-panels={panels.length}
           data-live-from={residentStart}
           data-live-count={residentEnd - residentStart}
           data-mounted-count={residentIds.size}
           data-boundary-loading={boundaryLoading ?? "none"}
+          data-auto-scroll={autoScroll ? "true" : "false"}
         >
           <div
             className="ct-chat__total"
@@ -475,6 +662,7 @@ export default function ChatContainer({
                 }}
               />
             )}
+
           </div>
         </div>
 

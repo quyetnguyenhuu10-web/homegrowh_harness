@@ -6,15 +6,15 @@ import Composer, {
 } from "./component/composer/renderer";
 import EmptyConversationState from "./component/empty_conversation_state/renderer";
 import type { ModelSelection } from "./component/picker_model/renderer";
-import { sendActiveConversationChatRequest } from "./component/session_conversation/renderer";
 import {
   getChatThreadDesktopBridge,
   NORMAL_CONVERSATION_SCOPE,
-  type ConversationRequestSnapshot,
+  type ConversationSessionSnapshot,
   type HistoryContextUsage,
   type HistoryRow,
   type ReasoningHistoryPolicy,
 } from "./component/history_conversation/renderer";
+import { mergeHistoryRows } from "./component/history_conversation/renderer/history_rows";
 import { projectHistoryEntries } from "./component/view_history/renderer";
 import type { HistoryEntry } from "./component/view_history/renderer";
 
@@ -24,16 +24,15 @@ const NAVIGATOR_BASE = {
   projects: [],
 } as const;
 
-type RequestVisualPhase = "waiting" | "reasoning" | "other";
+type SessionVisualPhase = "waiting" | "reasoning" | "other";
 
-function mergeHistoryRows(
-  ...collections: ReadonlyArray<readonly HistoryRow[]>
-): HistoryRow[] {
-  const byId = new Map<number, HistoryRow>();
-  for (const rows of collections) {
-    for (const row of rows) byId.set(row.id, row);
-  }
-  return [...byId.values()].sort((left, right) => left.id - right.id);
+interface CompactionDebugState {
+  repositoryPath: string;
+  conversationId: string;
+  sessionId: string;
+  requestId: string;
+  text: string;
+  streaming: boolean;
 }
 
 export default function App() {
@@ -42,17 +41,19 @@ export default function App() {
   const [navigatorRevision, setNavigatorRevision] = useState(0);
   const [selectedModel, setSelectedModel] =
     useState<ModelSelection | null>(null);
-  const [requestSnapshots, setRequestSnapshots] = useState<
-    readonly ConversationRequestSnapshot[]
+  const [sessionSnapshots, setSessionSnapshots] = useState<
+    readonly ConversationSessionSnapshot[]
   >([]);
   const [providerNotice, setProviderNotice] = useState<string | null>(null);
+  const [compactionDebug, setCompactionDebug] =
+    useState<CompactionDebugState | null>(null);
   const [reasoningHistory, setReasoningHistory] =
     useState<ReasoningHistoryPolicy>({ mode: "recent", requestCount: 5 });
   const [contextUsage, setContextUsage] = useState<HistoryContextUsage | null>(
     null,
   );
-  const [requestVisualPhases, setRequestVisualPhases] = useState<
-    Readonly<Record<string, RequestVisualPhase>>
+  const [sessionVisualPhases, setSessionVisualPhases] = useState<
+    Readonly<Record<string, SessionVisualPhase>>
   >({});
   const [activeConversation, setActiveConversation] = useState<{
     repositoryPath: string;
@@ -84,22 +85,37 @@ export default function App() {
       activeConversation.conversationId,
       historyRows,
     );
-    const activeRequest = requestSnapshots.find(
-      (request) =>
-        request.repositoryPath === activeConversation.repositoryPath &&
-        request.conversationId === activeConversation.conversationId,
+    const debugEntry: HistoryEntry | null =
+      compactionDebug &&
+      compactionDebug.repositoryPath === activeConversation.repositoryPath &&
+      compactionDebug.conversationId === activeConversation.conversationId
+        ? {
+            id: `compaction-debug:${compactionDebug.sessionId}:${compactionDebug.requestId}`,
+            type: "compaction-debug",
+            role: "assistant",
+            text: compactionDebug.text,
+            label: "Compaction debug",
+            sourceRowPositions: [],
+            streaming: compactionDebug.streaming,
+          }
+        : null;
+    const activeSession = sessionSnapshots.find(
+      (sessionSnapshot) =>
+        sessionSnapshot.repositoryPath === activeConversation.repositoryPath &&
+        sessionSnapshot.conversationId === activeConversation.conversationId,
     );
-    if (!activeRequest) return projected;
+    if (!activeSession) return debugEntry ? [...projected, debugEntry] : projected;
 
-    const phase = requestVisualPhases[activeRequest.requestId] ?? "waiting";
+    const phase = sessionVisualPhases[activeSession.sessionId] ?? "waiting";
     if (phase === "waiting") {
+      if (debugEntry) return [...projected, debugEntry];
       return [
         ...projected,
         {
-          id: `thinking:${activeRequest.requestId}`,
+          id: `thinking:${activeSession.sessionId}`,
           type: "thinking",
           role: "assistant",
-          sourceRowIds: [],
+          sourceRowPositions: [],
           streaming: true,
         },
       ];
@@ -115,8 +131,14 @@ export default function App() {
       }
     }
 
-    return projected;
-  }, [activeConversation, historyRows, requestSnapshots, requestVisualPhases]);
+    return debugEntry ? [...projected, debugEntry] : projected;
+  }, [
+    activeConversation,
+    compactionDebug,
+    historyRows,
+    sessionSnapshots,
+    sessionVisualPhases,
+  ]);
 
   useEffect(() => {
     const bridge = getChatThreadDesktopBridge();
@@ -126,23 +148,9 @@ export default function App() {
       rowQueryTailRef.current = rowQueryTailRef.current
         .catch(() => {})
         .then(async () => {
-          const row = await bridge.readConversationRow(
-            event.repositoryPath,
-            event.conversationId,
-            event.rowId,
-          );
-          if (!row) {
-            throw new Error(
-              `DB đã báo append row ${event.rowId} nhưng query lại không thấy row.`,
-            );
-          }
-          if (
-            row.id !== event.rowId ||
-            row.API_sessions !== event.API_sessions
-          ) {
-            throw new Error(
-              `Row reference lệch nguồn sự thật: event row=${event.rowId}/${event.API_sessions}, DB row=${row.id}/${row.API_sessions}.`,
-            );
+          const row = event.row;
+          if (row.rowPosition !== event.rowPosition) {
+            throw new Error("Conversation row event có rowPosition không nhất quán.");
           }
 
           const active = activeConversationRef.current;
@@ -153,25 +161,31 @@ export default function App() {
             return;
           }
 
-          setHistoryRows((current) => mergeHistoryRows(current, [row]));
-          if (event.requestId) {
+          if (row.type === "compaction") {
+            setHistoryRows(
+              await bridge.readConversation(event.repositoryPath, event.conversationId),
+            );
+          } else {
+            setHistoryRows((current) => mergeHistoryRows(current, [row]));
+          }
+          if (event.sessionId) {
             if (row.type === "reasoning" && row.role === "assistant") {
-              setRequestVisualPhases((current) => ({
+              setSessionVisualPhases((current) => ({
                 ...current,
-                [event.requestId!]: "reasoning",
+                [event.sessionId!]: "reasoning",
               }));
             } else if (
               (row.type === "reply" || row.type === "toolcall") &&
               row.role === "assistant"
             ) {
-              setRequestVisualPhases((current) => ({
+              setSessionVisualPhases((current) => ({
                 ...current,
-                [event.requestId!]: "other",
+                [event.sessionId!]: "other",
               }));
             } else if (row.type === "toolresult") {
-              setRequestVisualPhases((current) => ({
+              setSessionVisualPhases((current) => ({
                 ...current,
-                [event.requestId!]: "waiting",
+                [event.sessionId!]: "waiting",
               }));
             }
           }
@@ -181,32 +195,83 @@ export default function App() {
         });
     });
 
-    const removeRequestState =
-      typeof bridge.onChatRequestState === "function"
-        ? bridge.onChatRequestState((event) => {
+    const removeSessionState =
+      typeof bridge.onChatSessionState === "function"
+        ? bridge.onChatSessionState((event) => {
+            rowQueryTailRef.current = rowQueryTailRef.current.catch(() => {}).then(() => {
             if (event.active) {
-              setRequestSnapshots((current) => [
-                ...current.filter(
-                  (request) => request.requestId !== event.request.requestId,
+              setCompactionDebug((current) =>
+                current &&
+                current.repositoryPath === event.session.repositoryPath &&
+                current.conversationId === event.session.conversationId
+                  ? null
+                  : current,
+              );
+              setSessionSnapshots((current) => [
+                  ...current.filter(
+                    (sessionSnapshot) =>
+                      sessionSnapshot.sessionId !== event.session.sessionId,
+                  ),
+                  event.session,
+                ]);
+                setSessionVisualPhases((current) => ({
+                  ...current,
+                  [event.session.sessionId]: "waiting",
+                }));
+                return;
+              }
+
+              setSessionSnapshots((current) =>
+                current.filter(
+                  (sessionSnapshot) => sessionSnapshot.sessionId !== event.sessionId,
                 ),
-                event.request,
-              ]);
-              setRequestVisualPhases((current) => ({
-                ...current,
-                [event.request.requestId]: "waiting",
-              }));
-              return;
-            }
-
-            setRequestSnapshots((current) =>
-              current.filter((request) => request.requestId !== event.requestId),
-            );
-            setRequestVisualPhases((current) => {
-              const next = { ...current };
-              delete next[event.requestId];
-              return next;
+              );
+              setSessionVisualPhases((current) => {
+                const next = { ...current };
+                delete next[event.sessionId];
+                return next;
+              });
             });
+          })
+        : () => {};
 
+    const removeCompactionDebug =
+      typeof bridge.onCompactionDebug === "function"
+        ? bridge.onCompactionDebug((event) => {
+            setCompactionDebug((current) => {
+              if (event.phase === "done") {
+                if (
+                  !current ||
+                  current.sessionId !== event.sessionId ||
+                  current.requestId !== event.requestId
+                ) {
+                  return current;
+                }
+                return { ...current, streaming: false };
+              }
+
+              const delta = event.delta ?? "";
+              if (
+                current &&
+                current.sessionId === event.sessionId &&
+                current.requestId === event.requestId
+              ) {
+                return {
+                  ...current,
+                  text: current.text + delta,
+                  streaming: true,
+                };
+              }
+
+              return {
+                repositoryPath: event.repositoryPath,
+                conversationId: event.conversationId,
+                sessionId: event.sessionId,
+                requestId: event.requestId,
+                text: delta,
+                streaming: true,
+              };
+            });
           })
         : () => {};
 
@@ -238,7 +303,11 @@ export default function App() {
               event.repositoryPath,
               event.conversationId,
             );
-            if (!usage || usage.API_sessions !== event.API_sessions) return;
+            if (
+              !usage ||
+              usage.sessionId !== event.sessionId ||
+              usage.requestId !== event.requestId
+            ) return;
 
             const active = activeConversationRef.current;
             if (
@@ -256,7 +325,8 @@ export default function App() {
 
     return () => {
       removeRow();
-      removeRequestState();
+      removeSessionState();
+      removeCompactionDebug();
       removeProviderErrorNotice();
       removeContextUsageUpdated();
       if (providerNoticeTimerRef.current !== null) {
@@ -278,6 +348,7 @@ export default function App() {
       setActiveConversation(nextActive);
       setHistoryRows([]);
       setContextUsage(null);
+      setCompactionDebug(null);
 
       void bridge.setActiveConversation(repositoryPath, conversationId)
         .then(async () => {
@@ -285,19 +356,19 @@ export default function App() {
             repositoryPath,
             conversationId,
           );
-          const requests =
-            typeof bridge.listActiveChatRequests === "function"
-              ? await bridge.listActiveChatRequests().catch(() => [])
+          const sessions =
+            typeof bridge.listActiveChatSessions === "function"
+              ? await bridge.listActiveChatSessions().catch(() => [])
               : [];
           const usage = await bridge
             .readConversationContextUsage(repositoryPath, conversationId)
             .catch(() => null);
-          return [rows, requests, usage] as const;
+          return [rows, sessions, usage] as const;
         })
-        .then(([rows, requests, usage]) => {
+        .then(([rows, sessions, usage]) => {
           if (readRequestRef.current !== requestId) return;
 
-          setRequestSnapshots(requests);
+          setSessionSnapshots(sessions);
           setHistoryRows((current) => mergeHistoryRows(rows, current));
           setContextUsage(usage);
         })
@@ -335,14 +406,14 @@ export default function App() {
       ]);
       if (cancelled) return;
 
-      let requests: readonly ConversationRequestSnapshot[] = [];
-      if (typeof bridge.listActiveChatRequests === "function") {
-        requests = await bridge.listActiveChatRequests().catch((error) => {
-          console.error("[App] restore active requests failed", error);
+      let sessions: readonly ConversationSessionSnapshot[] = [];
+      if (typeof bridge.listActiveChatSessions === "function") {
+        sessions = await bridge.listActiveChatSessions().catch((error) => {
+          console.error("[App] restore active sessions failed", error);
           return [];
         });
         if (cancelled) return;
-        setRequestSnapshots(requests);
+        setSessionSnapshots(sessions);
       }
 
       if (typeof bridge.getSelectedModel === "function") {
@@ -399,7 +470,7 @@ export default function App() {
 
       let target: { repositoryPath: string; conversationId: string } | null =
         null;
-      const normalConversation = normalConversations.find((item) => item.user);
+      const normalConversation = normalConversations.find((item) => item.active);
       if (normalConversation) {
         target = {
           repositoryPath: NORMAL_CONVERSATION_SCOPE,
@@ -408,7 +479,7 @@ export default function App() {
       } else {
         for (const repository of repositories) {
           const conversation = repository.conversations.find(
-            (item) => item.user,
+            (item) => item.active,
           );
           if (!conversation) continue;
           target = {
@@ -512,10 +583,7 @@ export default function App() {
     };
   };
 
-  const submitMessage = async ({
-    text,
-    model,
-  }: ComposerSubmitInput): Promise<void> => {
+  const submitMessage = async ({ text }: ComposerSubmitInput): Promise<void> => {
     const bridge = getChatThreadDesktopBridge();
     if (!bridge) {
       throw new Error("Chat thread desktop bridge chưa sẵn sàng.");
@@ -530,11 +598,10 @@ export default function App() {
       }
     }
 
-    await sendActiveConversationChatRequest({
-      provider: model.provider,
-      model: model.model,
+    await bridge.sendChatRequest({
+      repositoryPath: target.repositoryPath,
+      conversationId: target.conversationId,
       prompt: text,
-      stream: true,
       reasoningHistory,
     });
   };
@@ -558,21 +625,21 @@ export default function App() {
       throw new Error("Chat thread desktop bridge chưa sẵn sàng.");
     }
 
-    const request = requestSnapshots.find(
+    const activeSession = sessionSnapshots.find(
       (item) =>
         item.repositoryPath === activeConversation.repositoryPath &&
         item.conversationId === activeConversation.conversationId,
     );
-    if (!request) return;
+    if (!activeSession) return;
 
-    await bridge.cancelChatRequest(request.requestId);
+    await bridge.cancelChatSession(activeSession.sessionId);
   };
 
-  const activeRequest = activeConversation
-    ? requestSnapshots.find(
-        (request) =>
-          request.repositoryPath === activeConversation.repositoryPath &&
-          request.conversationId === activeConversation.conversationId,
+  const activeSession = activeConversation
+    ? sessionSnapshots.find(
+        (sessionSnapshot) =>
+          sessionSnapshot.repositoryPath === activeConversation.repositoryPath &&
+          sessionSnapshot.conversationId === activeConversation.conversationId,
       )
     : undefined;
 
@@ -618,7 +685,7 @@ export default function App() {
         )}
         <Composer
           disabled={false}
-          running={Boolean(activeRequest)}
+          running={Boolean(activeSession)}
           model={selectedModel ?? undefined}
           onModelChange={changeSelectedModel}
           showThinking={showThinking}

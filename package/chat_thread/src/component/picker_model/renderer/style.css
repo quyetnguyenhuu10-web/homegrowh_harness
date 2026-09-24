@@ -1,7 +1,11 @@
 .ct-modelpick {
+  --ct-modelpick-font-family: "Segoe UI Variable Text", "Segoe UI Variable",
+    "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+
   position: relative;
   min-width: 0;
   flex: 1 1 auto;
+  font-family: var(--ct-modelpick-font-family);
 }
 
 .ct-modelpick__trigger {
@@ -18,7 +22,7 @@
   color: #535a63;
   background: transparent;
   box-shadow: none;
-  font: 12.5px/1.2 "Segoe WPC", "Segoe UI", sans-serif;
+  font: 12.5px/1.2 var(--ct-modelpick-font-family);
   letter-spacing: -0.005em;
   cursor: pointer;
 }
@@ -105,7 +109,7 @@
   flex: 1 1 auto;
   padding: 5px 9px 4px;
   color: #8a919b;
-  font: 600 11px/1.2 "Segoe WPC", "Segoe UI", sans-serif;
+  font: 600 11px/1.2 var(--ct-modelpick-font-family);
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
@@ -121,7 +125,7 @@
   border-radius: 7px;
   color: #606873;
   background: transparent;
-  font: 500 19px/1 "Segoe UI", sans-serif;
+  font: 500 19px/1 var(--ct-modelpick-font-family);
   cursor: pointer;
 }
 
@@ -132,33 +136,30 @@
 
 .ct-modelpick__custom-form {
   display: grid;
-  gap: 8px;
-  margin: 2px 4px 7px;
-  padding: 10px;
-  border: 1px solid #e2e6ea;
-  border-radius: 10px;
-  background: #fafbfc;
+  gap: 12px;
+  margin: 0;
+  padding: 18px 20px 20px;
 }
 
 .ct-modelpick__field {
   display: grid;
-  gap: 4px;
+  gap: 6px;
   color: #656d77;
-  font: 500 11px/1.25 "Segoe WPC", "Segoe UI", sans-serif;
+  font: 500 12px/1.25 var(--ct-modelpick-font-family);
 }
 
 .ct-modelpick__field input {
   min-width: 0;
   width: 100%;
-  height: 30px;
+  height: 36px;
   box-sizing: border-box;
-  padding: 0 8px;
+  padding: 0 10px;
   border: 1px solid #d8dde3;
   border-radius: 7px;
   outline: none;
   color: #202124;
   background: #ffffff;
-  font: 12px/1.2 "Segoe WPC", "Segoe UI", sans-serif;
+  font: 12.5px/1.2 var(--ct-modelpick-font-family);
 }
 
 .ct-modelpick__field input:focus {
@@ -170,18 +171,91 @@
   display: flex;
   justify-content: flex-end;
   gap: 6px;
+  margin-top: 2px;
 }
 
 .ct-modelpick__custom-actions button {
   min-width: 54px;
-  height: 28px;
+  height: 32px;
   padding: 0 9px;
   border: 1px solid #d8dde3;
   border-radius: 7px;
   color: #3f454d;
   background: #ffffff;
-  font: 500 11.5px/1 "Segoe WPC", "Segoe UI", sans-serif;
+  font: 500 11.5px/1 var(--ct-modelpick-font-family);
   cursor: pointer;
+}
+
+.ct-modelpick__modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(17, 24, 39, 0.22);
+  backdrop-filter: blur(2px);
+}
+
+.ct-modelpick__modal {
+  width: min(440px, calc(100vw - 32px));
+  overflow: hidden;
+  border: 1px solid #dfe3e8;
+  border-radius: 14px;
+  color: #202124;
+  background: #ffffff;
+  box-shadow:
+    0 28px 80px rgba(18, 24, 40, 0.22),
+    0 8px 24px rgba(18, 24, 40, 0.10);
+}
+
+.ct-modelpick__modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 17px 18px 14px 20px;
+  border-bottom: 1px solid #edf0f2;
+}
+
+.ct-modelpick__modal-title {
+  color: #202124;
+  font: 600 15px/1.25 var(--ct-modelpick-font-family);
+}
+
+.ct-modelpick__modal-subtitle {
+  margin-top: 3px;
+  color: #8a919b;
+  font: 11.5px/1.3 var(--ct-modelpick-font-family);
+}
+
+.ct-modelpick__modal-close {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: #737b85;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ct-modelpick__modal-close svg {
+  width: 16px;
+  height: 16px;
+}
+
+.ct-modelpick__modal-close:hover:not(:disabled) {
+  color: #202124;
+  background: #f0f3f6;
+}
+
+.ct-modelpick__modal-close:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 .ct-modelpick__custom-actions button[type="submit"] {
@@ -199,7 +273,7 @@
 .ct-modelpick__status {
   padding: 6px 9px;
   color: #6b737d;
-  font: 11.5px/1.35 "Segoe WPC", "Segoe UI", sans-serif;
+  font: 11.5px/1.35 var(--ct-modelpick-font-family);
 }
 
 .ct-modelpick__custom-error,
@@ -207,12 +281,97 @@
   color: #a13a3a;
 }
 
+.ct-modelpick__option-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 100%;
+  min-width: 0;
+}
+
+.ct-modelpick__more-wrap {
+  position: relative;
+  flex: 0 0 30px;
+}
+
+.ct-modelpick__more {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: #737b85;
+  background: transparent;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ct-modelpick__option-row:hover .ct-modelpick__more,
+.ct-modelpick__more[aria-expanded="true"],
+.ct-modelpick__more:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ct-modelpick__more:hover,
+.ct-modelpick__more[aria-expanded="true"] {
+  color: #202124;
+  background: #f0f3f6;
+}
+
+.ct-modelpick__more svg {
+  width: 17px;
+  height: 17px;
+}
+
+.ct-modelpick__context-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 4px);
+  z-index: 60;
+  min-width: 116px;
+  padding: 4px;
+  border: 1px solid #dfe3e8;
+  border-radius: 9px;
+  background: #ffffff;
+  box-shadow:
+    0 12px 30px rgba(18, 24, 40, 0.14),
+    0 2px 8px rgba(18, 24, 40, 0.08);
+}
+
+.ct-modelpick__context-menu button {
+  width: 100%;
+  height: 30px;
+  padding: 0 9px;
+  border: 0;
+  border-radius: 7px;
+  color: #30343a;
+  background: transparent;
+  font: 500 12px/1 var(--ct-modelpick-font-family);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ct-modelpick__context-menu button:hover:not(:disabled) {
+  background: #f3f5f7;
+}
+
+.ct-modelpick__context-menu button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
 .ct-modelpick__option {
   display: flex;
   align-items: center;
   gap: 12px;
-  width: 100%;
+  width: auto;
   min-width: 0;
+  flex: 1 1 auto;
   padding: 8px 9px;
 
   border: 0;
@@ -241,7 +400,7 @@
 .ct-modelpick__option-label {
   overflow: hidden;
   color: #24272b;
-  font: 500 13px/1.3 "Segoe WPC", "Segoe UI", sans-serif;
+  font: 500 13px/1.3 var(--ct-modelpick-font-family);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -250,13 +409,42 @@
   width: 16px;
   flex: 0 0 16px;
   color: #202124;
-  font: 600 13px/1 "Segoe UI", sans-serif;
+  font: 600 13px/1 var(--ct-modelpick-font-family);
   text-align: center;
   opacity: 0;
 }
 
 .ct-modelpick__option--active .ct-modelpick__check {
   opacity: 1;
+}
+
+.ct-modelpick__delete {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  color: #8a919b;
+  background: transparent;
+  cursor: pointer;
+}
+
+.ct-modelpick__delete svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ct-modelpick__delete:hover:not(:disabled) {
+  color: #a13a3a;
+  background: #f7eeee;
+}
+
+.ct-modelpick__delete:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 
 @media (max-width: 760px) {

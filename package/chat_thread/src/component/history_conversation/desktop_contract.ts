@@ -1,5 +1,3 @@
-import type { ProviderName } from "@homegrowh/provider";
-
 import type {
   HistoryActiveConversation,
   HistoryConversationRecord,
@@ -10,8 +8,12 @@ import type {
 } from "./history_contract";
 import type {
   AddCustomModelInput,
+  CustomModelEditableConfig,
+  DeleteCustomModelInput,
+  GetCustomModelInput,
   ModelRegistryItem,
   ModelRegistrySnapshot,
+  UpdateCustomModelInput,
 } from "../picker_model/model_registry_contract";
 
 export const CHAT_THREAD_ADD_REPOSITORY_CHANNEL =
@@ -50,6 +52,8 @@ export const CHAT_THREAD_PROVIDER_ERROR_NOTICE_EVENT =
   "homegrowh-chat-thread:provider:error-notice";
 export const CHAT_THREAD_CONTEXT_USAGE_UPDATED_EVENT =
   "homegrowh-chat-thread:context:usage-updated";
+export const CHAT_THREAD_COMPACTION_DEBUG_EVENT =
+  "homegrowh-chat-thread:compaction:debug";
 export const CHAT_THREAD_READ_CONTEXT_USAGE_CHANNEL =
   "homegrowh-chat-thread:context:read-usage";
 export const CHAT_THREAD_DESKTOP_BRIDGE_KEY = "__homegrowhChatThreadDesktop";
@@ -57,39 +61,37 @@ export const CHAT_THREAD_DESKTOP_BRIDGE_KEY = "__homegrowhChatThreadDesktop";
 export interface ConversationRowAppendedEvent {
   repositoryPath: string;
   conversationId: string;
+  sessionId?: string;
   requestId?: string;
-  rowId: number;
-  API_sessions: string;
+  rowPosition: number;
+  row: HistoryRow;
 }
 
 export interface SendChatRequestInput {
-  provider: ProviderName;
-  model: string;
+  repositoryPath: string;
+  conversationId: string;
   prompt: string;
-  stream?: boolean;
   reasoningHistory?: ReasoningHistoryPolicy;
 }
 
 export interface SendChatRequestResult {
-  requestId: string;
+  sessionId: string;
 }
 
-export interface ConversationRequestSnapshot {
-  requestId: string;
+export interface ConversationSessionSnapshot {
+  sessionId: string;
   repositoryPath: string;
   conversationId: string;
-  reasoning: string;
-  answer: string;
 }
 
-export type ConversationRequestStateEvent =
+export type ConversationSessionStateEvent =
   | {
       active: true;
-      request: ConversationRequestSnapshot;
+      session: ConversationSessionSnapshot;
     }
   | {
       active: false;
-      requestId: string;
+      sessionId: string;
       repositoryPath: string;
       conversationId: string;
     };
@@ -97,19 +99,32 @@ export type ConversationRequestStateEvent =
 export interface ProviderErrorNoticeEvent {
   repositoryPath: string;
   conversationId: string;
-  requestId: string;
+  sessionId: string;
   message: string;
 }
 
 export interface ConversationContextUsageUpdatedEvent {
   repositoryPath: string;
   conversationId: string;
-  API_sessions: string;
+  sessionId: string;
+  requestId: string;
+}
+
+export interface CompactionDebugEvent {
+  repositoryPath: string;
+  conversationId: string;
+  sessionId: string;
+  requestId: string;
+  phase: "delta" | "done";
+  delta?: string;
 }
 
 export interface ChatThreadDesktopBridge {
   listModelRegistry(): Promise<ModelRegistrySnapshot>;
   addCustomModel(input: AddCustomModelInput): Promise<ModelRegistryItem>;
+  deleteCustomModel(input: DeleteCustomModelInput): Promise<boolean>;
+  getCustomModel(input: GetCustomModelInput): Promise<CustomModelEditableConfig>;
+  updateCustomModel(input: UpdateCustomModelInput): Promise<ModelRegistryItem>;
   getSelectedModel(): Promise<HistorySelectedModel | null>;
   setSelectedModel(selection: HistorySelectedModel): Promise<HistorySelectedModel>;
   listConversations(): Promise<HistoryConversationRecord[]>;
@@ -127,7 +142,7 @@ export interface ChatThreadDesktopBridge {
   readConversationRow(
     repositoryPath: string,
     conversationId: string,
-    rowId: number,
+    rowPosition: number,
   ): Promise<HistoryRow | null>;
   readConversationContextUsage(
     repositoryPath: string,
@@ -139,16 +154,19 @@ export interface ChatThreadDesktopBridge {
   ): Promise<void>;
   getActiveConversation(): Promise<HistoryActiveConversation | null>;
   sendChatRequest(input: SendChatRequestInput): Promise<SendChatRequestResult>;
-  cancelChatRequest(requestId: string): Promise<void>;
-  listActiveChatRequests(): Promise<ConversationRequestSnapshot[]>;
-  onChatRequestState(
-    listener: (event: ConversationRequestStateEvent) => void,
+  cancelChatSession(sessionId: string): Promise<void>;
+  listActiveChatSessions(): Promise<ConversationSessionSnapshot[]>;
+  onChatSessionState(
+    listener: (event: ConversationSessionStateEvent) => void,
   ): () => void;
   onProviderErrorNotice(
     listener: (event: ProviderErrorNoticeEvent) => void,
   ): () => void;
   onConversationContextUsageUpdated(
     listener: (event: ConversationContextUsageUpdatedEvent) => void,
+  ): () => void;
+  onCompactionDebug(
+    listener: (event: CompactionDebugEvent) => void,
   ): () => void;
   onConversationRow(
     listener: (event: ConversationRowAppendedEvent) => void,

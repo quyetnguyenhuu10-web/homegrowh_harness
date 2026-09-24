@@ -1,0 +1,188 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "read",
+      "description": "Read a file or directory from the local filesystem.\n\nUsage:\n- filePath is the file or directory to read.\n- By default, returns up to 2000 lines from the start.\n- offset is the line number to start reading from (1-indexed).\n- To read later sections, call again with a larger offset.\n- Use grep to find specific content in large files.\n- Use glob if you are unsure of the file path.\n- File lines are prefixed as <line>: <content>.\n- Directory entries are returned one per line with / suffix for directories.\n- Lines longer than 2000 characters are truncated.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "filePath": {
+            "type": "string",
+            "description": "The path to the file or directory to read"
+          },
+          "offset": {
+            "type": "number",
+            "description": "The line number to start reading from (1-indexed)"
+          },
+          "limit": {
+            "type": "number",
+            "description": "Maximum number of lines to read (defaults to 2000)"
+          }
+        },
+        "required": ["filePath"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "write",
+      "description": "Writes a file to the local filesystem.\n\nUsage:\n- Overwrites the existing file if one exists.\n- Existing files must be read with the read tool before overwrite.\n- Prefer editing existing files rather than rewriting them when possible.\n- Creates parent directories for new files when needed.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string",
+            "description": "The content to write to the file"
+          },
+          "filePath": {
+            "type": "string",
+            "description": "The path to the file to write"
+          }
+        },
+        "required": ["content", "filePath"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "edit_file",
+      "description": "Thay old_content bằng new_content trong một file.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Đường dẫn file cần sửa."
+          },
+          "old_content": {
+            "type": "string",
+            "description": "Nội dung cũ cần tìm và thay thế."
+          },
+          "new_content": {
+            "type": "string",
+            "description": "Nội dung mới dùng để thay thế."
+          }
+        },
+        "required": ["path", "old_content", "new_content"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "glob",
+      "description": "Fast file pattern matching. Supports patterns like **/*.js and src/**/*.ts. Returns matching file paths sorted by modification time.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "The glob pattern to match files against"
+          },
+          "path": {
+            "type": "string",
+            "description": "Directory to search. Defaults to the active repository."
+          }
+        },
+        "required": ["pattern"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "grep",
+      "description": "Search file contents using a regular expression. Supports an include glob and returns matching file paths and line numbers.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "pattern": {
+            "type": "string",
+            "description": "Regex pattern to search for"
+          },
+          "path": {
+            "type": "string",
+            "description": "File or directory to search. Defaults to the active repository."
+          },
+          "include": {
+            "type": "string",
+            "description": "Optional file glob such as \"*.js\" or \"*.{ts,tsx}\""
+          }
+        },
+        "required": ["pattern"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "webfetch",
+      "description": "Fetches content from a specified URL.\n\nUsage notes:\n- The URL must be a fully-formed valid URL.\n- Format options: \"markdown\" (default), \"text\", or \"html\".\n- This tool is read-only and does not modify any files.\n- Results may be summarized if the content is very large.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "url": {
+            "type": "string",
+            "description": "The URL to fetch content from"
+          },
+          "format": {
+            "type": "string",
+            "enum": ["text", "markdown", "html"],
+            "description": "The format to return. Defaults to markdown."
+          },
+          "timeout": {
+            "type": "number",
+            "description": "Optional timeout in seconds (max 120)"
+          }
+        },
+        "required": ["url"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "todowrite",
+      "description": "Create and maintain a structured task list for the current coding session.\n\nStates:\n- pending\n- in_progress\n- completed\n- cancelled",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "todos": {
+            "type": "array",
+            "description": "The updated todo list",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "type": "string",
+                  "description": "Brief description of the task"
+                },
+                "status": {
+                  "type": "string",
+                  "description": "Current status: pending, in_progress, completed, cancelled"
+                },
+                "priority": {
+                  "type": "string",
+                  "description": "Priority: high, medium, low"
+                }
+              },
+              "required": ["content", "status", "priority"]
+            }
+          }
+        },
+        "required": ["todos"]
+      }
+    }
+  }
+]

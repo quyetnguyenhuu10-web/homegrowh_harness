@@ -2,6 +2,8 @@
 
 #include <filesystem>
 #include <fstream>
+#include <iterator>
+#include <string>
 #include <string_view>
 #include <system_error>
 
@@ -34,5 +36,41 @@ namespace test_support
         );
 
         return output.good();
+    }
+
+    inline std::string read_file(const std::filesystem::path& path)
+    {
+        std::ifstream input(path, std::ios::binary);
+        if (!input)
+            return {};
+
+        return {
+            std::istreambuf_iterator<char>(input),
+            std::istreambuf_iterator<char>()
+        };
+    }
+}
+
+// Test-only compatibility for legacy assertions inside edit_test.cpp.
+// Production <fsystem> exposes only edit + watcher.
+namespace fsystem
+{
+    struct ReadResult
+    {
+        std::string content;
+        int error = 0;
+    };
+
+    inline ReadResult read(const std::filesystem::path& path)
+    {
+        std::ifstream input(path, std::ios::binary);
+        if (!input)
+            return {{}, 1};
+
+        std::string content{
+            std::istreambuf_iterator<char>(input),
+            std::istreambuf_iterator<char>()
+        };
+        return {content, input.bad() ? 1 : 0};
     }
 }

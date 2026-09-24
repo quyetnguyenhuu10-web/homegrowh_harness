@@ -1,0 +1,54 @@
+#pragma once
+
+#include <cstdint>
+#include <filesystem>
+#include <memory>
+#include <optional>
+#include <string>
+#include <vector>
+
+namespace events
+{
+    struct EventInput
+    {
+        std::string events;
+        std::optional<std::string> create_at;
+        std::string session_id;
+        std::string provider;
+        std::string model;
+    };
+
+    struct Event
+    {
+        std::int64_t row_position = 0;
+        std::string events;
+        std::string create_at;
+        std::string session_id;
+        std::string provider;
+        std::string model;
+    };
+
+    class Store
+    {
+    public:
+        explicit Store(const std::filesystem::path& database_path);
+        ~Store();
+
+        Store(const Store&) = delete;
+        Store& operator=(const Store&) = delete;
+        Store(Store&&) noexcept;
+        Store& operator=(Store&&) noexcept;
+
+        std::int64_t append(const EventInput& event);
+        bool erase(std::int64_t row_position);
+        std::vector<Event> query() const;
+        std::vector<Event> query(const std::string& session_id) const;
+        std::int64_t insert_after(
+            std::int64_t row_position,
+            const EventInput& event);
+
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> impl_;
+    };
+}
