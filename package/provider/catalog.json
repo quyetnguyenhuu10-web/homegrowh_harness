@@ -1,6 +1,6 @@
 {
   "openai": {
-    "api_key": "OPENAI_API_KEY",
+    "credential": "HomegrowphHarness/OpenAI",
     "endpoint": "https://api.openai.com/v1/chat/completions",
     "models": [
       {
@@ -18,7 +18,7 @@
     ]
   },
   "deepseek": {
-    "api_key": "DEEPSEEK_API_KEY",
+    "credential": "HomegrowphHarness/DeepSeek",
     "endpoint": "https://api.deepseek.com/chat/completions",
     "models": [
       {
@@ -32,11 +32,12 @@
     ]
   },
   "bonsai": {
-    "api_key": "Bearer NgKFxGR8k3w2LtkMzgrHM04cCdgUx0EPbF4HoOGKTTw",
-    "endpoint": "https://trickle-crewless-smasher.ngrok-free.dev/v1/chat/completions",
+    "credential": "HomegrowphHarness/Bonsai",
+    "endpoint": "https://flanking-strategic-murkiness.ngrok-free.dev/v1/chat/completions",
     "models": [
       {
-        "id": "bonsai"
+        "id": "bonsai",
+        "context_limit": 64000
       }
     ]
   }

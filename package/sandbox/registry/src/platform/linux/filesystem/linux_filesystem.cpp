@@ -256,4 +256,64 @@ namespace sandbox::detail::filesystem::linux
         }
         return result;
     }
+
+    release_result release_permissions(const std::filesystem::path& path)
+    {
+        release_result result;
+        std::filesystem::path canonical_path;
+        try
+        {
+            canonical_path = canonical_existing_path(path);
+        }
+        catch (const std::system_error& exception)
+        {
+            result.path_errors.push_back({path, exception.code()});
+            return result;
+        }
+        const std::string wanted_path = canonical_path.native();
+
+        const std::filesystem::path state_path = registry_state_path();
+        registry_state_lock lock(state_path, true);
+        registry_state state = load_registry_state(state_path, true);
+
+        const auto old_size = state.entries.size();
+        std::erase_if(
+            state.entries,
+            [&](const registry_entry& entry) {
+                return entry.canonical_path == wanted_path;
+            });
+        if (state.entries.size() == old_size)
+            return {};
+
+        try
+        {
+            save_registry_state(state_path, state);
+        }
+        catch (const std::system_error& exception)
+        {
+            result.final_error = exception.code();
+        }
+        return result;
+    }
+
+    release_result release_all_permissions()
+    {
+        const std::filesystem::path state_path = registry_state_path();
+        registry_state_lock lock(state_path, true);
+        registry_state state = load_registry_state(state_path, true);
+        if (state.entries.empty())
+            return {};
+
+        state.entries.clear();
+        release_result result;
+        try
+        {
+            save_registry_state(state_path, state);
+        }
+        catch (const std::system_error& exception)
+        {
+            result.final_error = exception.code();
+        }
+        return result;
+    }
 }

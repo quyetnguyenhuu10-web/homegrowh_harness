@@ -78,3 +78,33 @@ assert.deepEqual(
   [resolve(sourceRoot, "_runtime", "process_runner.ts")],
   "Only process_runner.ts may import node:child_process",
 );
+
+const editFileIndex = await readFile(
+  resolve(sourceRoot, "edit_file", "index.ts"),
+  "utf8",
+);
+assert.match(
+  editFileIndex,
+  /runOpenAIExecutableTool/,
+  "edit_file must execute through the sandboxed executable adapter",
+);
+
+const todowriteIndex = await readFile(
+  resolve(sourceRoot, "todowrite", "index.ts"),
+  "utf8",
+);
+assert.match(
+  todowriteIndex,
+  /runOpenAITypeScriptTool/,
+  "todowrite must execute through the sandboxed TypeScript adapter",
+);
+
+const toolHost = await readFile(
+  resolve(sourceRoot, "_runtime", "tool_host.ts"),
+  "utf8",
+);
+assert.match(
+  toolHost,
+  /todowrite.*todowrite\/logic\.js/s,
+  "tool_host must load todowrite logic inside the sandbox child",
+);

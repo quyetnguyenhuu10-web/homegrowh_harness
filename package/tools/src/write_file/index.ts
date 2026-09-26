@@ -18,7 +18,7 @@ export function executeWriteFileToolCall(
     toolName: WRITE_FILE_TOOL_NAME,
     toolCall,
     context,
-    filesystemAccess: "read_modify",
+    filesystemAccess: "read_write",
   });
 }
 

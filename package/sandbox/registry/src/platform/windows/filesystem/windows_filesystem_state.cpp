@@ -206,10 +206,13 @@ namespace sandbox::detail::filesystem::windows
             {
                 throw std::runtime_error("sandbox registry state entry is invalid");
             }
+            if (access == "read_modify")
+                access = "read_write";
+
             if (canonical_path.empty()
                 || capability_name.empty()
                 || sid.empty()
-                || (access != "read_only" && access != "read_modify")
+                || (access != "read_only" && access != "read_write")
                 || (acl_ready != 0 && acl_ready != 1)
                 || stored_tree_version < 0)
             {

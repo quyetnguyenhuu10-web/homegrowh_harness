@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cstdint>
 #include <string>
+#include <string_view>
 
 #include <nlohmann/json.hpp>
 
@@ -14,10 +14,9 @@ namespace provider
 
         void post(
             const std::string& url,
-            const std::string& api_key,
+            std::string_view api_key,
             const nlohmann::json& body,
             void* context,
-            EventHandler on_event,
-            std::uint32_t* error);
+            EventHandler on_event);
     };
 }

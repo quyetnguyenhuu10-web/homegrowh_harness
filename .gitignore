@@ -4,9 +4,12 @@ node_modules/
 
 # Build directories
 **/build/
+**/build-*/
 **/build-ci/
 **/.cmake-build-filesystems/
 /build-windows/
+/.deps/
+/executable/
 
 # Generated Windows edit stress reports
 /package/tools/filesystems/tests/platform/windows/fsystem/edit/windows_edit_stress/index.html
@@ -18,3 +21,53 @@ node_modules/
 
 # Local custom model credentials
 /package/chat_thread/src/data/history_conversation/projects/.custom_models.json
+
+# Native executables and binary artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.obj
+*.o
+*.pdb
+*.ilk
+*.exp
+*.out
+
+# CMake and native build outputs
+**/cmake-build-*/
+**/CMakeFiles/
+**/CMakeCache.txt
+**/cmake_install.cmake
+**/CTestTestfile.cmake
+**/compile_commands.json
+**/.ninja_deps
+**/.ninja_log
+**/build.ninja
+**/rules.ninja
+**/Testing/
+CMakeUserPresets.json
+
+# Local verification and test output
+/.verify-*/
+**/coverage/
+**/test-results/
+**/test-output/
+*.log
+*.tmp
+*.temp
+*.bak
+*.recipe
+
+# IDE and operating-system files
+.vs/
+**/.vs/
+.idea/
+**/.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+*.swp
+*.swo

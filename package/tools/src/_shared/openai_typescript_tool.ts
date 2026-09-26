@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -36,8 +37,18 @@ export type TypeScriptToolHostResponse =
     }
   | {
       ok: false;
-      error: string;
+      error: TypeScriptToolHostError;
     };
+
+export interface TypeScriptToolHostError {
+  message: string;
+  name?: string;
+  code?: string;
+  errno?: number;
+  syscall?: string;
+  path?: string;
+  dest?: string;
+}
 
 interface RunOpenAITypeScriptToolOptions {
   toolName: string;
@@ -90,10 +101,11 @@ export async function runOpenAITypeScriptTool(
   };
 
   const runtimeRoot = toolRuntimeRoot();
+  const runtimeExecutable = realpathSync.native(process.execPath);
   const filesystem = [
     { path: runtimeRoot, access: "read_only" as const },
     { path: toolPackageJsonPath(), access: "read_only" as const },
-    { path: dirname(process.execPath), access: "read_only" as const },
+    { path: dirname(runtimeExecutable), access: "read_only" as const },
     ...(options.filesystemAccess === undefined
       ? []
       : [{ path: context.repositoryPath, access: options.filesystemAccess }]),
@@ -102,7 +114,7 @@ export async function runOpenAITypeScriptTool(
   let processResult;
   try {
     processResult = await runProcess({
-      executable: process.execPath,
+      executable: runtimeExecutable,
       args: [toolHostPath()],
       cwd: options.filesystemAccess === undefined ? runtimeRoot : context.repositoryPath,
       stdin: JSON.stringify(request),
@@ -159,7 +171,16 @@ export async function runOpenAITypeScriptTool(
   }
 
   if (!response.ok) {
-    throw new Error(response.error);
+    return toolResult(
+      toolCall.id,
+      errorPayload(
+        toolName,
+        toolCall.id,
+        "tool_execution_error",
+        response.error.message,
+        { source_error: response.error },
+      ),
+    );
   }
 
   mergeReadFiles(

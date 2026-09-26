@@ -76,26 +76,15 @@ function sandboxProcessPath(): string {
     return candidate;
   }
 
-  const root = resolve(toolsPackageRoot(), "../sandbox");
+  const root = resolve(toolsPackageRoot(), "../..");
   const executable = process.platform === "win32" ? "sandbox_process.exe" : "sandbox_process";
-  const candidates = process.platform === "win32"
-    ? [
-        resolve(root, "build/Debug", executable),
-        resolve(root, "build/Release", executable),
-        resolve(root, "build/RelWithDebInfo", executable),
-      ]
-    : [
-        resolve(root, "build", executable),
-        resolve(root, "build-linux", executable),
-      ];
-
-  const found = candidates.find((candidate) => existsSync(candidate));
-  if (!found) {
+  const candidate = resolve(root, "executable", executable);
+  if (!existsSync(candidate)) {
     throw new Error(
-      `Không tìm thấy sandbox process launcher. Đã kiểm tra: ${candidates.join(", ")}`,
+      `Không tìm thấy sandbox process launcher: ${candidate}`,
     );
   }
-  return found;
+  return candidate;
 }
 
 export function processFailure(result: ProcessRunResult): ProcessFailure | null {

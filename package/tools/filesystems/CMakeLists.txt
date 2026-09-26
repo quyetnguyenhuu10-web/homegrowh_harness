@@ -1,35 +1,6 @@
-cmake_minimum_required(VERSION 3.20)
-
-project(filesystems LANGUAGES CXX)
-
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
-find_package(Threads REQUIRED)
-
-# ---------------------------------------------------------
-# Dependencies
-# ---------------------------------------------------------
-
-include(FetchContent)
-
-FetchContent_Declare(
-    CLI11
-    GIT_REPOSITORY https://github.com/CLIUtils/CLI11.git
-    GIT_TAG v2.6.1
-)
-
-FetchContent_Declare(
-    nlohmann_json
-    GIT_REPOSITORY https://github.com/nlohmann/json.git
-    GIT_TAG v3.12.0
-)
-
-FetchContent_MakeAvailable(
-    CLI11
-    nlohmann_json
-)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    message(FATAL_ERROR "Configure from the repository root")
+endif()
 
 # ---------------------------------------------------------
 # Library
@@ -239,7 +210,7 @@ endif()
 # RAM Benchmark
 # ---------------------------------------------------------
 
-if(WIN32)
+if(WIN32 AND FILESYSTEMS_BUILD_TESTS)
 
     add_executable(bench_ram
         tests/platform/windows/fsystem/edit/bench_ram/main.cpp

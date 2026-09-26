@@ -191,7 +191,7 @@ namespace sandbox::executable::process_protocol
             std::uint32_t access = 0;
             if (!read_string(input, path_text, error) || !read_u32(input, access))
                 return false;
-            if (access > static_cast<std::uint32_t>(permission::read_modify))
+            if (access > static_cast<std::uint32_t>(permission::read_write))
             {
                 error = "sandbox request contains unknown filesystem permission";
                 return false;

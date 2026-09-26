@@ -1,5 +1,6 @@
 import type { OpenAIToolResultMessage } from "../_shared/openai_executable_tool.js";
 import type {
+  TypeScriptToolHostError,
   TypeScriptToolHostRequest,
   TypeScriptToolHostResponse,
 } from "../_shared/openai_typescript_tool.js";
@@ -11,12 +12,33 @@ type ToolExecutor = (
   context: ToolExecutionContext,
 ) => Promise<OpenAIToolResultMessage>;
 
+function serializeError(error: unknown): TypeScriptToolHostError {
+  if (!(error instanceof Error)) {
+    return { message: String(error) };
+  }
+
+  const systemError = error as NodeJS.ErrnoException & {
+    path?: string;
+    dest?: string;
+  };
+  return {
+    message: error.message,
+    name: error.name,
+    ...(typeof systemError.code === "string" ? { code: systemError.code } : {}),
+    ...(typeof systemError.errno === "number" ? { errno: systemError.errno } : {}),
+    ...(typeof systemError.syscall === "string" ? { syscall: systemError.syscall } : {}),
+    ...(typeof systemError.path === "string" ? { path: systemError.path } : {}),
+    ...(typeof systemError.dest === "string" ? { dest: systemError.dest } : {}),
+  };
+}
+
 const executorLoaders: Record<string, () => Promise<ToolExecutor>> = {
   read: async () => (await import("../read_file/logic.js")).executeReadFileToolCall,
   write: async () => (await import("../write_file/logic.js")).executeWriteFileToolCall,
   glob: async () => (await import("../glob/logic.js")).executeGlobToolCall,
   grep: async () => (await import("../grep/logic.js")).executeGrepToolCall,
   webfetch: async () => (await import("../webfetch/logic.js")).executeWebfetchToolCall,
+  todowrite: async () => (await import("../todowrite/logic.js")).executeTodowriteToolCall,
 };
 
 async function readStdin(): Promise<string> {
@@ -31,11 +53,17 @@ async function executeRequest(
   request: TypeScriptToolHostRequest,
 ): Promise<TypeScriptToolHostResponse> {
   if (request.version !== 1) {
-    return { ok: false, error: `Unsupported tool host version: ${String(request.version)}` };
+    return {
+      ok: false,
+      error: { message: `Unsupported tool host version: ${String(request.version)}` },
+    };
   }
   const loadExecutor = executorLoaders[request.tool];
   if (!loadExecutor) {
-    return { ok: false, error: `Unsupported TypeScript tool: ${request.tool}` };
+    return {
+      ok: false,
+      error: { message: `Unsupported TypeScript tool: ${request.tool}` },
+    };
   }
 
   const context: ToolExecutionContext = {
@@ -65,7 +93,7 @@ async function executeRequest(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: serializeError(error),
     };
   }
 }
@@ -79,7 +107,7 @@ async function main(): Promise<void> {
   } catch (error) {
     response = {
       ok: false,
-      error: error instanceof Error ? error.message : String(error),
+      error: serializeError(error),
     };
   }
   process.stdout.write(JSON.stringify(response));

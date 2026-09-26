@@ -57,8 +57,8 @@ namespace sandbox::detail::filesystem::linux
         {
         case permission::read_only:
             return "read_only";
-        case permission::read_modify:
-            return "read_modify";
+        case permission::read_write:
+            return "read_write";
         }
         throw std::invalid_argument("unknown sandbox permission");
     }
@@ -71,7 +71,9 @@ namespace sandbox::detail::filesystem::linux
         material.push_back('\n');
         material += canonical_path.native();
         material.push_back('\n');
-        material += permission_name(access);
+        material += access == permission::read_write
+            ? "read_modify"
+            : permission_name(access);
 
         /*
          * This identity is only a stable registry key. The security boundary

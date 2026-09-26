@@ -9,6 +9,7 @@
 #include <sandbox/registry.h>
 
 #include <filesystem>
+#include <optional>
 #include <vector>
 
 namespace sandbox::detail::filesystem::windows
@@ -28,4 +29,8 @@ namespace sandbox::detail::filesystem::windows
         PSID sid,
         permission access,
         std::vector<registry_path_error>& path_errors);
+
+    std::optional<registry_path_error> release_tree(
+        const std::filesystem::path& root,
+        const std::wstring& sid);
 }

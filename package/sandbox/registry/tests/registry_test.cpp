@@ -41,6 +41,19 @@ namespace
         return false;
     }
 
+    bool has_path_error(
+        const sandbox::release_result& result,
+        const std::filesystem::path& path,
+        int error_value)
+    {
+        for (const auto& item : result.path_errors)
+        {
+            if (item.path == path && item.error.value() == error_value)
+                return true;
+        }
+        return false;
+    }
+
 #ifdef _WIN32
     struct local_free_deleter
     {
@@ -59,7 +72,7 @@ namespace
         {
         case sandbox::permission::read_only:
             return FILE_GENERIC_READ | FILE_GENERIC_EXECUTE;
-        case sandbox::permission::read_modify:
+        case sandbox::permission::read_write:
             return FILE_GENERIC_READ
                 | FILE_GENERIC_WRITE
                 | FILE_GENERIC_EXECUTE
@@ -258,8 +271,12 @@ int main()
     const std::filesystem::path state_path =
         std::filesystem::temp_directory_path()
         / "homegrowph-harness-sandbox-registry-test.state";
+    const std::filesystem::path failed_release_root =
+        std::filesystem::temp_directory_path()
+        / "homegrowph-harness-sandbox-release-failure-test";
     std::error_code cleanup_error;
     std::filesystem::remove_all(root, cleanup_error);
+    std::filesystem::remove_all(failed_release_root, cleanup_error);
     std::filesystem::remove(state_path, cleanup_error);
     if (_wputenv_s(
             L"HOMEGROWPH_SANDBOX_REGISTRY_STATE",
@@ -430,26 +447,26 @@ int main()
             "refresh=true did not restore the changed ACL");
 
         const auto modify = sandbox::registry({
-            {root, sandbox::permission::read_modify},
+            {root, sandbox::permission::read_write},
         }, true);
         require(modify.permissions.size() == 1, "modify registration result size mismatch");
         require(
             modify.permissions[0].sid != first.permissions[0].sid,
-            "read-only and read-modify capabilities must be distinct");
+            "read-only and read-write capabilities must be distinct");
         require(
             has_capability_acl(
                 existing_directory,
                 modify.permissions[0].sid,
-                sandbox::permission::read_modify,
+                sandbox::permission::read_write,
                 false),
-            "pre-existing directory did not receive read-modify baseline ACL");
+            "pre-existing directory did not receive read-write baseline ACL");
         require(
             has_capability_acl(
                 existing_file,
                 modify.permissions[0].sid,
-                sandbox::permission::read_modify,
+                sandbox::permission::read_write,
                 false),
-            "pre-existing file did not receive read-modify baseline ACL");
+            "pre-existing file did not receive read-write baseline ACL");
 
         const auto modify_future_directory = root / "modify-future";
         const auto modify_future_file = modify_future_directory / "after.txt";
@@ -462,26 +479,188 @@ int main()
             has_capability_acl(
                 modify_future_directory,
                 modify.permissions[0].sid,
-                sandbox::permission::read_modify,
+                sandbox::permission::read_write,
                 true),
-            "new directory did not inherit read-modify ACL");
+            "new directory did not inherit read-write ACL");
         require(
             has_capability_acl(
                 modify_future_file,
                 modify.permissions[0].sid,
-                sandbox::permission::read_modify,
+                sandbox::permission::read_write,
                 true),
-            "new file did not inherit read-modify ACL");
+            "new file did not inherit read-write ACL");
 
         const auto modify_again = sandbox::registry({
-            {root, sandbox::permission::read_modify},
+            {root, sandbox::permission::read_write},
         }, false);
         require(modify_again.permissions[0].reused, "modify ACL was not reused");
         require(
             modify_again.permissions[0].sid == modify.permissions[0].sid,
-            "read-modify SID was not stable");
+            "read-write SID was not stable");
+
+        const auto other_root = root / "other-registration";
+        std::filesystem::create_directories(other_root);
+        const auto other = sandbox::registry({
+            {other_root, sandbox::permission::read_only},
+        }, true);
+        require(other.permissions.size() == 1, "other registration result size mismatch");
+        require(
+            has_capability_acl(
+                other_root,
+                other.permissions[0].sid,
+                sandbox::permission::read_only,
+                false),
+            "other registration ACL was not established");
+
+        const auto released = sandbox::release(root);
+        require(!released.final_error, "release(path) returned a final OS error");
+        require(released.path_errors.empty(), "release(path) returned a path OS error");
+        require(
+            !has_capability_acl(
+                existing_file,
+                first.permissions[0].sid,
+                sandbox::permission::read_only,
+                false),
+            "release(path) left the read-only capability ACE behind");
+        require(
+            !has_capability_acl(
+                existing_file,
+                modify.permissions[0].sid,
+                sandbox::permission::read_write,
+                false),
+            "release(path) left the read-write capability ACE behind");
+        require(
+            has_capability_acl(
+                other_root,
+                other.permissions[0].sid,
+                sandbox::permission::read_only,
+                false),
+            "release(path) removed another registered capability");
+
+        const auto released_read_only_reuse = sandbox::registry({
+            {root, sandbox::permission::read_only},
+        }, false);
+        require(
+            released_read_only_reuse.permissions.empty(),
+            "released read-only capability was still reusable");
+        require(
+            has_path_error(
+                released_read_only_reuse,
+                root,
+                ERROR_FILE_NOT_FOUND),
+            "released read-only capability did not preserve missing-state error");
+
+        const auto released_read_write_reuse = sandbox::registry({
+            {root, sandbox::permission::read_write},
+        }, false);
+        require(
+            released_read_write_reuse.permissions.empty(),
+            "released read-write capability was still reusable");
+        require(
+            has_path_error(
+                released_read_write_reuse,
+                root,
+                ERROR_FILE_NOT_FOUND),
+            "released read-write capability did not preserve missing-state error");
+
+        const auto other_reuse = sandbox::registry({
+            {other_root, sandbox::permission::read_only},
+        }, false);
+        require(
+            other_reuse.permissions.size() == 1
+                && other_reuse.permissions[0].reused,
+            "release(path) broke another path's reuse state");
+
+        const auto repeated_release = sandbox::release(root);
+        require(!repeated_release.final_error, "repeated release(path) failed");
+        require(repeated_release.path_errors.empty(), "repeated release(path) returned a path error");
+
+        std::filesystem::create_directories(failed_release_root);
+        const auto failed_release_registration = sandbox::registry({
+            {failed_release_root, sandbox::permission::read_only},
+        }, true);
+        require(
+            failed_release_registration.permissions.size() == 1,
+            "failed-release setup registration failed");
+        std::filesystem::remove_all(failed_release_root);
+
+        const auto released_all = sandbox::release_all();
+        require(!released_all.final_error, "release_all() returned a final OS error");
+        require(
+            has_path_error(
+                released_all,
+                failed_release_root,
+                ERROR_FILE_NOT_FOUND)
+                || has_path_error(
+                    released_all,
+                    failed_release_root,
+                    ERROR_PATH_NOT_FOUND),
+            "release_all() did not return the cleanup path error");
+        require(
+            !has_capability_acl(
+                other_root,
+                other.permissions[0].sid,
+                sandbox::permission::read_only,
+                false),
+            "release_all() left a sandbox capability ACE behind");
+
+        const auto released_all_reuse = sandbox::registry({
+            {other_root, sandbox::permission::read_only},
+        }, false);
+        require(
+            released_all_reuse.permissions.empty(),
+            "release_all() left durable reuse state behind");
+        require(
+            has_path_error(
+                released_all_reuse,
+                other_root,
+                ERROR_FILE_NOT_FOUND),
+            "release_all() did not preserve missing-state error");
+
+        std::filesystem::create_directories(failed_release_root);
+        const auto failed_release_reuse = sandbox::registry({
+            {failed_release_root, sandbox::permission::read_only},
+        }, false);
+        require(
+            failed_release_reuse.permissions.size() == 1
+                && failed_release_reuse.permissions[0].reused,
+            "failed cleanup entry incorrectly advanced to state removal");
+
+        const auto cleanup_failed_entry = sandbox::release_all();
+        require(
+            !cleanup_failed_entry.final_error,
+            "second explicit release_all() returned a final OS error");
+        require(
+            cleanup_failed_entry.path_errors.empty(),
+            "second explicit release_all() failed after the path was restored");
+
+        const auto cleaned_failed_release_reuse = sandbox::registry({
+            {failed_release_root, sandbox::permission::read_only},
+        }, false);
+        require(
+            cleaned_failed_release_reuse.permissions.empty(),
+            "successful cleanup did not remove durable state");
+        require(
+            has_path_error(
+                cleaned_failed_release_reuse,
+                failed_release_root,
+                ERROR_FILE_NOT_FOUND),
+            "successful cleanup left durable state reusable");
+
+        const auto repeated_release_all = sandbox::release_all();
+        require(!repeated_release_all.final_error, "repeated release_all() failed");
+        require(
+            repeated_release_all.path_errors.empty(),
+            "repeated release_all() returned a path error");
+
+        {
+            std::ofstream output(root / "after-release.txt");
+            output << "unrelated owner/user ACLs remain usable";
+            require(static_cast<bool>(output), "release removed unrelated filesystem access");
+        }
 
         std::filesystem::remove_all(root);
+        std::filesystem::remove_all(failed_release_root, cleanup_error);
         std::filesystem::remove(state_path, cleanup_error);
         _wputenv_s(L"HOMEGROWPH_SANDBOX_REGISTRY_STATE", L"");
         std::cout << "sandbox registry tests passed\n";
@@ -490,6 +669,7 @@ int main()
     catch (const std::exception& exception)
     {
         std::filesystem::remove_all(root, cleanup_error);
+        std::filesystem::remove_all(failed_release_root, cleanup_error);
         std::filesystem::remove(state_path, cleanup_error);
         _wputenv_s(L"HOMEGROWPH_SANDBOX_REGISTRY_STATE", L"");
         std::cerr << "sandbox registry test failed: " << exception.what() << '\n';
@@ -498,6 +678,7 @@ int main()
     catch (...)
     {
         std::filesystem::remove_all(root, cleanup_error);
+        std::filesystem::remove_all(failed_release_root, cleanup_error);
         std::filesystem::remove(state_path, cleanup_error);
         _wputenv_s(L"HOMEGROWPH_SANDBOX_REGISTRY_STATE", L"");
         std::cerr << "sandbox registry test failed: unknown exception\n";
@@ -599,23 +780,71 @@ int main()
             "Linux refresh=false unexpectedly mutated durable registry state");
 
         const auto missing_modify = sandbox::registry({
-            {root, sandbox::permission::read_modify},
+            {root, sandbox::permission::read_write},
         }, false);
         require(
             has_path_error(missing_modify, root, ENOENT),
             "Linux reuse of an unregistered policy did not preserve ENOENT");
 
         const auto modify = sandbox::registry({
-            {root, sandbox::permission::read_modify},
+            {root, sandbox::permission::read_write},
         }, true);
         require(modify.permissions.size() == 1, "Linux modify refresh result size mismatch");
         require(!modify.permissions[0].reused, "Linux modify refresh=true reported reuse");
         require(
             modify.permissions[0].capability_name != first.permissions[0].capability_name,
-            "Linux read-only and read-modify identities must be distinct");
+            "Linux read-only and read-write identities must be distinct");
         require(
             std::filesystem::status(root).permissions() == permissions_before,
-            "Linux read-modify registration changed host filesystem permissions");
+            "Linux read-write registration changed host filesystem permissions");
+
+        const auto released = sandbox::release(root);
+        require(!released.final_error, "Linux release(path) returned a final OS error");
+        require(released.path_errors.empty(), "Linux release(path) returned a path OS error");
+        require(
+            std::filesystem::status(root).permissions() == permissions_before,
+            "Linux release(path) changed host filesystem permissions");
+
+        const auto released_read_only_reuse = sandbox::registry({
+            {root, sandbox::permission::read_only},
+        }, false);
+        require(
+            has_path_error(released_read_only_reuse, root, ENOENT),
+            "Linux release(path) left read-only durable state behind");
+        const auto released_read_write_reuse = sandbox::registry({
+            {root, sandbox::permission::read_write},
+        }, false);
+        require(
+            has_path_error(released_read_write_reuse, root, ENOENT),
+            "Linux release(path) left read-write durable state behind");
+
+        const auto repeated_release = sandbox::release(root);
+        require(!repeated_release.final_error, "Linux repeated release(path) failed");
+        require(repeated_release.path_errors.empty(), "Linux repeated release(path) returned a path error");
+
+        const auto refreshed_for_release_all = sandbox::registry({
+            {root, sandbox::permission::read_only},
+        }, true);
+        require(
+            refreshed_for_release_all.permissions.size() == 1,
+            "Linux release_all setup registration failed");
+        const auto released_all = sandbox::release_all();
+        require(!released_all.final_error, "Linux release_all() returned a final OS error");
+        require(released_all.path_errors.empty(), "Linux release_all() returned a path OS error");
+        require(
+            std::filesystem::status(root).permissions() == permissions_before,
+            "Linux release_all() changed host filesystem permissions");
+        const auto released_all_reuse = sandbox::registry({
+            {root, sandbox::permission::read_only},
+        }, false);
+        require(
+            has_path_error(released_all_reuse, root, ENOENT),
+            "Linux release_all() left durable state behind");
+        const auto repeated_release_all = sandbox::release_all();
+        require(!repeated_release_all.final_error, "Linux repeated release_all() failed");
+        require(
+            repeated_release_all.path_errors.empty(),
+            "Linux repeated release_all() returned a path error");
 
         std::filesystem::remove(state_path);
         const auto missing_state = sandbox::registry({

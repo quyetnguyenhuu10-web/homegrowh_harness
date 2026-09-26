@@ -141,9 +141,7 @@ namespace
         }
     }
 
-    void validate_schema(
-        const Json& schema,
-        const Json& catalog)
+    void validate_schema(const Json& schema)
     {
         if (!schema.is_object() ||
             !schema.contains("providers") ||
@@ -152,12 +150,6 @@ namespace
         {
             throw std::runtime_error(
                 "provider_types.json: providers must be a nonempty array");
-        }
-
-        if (!catalog.is_object())
-        {
-            throw std::runtime_error(
-                "catalog.json: expected an object of providers");
         }
 
         std::set<std::string> ids;
@@ -197,23 +189,6 @@ namespace
             }
 
             validate_fields(provider.at("fields"), usage_type);
-
-            if (!catalog.contains(id))
-            {
-                throw std::runtime_error(
-                    "provider_types.json: provider missing from catalog.json: " + id);
-            }
-        }
-
-        for (const auto& [id, value] : catalog.items())
-        {
-            (void)value;
-
-            if (!ids.contains(id))
-            {
-                throw std::runtime_error(
-                    "catalog.json: provider missing from provider_types.json: " + id);
-            }
         }
     }
 
@@ -364,7 +339,7 @@ namespace
 
         output << "\n"
                << "        throw std::runtime_error(\n"
-               << "            \"unsupported provider in catalog: \" + provider_name);\n"
+               << "            \"unsupported provider: \" + provider_name);\n"
                << "    }\n\n";
 
         emit_usage_parser(output, schema);
@@ -376,27 +351,26 @@ namespace
 
 int main(int argc, char** argv)
 {
-    if (argc != 4)
+    if (argc != 3)
     {
         std::cerr
             << "usage: generate_provider_types "
-               "<provider_types.json> <catalog.json> <output.h>\n";
+               "<provider_types.json> <output.h>\n";
         return 2;
     }
 
     try
     {
         const Json schema = read_json(argv[1]);
-        const Json catalog = read_json(argv[2]);
-        validate_schema(schema, catalog);
+        validate_schema(schema);
 
         const std::string header = generate_header(schema);
-        std::ofstream output(argv[3], std::ios::binary | std::ios::trunc);
+        std::ofstream output(argv[2], std::ios::binary | std::ios::trunc);
 
         if (!output || !(output << header))
         {
             throw std::runtime_error(
-                std::string("cannot write generated header: ") + argv[3]);
+                std::string("cannot write generated header: ") + argv[2]);
         }
     }
     catch (const std::exception& error)

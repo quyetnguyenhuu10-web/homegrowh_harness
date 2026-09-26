@@ -1,141 +1,165 @@
 # BLOCK DATABASE
 
-## 1. Public API
+## 1. Trạng thái hiện tại
 
-`@hh/database` là public boundary duy nhất.
+Database block đang được hiện thực bằng package C++ package/events, không còn package TypeScript @hh/database trong cây package hiện tại.
 
-```ts
-import * as database from "@hh/database";
-```
+Public header:
 
-Runtime chỉ có:
+~~~cpp
+#include <events>
+~~~
 
-```text
-database.repository
-database.conversation
-database.contextUsage
-database.algorithm
-```
+Target CMake:
 
-## 2. Repository
+~~~text
+events::events
+~~~
 
-```ts
-database.repository.list()
-database.repository.add(repositoryPath)
-```
+Block này chỉ sở hữu event store SQLite. Các khái niệm repository, conversation registry, contextUsage và algorithm trong tài liệu cũ không có trong implementation hiện tại.
 
-## 3. Conversation
+## 2. Public data model
 
-```ts
-database.conversation.list(scope)
-database.conversation.create(scope)
-database.conversation.delete(ref)
-database.conversation.getActive()
-database.conversation.setActive(ref)
-database.conversation.read(ref)
-database.conversation.readRow(ref, rowPosition)
-database.conversation.readSession(ref, sessionId)
-database.conversation.append(ref, row)
-database.conversation.insertBeforeSession(ref, sessionId, row)  -> Chèn 1 row vào trước row đầu tiên của sessionId
-```
+Input khi ghi:
 
-```ts
-type ConversationScope =
-  | { kind: "normal" }
-  | { kind: "repository"; repositoryPath: string }
+~~~cpp
+struct EventInput {
+    std::string events;
+    std::optional<std::string> create_at;
+    std::string session_id;
+    std::string provider;
+    std::string model;
+};
+~~~
 
-interface ConversationRef {
-  scope: ConversationScope
-  conversationId: string
-}
-```
+Row khi đọc:
 
-Conversation row public dùng `rowPosition` làm vị trí row:
+~~~cpp
+struct Event {
+    std::int64_t row_position;
+    std::string events;
+    std::string create_at;
+    std::string session_id;
+    std::string provider;
+    std::string model;
+};
+~~~
 
-```ts
-interface ConversationRow {
-  rowPosition: number
-  type: string
-  role: string | null
-  content: string | null
-  delta: string | null
-  sessionId: string | null
-  requestId: string | null
-  eventIndex: number | null
-  createdAt: number
-}
-```
+events là text thô và có thể chứa JSON/SSE event. Database không parse nội dung này thành message.
+
+## 3. Store và schema
+
+~~~cpp
+events::Store store(database_path);
+events::Store created = events::create(id, directory);
+~~~
+
+Store:
+
+- mở hoặc tạo một SQLite database tại database_path;
+- là move-only;
+- giữ SQLite state bằng ownership nội bộ;
+- tuần tự hóa các lời gọi trên cùng Store bằng mutex.
+
+events::create(id, directory) tạo directory/id.db và lỗi nếu file đã tồn tại. id phải là tên file, không phải path.
+
+Schema hiện tại:
+
+~~~sql
+CREATE TABLE IF NOT EXISTS events (
+    row_position INTEGER PRIMARY KEY,
+    events TEXT NOT NULL,
+    create_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    Session_ID TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    model TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS events_session_position
+ON events(Session_ID, row_position);
+~~~
+
+Không có cột id, sort_order, request_id hoặc event_index trong schema hiện tại.
+
+## 4. Row position
+
+row_position là vị trí nguyên bắt đầu từ 0:
+
+~~~text
+0, 1, 2, ... N-1
+~~~
+
+Public operations:
+
+~~~cpp
+std::int64_t events::append(Store&, const EventInput&);
+std::int64_t events::insert_after(Store&, std::int64_t row_position, const EventInput&);
+bool events::erase(Store&, std::int64_t row_position);
+std::vector<Event> events::query(const Store&);
+std::vector<Event> events::query(const Store&, const std::string& session_id);
+~~~
 
 Invariant:
 
-```text
-rowPosition = 1, 2, 3, ... N
-row kế tiếp = row hiện tại + 1
-```
+- append thêm tại max(row_position) + 1; database rỗng bắt đầu ở 0;
+- insert_after(P) chèn tại P + 1 và dịch các row phía sau lên 1;
+- erase(P) xóa P và dịch các row phía sau xuống 1;
+- query luôn ORDER BY row_position;
+- query(store, session_id) lọc Session_ID khớp chính xác rồi vẫn giữ thứ tự row_position.
 
-`insertBeforeSession()` chèn ngay trước row thường đầu tiên của Session và dịch
-các row từ vị trí chèn trở đi `+1`. `rowPosition` là vị trí, không phải ID ổn định.
+Các thay đổi vị trí của insert/erase chạy trong SQLite transaction.
 
-## 4. Context usage
+## 5. Timestamp và SQLite
 
-```ts
-database.contextUsage.get(ref)
-database.contextUsage.set(ref, usage)
-```
+Nếu EventInput.create_at có giá trị, Database lưu nguyên văn.
 
-## 5. Algorithm
+Nếu không có, insert dùng timestamp UTC:
 
-```ts
-database.algorithm.append(row)
-database.algorithm.insert(rowPosition, row)
-database.algorithm.delete(rowPosition)
-```
+~~~text
+YYYY-MM-DDTHH:MM:SS.sssZ
+~~~
 
-```ts
-interface AlgorithmRowInput {
-  block: string
-  description: string
-  formula: string
-  typeFormula: string
-}
+SQLite được mở read/write/create, FULLMUTEX, bật extended result codes và busy timeout 5000 ms.
 
-interface AlgorithmRow extends AlgorithmRowInput {
-  rowPosition: number
-}
-```
+## 6. Quan hệ với Sessions
 
-Algorithm cũng dùng vị trí nguyên liên tiếp `1..N`:
+Database không tự tạo chat history.
 
-```text
-append      -> thêm tại N + 1
-insert(P)   -> chèn tại P, các row >= P dịch +1
-delete(P)   -> xóa P, các row > P dịch -1
-```
+Sessions có hai projection API đọc event database:
 
-Hiện chưa có public API query/read cho Algorithm.
+~~~cpp
+sessions::convert_history(database_path, session_id);
+sessions::convert_all_history(database_path);
+~~~
 
-## 6. Private
+Projection đọc events theo row_position, chia segment theo provider và dựng lại OpenAI-compatible messages từ raw provider events cho openai, deepseek và bonsai.
 
-Không public:
+Đây là consumer của event store; nó không làm thay đổi schema hoặc ownership của Database.
 
-```text
-SQLite handle
-openHistory
-historyExists
-deleteHistory
-listHistories
-baseDir
-projectsDir
-filePath
-NORMAL_CONVERSATION_SCOPE
-raw registry JSON
-raw SQLite column names
-storage path helpers
+## 7. Boundary
+
+Database hiện tại chịu trách nhiệm:
+
+~~~text
+SQLite lifetime
+event row storage
+integer row ordering
+append / insert_after / erase / query
+session_id + provider + model metadata
+~~~
+
+Database hiện tại không chịu trách nhiệm:
+
+~~~text
+conversation registry
+active conversation
+repository registry
+context-usage record
+algorithm table
 model registry
-custom model credential
-selected model
-```
+provider routing
+tool execution
+session orchestration
+~~~
 
-Model không thuộc Database. Toàn bộ model ownership thuộc `@hh/provider`.
-
-> Consumer chỉ biết dữ liệu và thao tác nghiệp vụ; cách Database lưu dữ liệu là private.
+> Nguồn sự thật hiện tại của block Database là package/events và schema events, không phải API @hh/database cũ.

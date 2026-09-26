@@ -1,3 +1,5 @@
+import { stat } from "node:fs/promises";
+
 import type {
   OpenAIFunctionToolCall,
   OpenAIToolResultMessage,
@@ -18,7 +20,6 @@ import {
   readDirectoryNames,
   readLines,
   readSample,
-  statSafe,
 } from "../_shared/text_file.js";
 
 export const READ_FILE_TOOL_NAME = "read";
@@ -30,8 +31,7 @@ export async function executeReadFileToolCall(
   const args = requireArguments(toolCall, READ_FILE_TOOL_NAME);
   const requested = requireString(args.filePath, "filePath");
   const filePath = resolveToolPath(context, requested);
-  const info = await statSafe(filePath);
-  if (!info) throw new Error(`Path not found: ${filePath}`);
+  const info = await stat(filePath);
 
   const offset = readPositiveInteger(args.offset, 1);
   const limit =

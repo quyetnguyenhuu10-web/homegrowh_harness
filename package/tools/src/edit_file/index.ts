@@ -9,9 +9,11 @@ import type { ToolExecutionContext } from "../_shared/native_tool.js";
 
 export const EDIT_FILE_TOOL_NAME = "edit_file";
 
-/** Relative từ package/tools. Không hardcode checkout path. */
+/** Stable runtime artifact. Resolution walks upward to the repository root. */
 export const EDIT_FILE_EXECUTABLE =
-  "filesystems/build/Debug/edit_file.exe";
+  process.platform === "win32"
+    ? "executable/edit_file.exe"
+    : "executable/edit_file";
 
 export const editFileToolDefinition = toolDefinition(EDIT_FILE_TOOL_NAME);
 
@@ -25,7 +27,7 @@ export function executeEditFileToolCall(
     moduleUrl: import.meta.url,
     toolCall,
     context,
-    filesystemAccess: "read_modify",
+    filesystemAccess: "read_write",
   });
 }
 

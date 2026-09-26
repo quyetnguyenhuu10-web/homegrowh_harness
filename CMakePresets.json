@@ -1,0 +1,45 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "release",
+      "displayName": "Configure Homegrowh Harness (Release)",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "all-release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "targets": [
+        "harness_all"
+      ]
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "setup",
+      "displayName": "Build all C++ packages and runtime executables",
+      "description": "Configure one build tree, prepare dependencies and tools, then build every C++ package and runtime executable.",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "release"
+        },
+        {
+          "type": "build",
+          "name": "all-release"
+        }
+      ]
+    }
+  ]
+}

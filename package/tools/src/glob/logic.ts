@@ -22,8 +22,8 @@ export async function executeGlobToolCall(
   const args = requireArguments(toolCall, GLOB_TOOL_NAME);
   const pattern = requireString(args.pattern, "pattern");
   const root = resolveToolPath(context, args.path);
-  const info = await stat(root).catch(() => null);
-  if (!info?.isDirectory()) {
+  const info = await stat(root);
+  if (!info.isDirectory()) {
     throw new Error(`glob path must be an existing directory: ${root}`);
   }
 

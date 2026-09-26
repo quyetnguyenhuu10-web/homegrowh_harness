@@ -21,4 +21,32 @@ namespace sandbox
             return result;
         }
     }
+
+    release_result release(const std::filesystem::path& path)
+    {
+        try
+        {
+            return detail::filesystem::release_permissions(path);
+        }
+        catch (const std::system_error& exception)
+        {
+            release_result result;
+            result.final_error = exception.code();
+            return result;
+        }
+    }
+
+    release_result release_all()
+    {
+        try
+        {
+            return detail::filesystem::release_all_permissions();
+        }
+        catch (const std::system_error& exception)
+        {
+            release_result result;
+            result.final_error = exception.code();
+            return result;
+        }
+    }
 }

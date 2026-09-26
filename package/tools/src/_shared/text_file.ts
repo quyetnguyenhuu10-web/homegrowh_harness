@@ -24,16 +24,9 @@ export async function exists(path: string): Promise<boolean> {
   try {
     await access(path);
     return true;
-  } catch {
-    return false;
-  }
-}
-
-export async function statSafe(path: string) {
-  try {
-    return await stat(path);
-  } catch {
-    return null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
   }
 }
 

@@ -1,0 +1,8 @@
+{
+  "messages": [
+    {
+      "role": "user",
+      "content": "Đọc toàn bộ code trong D:\\tools và review codebase. Tập trung vào lỗi logic, bug có thể xảy ra, quản lý tài nguyên/RAM và lifetime, concurrency/thread-safety, error handling, thiết kế API/kiến trúc, bảo mật và tính portable Windows/Linux. Không sửa file. Với mỗi vấn đề, nêu rõ file/vị trí liên quan, mức độ ảnh hưởng, nguyên nhân và cách sửa đề xuất. Sau cùng tổng kết các rủi ro quan trọng nhất. Trước mỗi lượt gọi tool, hãy phát một câu content ngắn mô tả bước đang làm để người dùng thấy tiến trình được stream. Sau mỗi batch đọc/kiểm tra file, nếu còn phải gọi thêm tool thì phát thêm một cập nhật content ngắn trước khi gọi tool tiếp theo. Không in raw tool call hoặc raw tool result trong các cập nhật này."
+    }
+  ]
+}
