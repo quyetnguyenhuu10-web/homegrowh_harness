@@ -2,17 +2,26 @@ homegrowh_harness/
 ├── .github
 │   └── workflows
 │       └── filesystems-ci.yml
+├── cli
+├── cmake
+│   ├── dependencies.cmake
+│   └── npm_ci.cmake
 ├── docs
-│   ├── draw_architech
-│   │   ├── model_architech.png
-│   │   └── session.drawio
+│   ├── API_REFERENCE.md
 │   ├── BLOCK_CHAT_THREAD.md
 │   ├── BLOCK_COMPACTION.md
 │   ├── BLOCK_DATABASE.md
 │   ├── BLOCK_PROVIDER.md
 │   ├── BLOCK_SESSION.md
 │   ├── BLOCK_TOOLS.md
-│   └── model_architech.md
+│   ├── model_architech.md
+│   └── model_architech.png
+├── executable
+│   ├── edit_file.exe
+│   ├── sandbox_process.exe
+│   └── sessions_loop.exe
+├── include
+│   └── homegrowh_harness
 ├── package
 │   ├── chat_thread
 │   │   ├── src
@@ -82,9 +91,8 @@ homegrowh_harness/
 │   │   │   ├── index.css
 │   │   │   ├── main.tsx
 │   │   │   └── vite-env.d.ts
-│   │   ├── test
-│   │   │   └── history_order.mjs
 │   │   ├── tests
+│   │   │   └── history_order.mjs
 │   │   ├── index.html
 │   │   ├── package-lock.json
 │   │   ├── package.json
@@ -92,6 +100,38 @@ homegrowh_harness/
 │   │   ├── vite.config.ts
 │   │   ├── vite.desktop.config.ts
 │   │   └── vite.embed.config.ts
+│   ├── context_usage
+│   │   ├── include
+│   │   │   └── context_usage
+│   │   ├── src
+│   │   │   └── context_usage
+│   │   │       ├── context_usage.cpp
+│   │   │       └── context_usage.h
+│   │   └── CMakeLists.txt
+│   ├── event_port
+│   │   ├── include
+│   │   │   └── event_port
+│   │   ├── src
+│   │   │   └── event_port
+│   │   │       ├── detail
+│   │   │       │   ├── clock.cpp
+│   │   │       │   ├── clock.h
+│   │   │       │   ├── event_access.h
+│   │   │       │   ├── registration_state.cpp
+│   │   │       │   ├── registration_state.h
+│   │   │       │   ├── registry.cpp
+│   │   │       │   ├── registry.h
+│   │   │       │   ├── sequence.cpp
+│   │   │       │   ├── sequence.h
+│   │   │       │   ├── validate.cpp
+│   │   │       │   └── validate.h
+│   │   │       ├── event.cpp
+│   │   │       ├── event_port.h
+│   │   │       ├── port.cpp
+│   │   │       └── registration.cpp
+│   │   ├── tests
+│   │   │   └── event_port_test.cpp
+│   │   └── CMakeLists.txt
 │   ├── events
 │   │   ├── include
 │   │   │   └── events
@@ -121,7 +161,6 @@ homegrowh_harness/
 │   │   ├── codegen
 │   │   │   ├── emit_usage_parser.cpp
 │   │   │   ├── emit_usage_parser.h
-│   │   │   ├── generate_context_usage.cpp
 │   │   │   └── generate_provider_types.cpp
 │   │   ├── include
 │   │   │   └── provider
@@ -133,28 +172,22 @@ homegrowh_harness/
 │   │   │   │   ├── compaction.h
 │   │   │   │   └── COMPACTION.md
 │   │   │   ├── context_usage
-│   │   │   │   ├── context_usage.cpp
-│   │   │   │   ├── context_usage.h
-│   │   │   │   └── context_usage.json
 │   │   │   ├── platform
 │   │   │   │   ├── linux
 │   │   │   │   │   └── request
-│   │   │   │   │       ├── completion.cpp
-│   │   │   │   │       └── completion.h
 │   │   │   │   └── windows
 │   │   │   │       └── request
-│   │   │   │           ├── completion.cpp
-│   │   │   │           └── completion.h
-│   │   │   └── request
-│   │   │       ├── catalog.h
-│   │   │       ├── completion_detail.h
-│   │   │       ├── completion_port.cpp
-│   │   │       ├── provider_types.json
-│   │   │       ├── request_state.h
-│   │   │       ├── requests.cpp
-│   │   │       ├── requests.h
-│   │   │       ├── sse.cpp
-│   │   │       └── sse.h
+│   │   │   ├── request
+│   │   │   │   ├── catalog.h
+│   │   │   │   ├── provider_types.json
+│   │   │   │   ├── request_state.h
+│   │   │   │   ├── requests.cpp
+│   │   │   │   ├── requests.h
+│   │   │   │   ├── sse.cpp
+│   │   │   │   └── sse.h
+│   │   │   └── stream
+│   │   │       ├── stream.cpp
+│   │   │       └── stream.h
 │   │   ├── tests
 │   │   │   └── call_llm.cpp
 │   │   ├── .gitignore
@@ -162,9 +195,21 @@ homegrowh_harness/
 │   │   └── CMakeLists.txt
 │   ├── sandbox
 │   │   ├── executable
-│   │   │   ├── process_protocol.cpp
-│   │   │   ├── process_protocol.h
-│   │   │   └── sandbox_process.cpp
+│   │   │   ├── platform
+│   │   │   │   ├── linux
+│   │   │   │   │   └── process
+│   │   │   │   │       ├── process_path.cpp
+│   │   │   │   │       └── sandbox_process.cpp
+│   │   │   │   └── windows
+│   │   │   │       └── process
+│   │   │   │           ├── process_path.cpp
+│   │   │   │           └── sandbox_process.cpp
+│   │   │   └── process
+│   │   │       ├── process_broker.cpp
+│   │   │       ├── process_broker.h
+│   │   │       ├── process_path.h
+│   │   │       ├── process_protocol.cpp
+│   │   │       └── process_protocol.h
 │   │   ├── process
 │   │   │   ├── include
 │   │   │   │   └── sandbox
@@ -223,7 +268,101 @@ homegrowh_harness/
 │   │   │   │       └── registry.cpp
 │   │   │   └── tests
 │   │   │       └── registry_test.cpp
+│   │   ├── tests
+│   │   │   └── process_test.cpp
 │   │   └── CmakeLists.txt
+│   ├── secrets
+│   │   ├── include
+│   │   │   └── secrets
+│   │   ├── src
+│   │   │   ├── credential
+│   │   │   │   ├── credential.cpp
+│   │   │   │   └── credential.h
+│   │   │   ├── memory
+│   │   │   │   ├── secure_string.cpp
+│   │   │   │   └── secure_string.h
+│   │   │   └── platform
+│   │   │       ├── linux
+│   │   │       │   └── credential
+│   │   │       │       ├── linux_credential.cpp
+│   │   │       │       └── linux_credential.h
+│   │   │       └── windows
+│   │   │           └── credential
+│   │   │               ├── windows_credential.cpp
+│   │   │               └── windows_credential.h
+│   │   ├── tests
+│   │   │   └── credential_test.cpp
+│   │   └── CMakeLists.txt
+│   ├── sessions
+│   │   ├── excutable
+│   │   │   └── loop
+│   │   │       └── main.cpp
+│   │   ├── include
+│   │   │   └── sessions
+│   │   ├── src
+│   │   │   ├── catalog
+│   │   │   │   ├── catalog.cpp
+│   │   │   │   └── catalog.h
+│   │   │   ├── context
+│   │   │   │   ├── context.cpp
+│   │   │   │   └── context.h
+│   │   │   ├── convert_history
+│   │   │   │   ├── bonsai.cpp
+│   │   │   │   ├── deepseek.cpp
+│   │   │   │   └── openai.cpp
+│   │   │   ├── loop
+│   │   │   │   ├── full_loop.cpp
+│   │   │   │   └── loop.h
+│   │   │   ├── request
+│   │   │   │   ├── request.cpp
+│   │   │   │   ├── request.h
+│   │   │   │   ├── turn.cpp
+│   │   │   │   └── turn.h
+│   │   │   ├── response
+│   │   │   │   ├── reasoning.cpp
+│   │   │   │   ├── reasoning.h
+│   │   │   │   ├── response.cpp
+│   │   │   │   └── response.h
+│   │   │   ├── session
+│   │   │   │   ├── credential_owner.cpp
+│   │   │   │   ├── credential_owner.h
+│   │   │   │   ├── request.cpp
+│   │   │   │   ├── request.h
+│   │   │   │   ├── response.cpp
+│   │   │   │   ├── response.h
+│   │   │   │   ├── session.cpp
+│   │   │   │   ├── session.h
+│   │   │   │   ├── session_internal.h
+│   │   │   │   ├── session_state.cpp
+│   │   │   │   ├── session_state.h
+│   │   │   │   ├── tool.cpp
+│   │   │   │   └── tool.h
+│   │   │   ├── stream
+│   │   │   │   └── stream.h
+│   │   │   └── tool
+│   │   │       ├── tool_call.cpp
+│   │   │       └── tool_call.h
+│   │   ├── tests
+│   │   │   ├── context_usage_test.cpp
+│   │   │   ├── loop_response_test.cpp
+│   │   │   ├── request_test.cpp
+│   │   │   ├── stage_api_test.cpp
+│   │   │   └── tool_call_test.cpp
+│   │   └── CMakeLists.txt
+│   ├── tool_runtime
+│   │   ├── include
+│   │   │   └── tool_runtime
+│   │   ├── src
+│   │   │   └── tool_runtime
+│   │   │       ├── execute
+│   │   │       │   ├── execute.cpp
+│   │   │       │   └── execute.h
+│   │   │       └── runtime
+│   │   │           ├── runtime.cpp
+│   │   │           └── runtime.h
+│   │   ├── tests
+│   │   │   └── runtime_test.cpp
+│   │   └── CMakeLists.txt
 │   └── tools
 │       ├── filesystems
 │       │   ├── executables
@@ -378,7 +517,8 @@ homegrowh_harness/
 │       │   ├── registry
 │       │   │   └── index.ts
 │       │   ├── todowrite
-│       │   │   └── index.ts
+│       │   │   ├── index.ts
+│       │   │   └── logic.ts
 │       │   ├── webfetch
 │       │   │   ├── index.ts
 │       │   │   └── logic.ts
@@ -389,13 +529,18 @@ homegrowh_harness/
 │       │   ├── tool_definitions.json
 │       │   └── tool_definitions.ts
 │       ├── tests
+│       │   ├── process_runtime.ts
 │       │   └── public_api.ts
 │       ├── package-lock.json
 │       ├── package.json
 │       └── tsconfig.json
 ├── tests
+│   └── session_current.review_tool.json
 ├── .gitattributes
 ├── .gitignore
+├── CMakeLists.txt
+├── CMakePresets.json
 ├── package-lock.json
 ├── package.json
+├── README.md
 └── tree.txt

@@ -107,7 +107,7 @@ int main(int argc, char* argv[])
 
     const auto registration = sandbox::registry({
         {executable, sandbox::permission::read_only},
-        {root, sandbox::permission::read_modify},
+        {root, sandbox::permission::read_write},
     }, true);
     require(!registration.final_error, "process test registry final error");
     require(
@@ -120,7 +120,7 @@ int main(int argc, char* argv[])
     normal.working_directory = root;
     normal.filesystem = {
         {executable, sandbox::permission::read_only},
-        {root, sandbox::permission::read_modify},
+        {root, sandbox::permission::read_write},
     };
     normal.timeout = std::chrono::seconds(5);
 

@@ -1,4 +1,4 @@
-export type SandboxFilesystemAccess = "read_only" | "read_modify";
+export type SandboxFilesystemAccess = "read_only" | "read_write";
 export type SandboxNetworkAccess = "none" | "internet_client";
 
 export interface SandboxFilesystemRule {
@@ -90,7 +90,7 @@ export function encodeSandboxRequest(request: SandboxBrokerRequest): Buffer {
   for (const rule of request.sandbox.filesystem) {
     chunks.push(
       ...stringField(rule.path),
-      u32(rule.access === "read_modify" ? 1 : 0),
+      u32(rule.access === "read_write" ? 1 : 0),
     );
   }
 

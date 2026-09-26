@@ -3,11 +3,17 @@
 #include "request/requests.h"
 
 #include <string>
+#include <string_view>
 
 #include <nlohmann/json.hpp>
 
 namespace provider
 {
+    struct CompactionResponse
+    {
+        RequestUsage usage = UsageState::unavailable;
+    };
+
     struct CompactionResult
     {
         nlohmann::json messages;
@@ -15,10 +21,16 @@ namespace provider
     };
 
     CompactionResult compaction(
+        Provider selected_provider,
+        const std::string& endpoint,
         const std::string& model_id,
-        const nlohmann::json& messages,
-        RawResponse* raw_response = nullptr,
+        std::string_view api_key,
+        std::string_view compaction_prompt,
+        const nlohmann::json& session_current,
+        const nlohmann::json& tool_definitions,
+        const nlohmann::json& history = {},
+        EventSink response_sink = {},
         bool compact = false,
-        const nlohmann::json& current_sessions = {},
-        const nlohmann::json& tools = {});
+        EventSink summary_sink = {},
+        CompactionResponse* compaction_response = nullptr);
 }

@@ -10,7 +10,7 @@ namespace sandbox
     enum class permission
     {
         read_only,
-        read_modify,
+        read_write,
     };
 
     struct registry_request
@@ -48,6 +48,19 @@ namespace sandbox
         std::vector<registry_path_error> path_errors;
     };
 
+    struct release_result
+    {
+        // One registry-wide OS failure that is not attributable to one path,
+        // e.g. state/lock/commit failure.
+        std::error_code final_error;
+
+        // Final OS/path-specific failure for each entry that could not complete.
+        // Processing of that entry stops at the first failure; release does not
+        // retry it internally. Durable state is removed only after that entry's
+        // cleanup succeeds.
+        std::vector<registry_path_error> path_errors;
+    };
+
     /**
      * Register durable filesystem capabilities for the supplied paths.
      *
@@ -61,4 +74,19 @@ namespace sandbox
     registry_result registry(
         const std::vector<registry_request>& requests,
         bool refresh);
+
+    /**
+     * Release every durable sandbox capability registered for one canonical
+     * path, regardless of permission kind.
+     *
+     * On Windows this revokes only ACEs whose SID exactly matches the stored
+     * sandbox capability SID. Each entry stops at its first cleanup error and
+     * reports that exact path/error; successful entries are then removed from
+     * registry state. On Linux Landlock does not mutate host ACLs, so this removes
+     * only the matching durable registry entries.
+     */
+    release_result release(const std::filesystem::path& path);
+
+    /** Release every durable filesystem capability owned by this sandbox. */
+    release_result release_all();
 }

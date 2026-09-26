@@ -223,9 +223,12 @@ namespace sandbox::detail::filesystem::linux
                 throw std::runtime_error("sandbox registry state entry is invalid");
             }
 
+            if (access == "read_modify")
+                access = "read_write";
+
             if (canonical_path.empty()
                 || policy_name.empty()
-                || (access != "read_only" && access != "read_modify"))
+                || (access != "read_only" && access != "read_write"))
             {
                 throw std::runtime_error("sandbox registry state entry is incomplete");
             }

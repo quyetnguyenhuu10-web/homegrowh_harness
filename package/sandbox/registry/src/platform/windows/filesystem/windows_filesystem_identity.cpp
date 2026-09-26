@@ -218,7 +218,9 @@ namespace sandbox::detail::filesystem::windows
             material.push_back('\n');
             material += utf8(uppercase_path(canonical_path));
             material.push_back('\n');
-            material += permission_name(access);
+            material += access == permission::read_write
+                ? "read_modify"
+                : permission_name(access);
             return std::wstring(capability_signature)
                 + L"Filesystem"
                 + hex(sha256(material));
@@ -317,8 +319,8 @@ namespace sandbox::detail::filesystem::windows
         {
         case permission::read_only:
             return "read_only";
-        case permission::read_modify:
-            return "read_modify";
+        case permission::read_write:
+            return "read_write";
         }
         throw std::invalid_argument("unknown sandbox permission");
     }

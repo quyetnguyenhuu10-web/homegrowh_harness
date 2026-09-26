@@ -1,8 +1,6 @@
-cmake_minimum_required(VERSION 3.20)
-
-project(events LANGUAGES CXX)
-
-find_package(SQLite3 REQUIRED)
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    message(FATAL_ERROR "Configure from the repository root")
+endif()
 
 add_library(events
     src/events/events.h

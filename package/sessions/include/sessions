@@ -1,0 +1,22 @@
+#pragma once
+
+#include <filesystem>
+#include <string>
+
+#include <nlohmann/json_fwd.hpp>
+
+#include <loop/loop.h>
+#include <session/session.h>
+#include <session/request.h>
+#include <session/response.h>
+#include <session/tool.h>
+
+namespace sessions
+{
+    nlohmann::json convert_history(
+        const std::filesystem::path& database_path,
+        const std::string& session_id);
+
+    nlohmann::json convert_all_history(
+        const std::filesystem::path& database_path);
+}

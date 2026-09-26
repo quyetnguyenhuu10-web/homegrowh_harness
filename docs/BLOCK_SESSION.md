@@ -1,175 +1,454 @@
 # BLOCK SESSION
 
-## 1. Public API
+## 1. Public boundary
 
-`@hh/session` là public boundary duy nhất.
+Session runtime hiện tại là C++ package package/sessions.
 
-```ts
-import * as session from "@hh/session";
-```
+Public header:
 
-Runtime chỉ có:
+~~~cpp
+#include <sessions>
+~~~
 
-```ts
-session.send(target, prompt, options?)
-session.cancel(sessionId)
-session.active()
-session.subscribe(listener)
-session.close()
-```
+Source được chia theo trách nhiệm, không gom implementation vào `src/loop`:
 
-Không có deep import public.
+~~~text
+src/
+├─ context/         context estimate, usage accounting, threshold comparison
+├─ convert_history/ history conversion theo provider
+├─ loop/            optional full-loop driver
+├─ request/         provider request adapter + request turn/EventPort bridge
+├─ response/        SSE response projection + reasoning extraction
+├─ session/         Session ownership, lifecycle state, stage APIs, credential owner
+├─ stream/          StreamType + StreamCallback contract
+└─ tool/            tool-call preparation/canonicalization/execution adapter
+~~~
 
-## 2. Send
+`src/loop` không sở hữu config/context/credential/response/tool logic. Nó chỉ ghép các stage API thành chế độ chạy tự động.
 
-```ts
-const sessionId = await session.send(
+Public surface chính:
+
+~~~text
+sessions::register_session(...)
+sessions::declare_request(...) / sessions::run_request(...)
+sessions::declare_response(...) / sessions::run_response(...)
+sessions::declare_tool(...) / sessions::run_tool(...)
+sessions::close_session(...)
+sessions::loop(...)
+sessions::convert_history(...)
+sessions::convert_all_history(...)
+~~~
+
+Không còn public TypeScript API session.send/cancel/active/subscribe/close trong package hiện tại.
+
+`Session` giữ toàn bộ state xuyên suốt lifecycle. Mỗi stage được khai báo riêng và chỉ chạy khi caller gọi hàm `run_*` tương ứng. Khoảng giữa `declare_*` và `run_*` là điểm chèn tự nhiên cho CLI/UI/approval/debug.
+
+`sessions::request(...)` không còn nằm trên umbrella public surface; request transport là implementation của request stage.
+
+## 2. Stage API
+
+State machine public:
+
+~~~text
+request -> response -> finished
+                 \-> tool -> tool -> ... -> request
+~~~
+
+Ba stage có type riêng:
+
+~~~cpp
+RequestStage  declare_request(Session&);
+void          run_request(Session&, RequestStage&&);
+
+ResponseStage declare_response(Session&);
+void          run_response(Session&, ResponseStage&&);
+
+ToolStage     declare_tool(Session&);
+void          run_tool(Session&, ToolStage&&);
+~~~
+
+`declare_request()` chỉ tính context/compact và mô tả request sắp chạy. `run_request()` mới gọi Provider.
+
+`declare_response()` chỉ inspect pending TurnResult. `run_response()` mới commit history/usage và quyết định finished hay tool.
+
+`declare_tool()` chỉ chuẩn hóa một tool call và tạo metadata cho caller inspect. Nó không emit tool event, không consume refresh flag và không gọi runtime. `run_tool()` mới execute đúng một tool.
+
+Mỗi declaration mang generation + token. Declaration mới làm declaration cũ stale; stage đã run không thể reuse.
+
+## 3. Optional full loop
+
+~~~cpp
+sessions::LoopResult sessions::loop(
+    sessions::SessionConfig&& config);
+~~~
+
+LoopResult:
+
+~~~cpp
+struct LoopResult {
+    nlohmann::json history;
+    provider::RequestUsage usage;
+};
+~~~
+
+Input invariant:
+
+- history phải là array;
+- session_current phải là object có messages array không rỗng;
+- session_current không được chứa tools;
+- tool_definitions phải là array;
+- model_id, endpoint và API key không được rỗng;
+- context_limit phải lớn hơn 0;
+- workspace_path được tool runtime yêu cầu là directory tồn tại và canonical được.
+
+`src/loop/full_loop.cpp` chỉ là automatic driver ghép đúng ba cặp API stage. Nó không chứa một thuật toán orchestration thứ hai.
+
+~~~text
+register_session
+  ↓
+while !finished
+  request  -> declare_request  -> run_request
+  response -> declare_response -> run_response
+  tool     -> declare_tool     -> run_tool
+  ↓
+close_session
+~~~
+
+## 4. Vòng đời orchestration
+
+Một `Session` giữ toàn bộ agent/tool cycle trong RAM:
+
+~~~text
+history + session_current
+  ↓
+declare_request: context facts + threshold comparison
+  ↓
+run_request: request turn
+  ↓
+declare/run_response: assistant response commit
+  ├─ không có tool_calls -> return LoopResult
+  └─ có tool_calls
+       ↓
+     declare/run_tool từng call
+       ↓
+     session_current = tool-result messages
+       ↓
+     request turn tiếp theo
+~~~
+
+Sau mỗi provider turn:
+
+~~~text
+history = messages thực tế của request
+history.push_back(assistant)
+~~~
+
+Vì vậy request sau tool result mang theo assistant của request trước, bao gồm reasoning_content và tool_calls đã dựng được, rồi thêm tool-result messages của cycle mới.
+
+Sessions không duy trì một database-backed request state map trong runtime hiện tại. Persistence ra SQLite không nằm trong stage API.
+
+## 5. Context và compaction
+
+Sessions so sánh usage với `compact_threshold` do caller truyền; nó không sở hữu
+policy phần trăm cố định.
+
+Cold start:
+
+~~~text
+usage_checkpoint =
+    estimate(history)
+    + estimate(tool_definitions)
+~~~
+
+Mỗi vòng:
+
+~~~text
+total_usage =
+    usage_checkpoint
+    + estimate(session_current)
+~~~
+
+Decision:
+
+~~~text
+total_usage > compact_threshold -> compact
+~~~
+
+Không có hardcoded safety policy 95%. `RequestStage` expose `context_usage()` và
+`context_limit()` trước khi request chạy, nên caller có thể tự chèn approval,
+reject hoặc policy khác giữa `declare_request()` và `run_request()`.
+
+Sau provider response đầu tiên, usage_checkpoint chuyển sang usage thật của request vừa hoàn tất.
+
+Sessions yêu cầu usage thật sau mỗi request. UsageState::unavailable ở vị trí này là lỗi.
+
+Context usage theo provider:
+
+~~~text
+OpenAI   -> prompt_tokens + completion_tokens
+DeepSeek -> cache_hit + cache_miss + completion_tokens
+Bonsai   -> cache_n + prompt_n + predicted_n
+~~~
+
+`provider`, `endpoint`, `model_id`, `context_limit`, `compact_threshold`,
+`tool_result_timeout_ms`, `session_timeout_ms` và `compaction_prompt` đều được
+caller truyền qua `SessionConfig`. Sessions không đọc `catalog.json` và không tự
+đọc compaction prompt từ file.
+
+Timeout config dùng milliseconds. Public type là `int`: `-1` nghĩa là max,
+số dương là hữu hạn, còn `0` hoặc số nhỏ hơn `-1` là input lỗi. Sau validation,
+Sessions normalize sang `std::uint32_t`, nên runtime bên trong không giữ giá trị
+âm.
+
+## 6. Request turn
+
+run_turn() tạo:
+
+~~~text
+EventPort registration theo stream_id
+Provider EventSink adapter cho final request
+Provider EventSink adapter cho summary nếu cần
+ResponseBuilder
+~~~
+
+Request thật chạy trên thread riêng. Provider chỉ gọi callback với từng raw SSE event và không biết EventPort tồn tại.
+
+Callback adapter ở Sessions phát các event `data`, `finished`, `failed` vào EventPort. Thread orchestration block trên `event_port::Read`. Ngay sau mỗi Read, nếu caller truyền `SessionConfig::event_log`, Sessions gọi observer đó với `const event_port::Event&`, rồi mới đưa raw SSE data tương ứng vào ResponseBuilder. Caller không sở hữu Registration và không cần tự Register/Read/Close. Registration nội bộ được tạo trước khi request thread chạy nên event đầu tiên không bị bỏ lỡ.
+
+EventPort dùng single-slot backpressure cho registration này: nếu event trước chưa được orchestration đọc thì callback của Provider block tại Emit; do đó Provider không cần queue/buffer transport riêng mà stream vẫn giữ đúng nhịp consumer.
+
+`event_log` nằm trên cùng execution path sau Read. Vì vậy logger chậm cũng làm chậm việc consume event tiếp theo thay vì biến logging thành fire-and-forget; event quan sát được là chính object EventPort mà turn vừa đọc, không phải payload được serialize/copy lại.
+
+Nếu compact=true và history không rỗng:
+
+~~~text
+summary_start
+summary_reasoning / summary_content
+summary_end
+final reasoning / content
+~~~
+
+Provider giữ `HttpError` như request error bình thường và không biết EventPort. Sessions không parse raw SSE để đoán lỗi HTTP; nó bắt trực tiếp `provider::HttpError`, đọc các field Provider đã điền rồi emit `EventPort` event `http_error` với `Level::error`, phase summary/request và status_code/status_line/reason/body. Consumer chỉ đọc event `http_error` và forward payload ra `StreamType::http_error`, không phân tích lại nội dung lỗi; exception gốc vẫn được propagate sau khi request thread kết thúc.
+
+Các `std::exception` khác từ Provider, bao gồm transport/network error hiện được
+Provider ném dưới dạng `std::runtime_error`, không bị Sessions đổi sang một error
+type mới. Sessions emit EventPort event `failed` với `Level::error`, giữ nguyên
+`error.what()` trong `data.raw`, rồi vẫn propagate chính exception gốc sau khi
+request thread kết thúc. Caller tự quyết định cách phân loại/hiển thị `raw`.
+
+## 7. Assistant response
+
+ResponseBuilder dựng một assistant message từ stream:
+
+~~~text
+role
+content
+reasoning_content
+tool_calls
+~~~
+
+Chỉ choices[0] được project vào linear history.
+
+Reasoning:
+
+- DeepSeek: đọc reasoning_content;
+- Bonsai: đọc reasoning_content;
+- OpenAI Chat Completions: không expose hidden reasoning text nên parser không tự tạo reasoning.
+
+Tool-call arguments dạng string được nối qua các delta. Nếu representation đổi giữa stream thì request lỗi thay vì đoán.
+
+## 8. Tool stage
+
+Nếu assistant có tool_calls, Sessions xử lý tuần tự từng call, nhưng mỗi call là một stage riêng.
+
+`declare_tool()`:
+
+- tìm definition theo function name;
+- chuẩn hóa id/name/arguments;
+- trả `ToolStage` để CLI/UI inspect;
+- không emit `tool_call`;
+- không chạy runtime;
+- không consume `refresh_pending`.
+
+`run_tool()`:
+
+- phát StreamType::tool_call;
+- call sai schema tạo tool-result lỗi thay vì chạy runtime;
+- call hợp lệ đi vào tool_runtime::execute(...) với timeout chờ tool result do
+  caller cấu hình;
+- runtime exception được đổi thành tool_execution_error;
+- phát StreamType::tool_result;
+- thay assistant.tool_calls bằng canonical calls sau tool cuối cùng, trước request tiếp theo.
+
+Tool results của một cycle trở thành:
+
+~~~json
+{
+  "messages": [
+    { "role": "tool", "tool_call_id": "...", "content": "..." }
+  ]
+}
+~~~
+
+và được dùng làm session_current cho vòng kế tiếp.
+
+Session timeout là watchdog thuộc `SessionData`, không phải polling ở stage
+boundary. Watchdog bắt đầu cùng Session; nếu deadline hết trước khi lifecycle
+được đóng, nó gọi `std::abort()` để hard-stop process Session hiện tại. Vì mỗi
+Session chạy trong một process riêng, request Provider, EventPort callback hoặc
+tool orchestration có đang block cũng bị OS thu hồi cùng process.
+
+State `finished` chưa cancel watchdog. Timeout chỉ được cancel sau cleanup trong
+`fail_session()` hoặc sau credential cleanup thành công trong `close_session()`;
+như vậy cleanup bị kẹt vẫn nằm dưới session timeout.
+
+## 9. Workspace refresh
+
+ToolCallHandler giữ refresh_pending từ refresh_workspace.
+
+Chỉ call hợp lệ đầu tiên thực sự đi tới runtime consume cờ này:
+
+~~~cpp
+const bool refresh = std::exchange(refresh_pending_, false);
+~~~
+
+Call không có definition hoặc arguments không hợp lệ không consume refresh.
+
+Sau lần runtime đầu tiên, mọi tool execution còn lại trong cùng Session dùng refresh=false.
+
+## 10. Credential ownership
+
+register_session() nhận ownership raw API key qua SessionConfig.
+
+Đầu vòng đời:
+
+~~~text
+raw key
+  ↓
+Secrets::set_session(random session signature)
+  ↓
+wipe raw string
+~~~
+
+Signature có dạng:
+
+~~~text
+HomegrowphHarness/Session/<random hex>
+~~~
+
+Mỗi request resolve key thành SecureString rồi chỉ truyền view xuống Provider.
+
+Khi loop kết thúc, credential session được erase. Nếu đang xử lý primary exception, cleanup failure được giữ như secondary error và không được phép thay thế lỗi chính.
+
+## 10. Stream contract
+
+StreamType hiện có:
+
+~~~text
+reasoning
+content
+summary_start
+summary_reasoning
+summary_content
+summary_end
+http_error
+secondary_error
+tool_call
+tool_result
+context_usage
+~~~
+
+context_usage mang JSON:
+
+~~~json
+{
+  "used": 123,
+  "limit": 456
+}
+~~~
+
+Session stream là observer callback; history hoàn chỉnh vẫn được trả bằng LoopResult.
+
+## 11. History projection từ event database
+
+Sessions còn công khai:
+
+~~~cpp
+sessions::convert_history(database_path, session_id);
+sessions::convert_all_history(database_path);
+~~~
+
+Hai API này đọc package/events database và dựng lại message history theo provider.
+
+convert_history lọc một session_id.
+
+convert_all_history đọc toàn bộ row_position order rồi trả các nhóm:
+
+~~~json
+[
   {
-    scope: {
-      kind: "repository",
-      repositoryPath: "D:\\homegrowh_harness",
-    },
-    conversationId: "...",
-  },
-  "prompt",
-);
-```
+    "session_id": "...",
+    "history": ["..."]
+  }
+]
+~~~
 
-Session tự lấy model đang chọn từ `@hh/provider`.
+Projection hỗ trợ openai, deepseek và bonsai; provider khác là lỗi.
 
-Caller không truyền:
+## 12. CLI
 
-```text
-provider
-model
-apiKey
-baseUrl
-tool executor
-context builder
-database writer
-compaction policy
-```
+Executable hiện tại:
 
-## 3. Orchestration
+~~~text
+sessions_loop.exe <session_current> <id> <workspace_path>
+sessions_loop.exe <history> <session_current> <id> <workspace_path>
+~~~
 
-Quy ước:
+history và session_current có thể là inline JSON hoặc path tới JSON file.
 
-```text
-Session = từ lúc user nhấn Send đến khi toàn bộ agent/tool loop kết thúc.
-Request = đúng một lần gọi Provider.
-```
+Environment:
 
-Mọi Request thường, kể cả Request đầu Session và Request sau tool result, đều đi
-chung đúng một preflight runtime. Không có pipeline riêng theo vị trí Request
-trong Session.
+~~~text
+HH_API_KEY=<raw api key>
+HH_PROVIDER=<openai|deepseek|bonsai>
+HH_ENDPOINT=<request endpoint>
+HH_CONTEXT_LIMIT=<tokens>
+HH_COMPACT_THRESHOLD=<tokens>
+PROVIDER_COMPACTION_PROMPT=<prompt file path>
+HH_REFRESH_WORKSPACE=<true|false>     default false
+TOOLS_DEFINITIONS=<optional path>
+~~~
 
-Session trực tiếp phối hợp public API của:
+Nếu TOOLS_DEFINITIONS không set, CLI tìm tool_definitions.json từ working directory đi lên.
 
-```text
-@hh/database
-@hh/provider
-@hh/compaction
-@hh/tools
-```
+## 13. Boundary
 
-Flow của mọi Request theo đúng sơ đồ `docs/draw_architech/model_architech.png`:
+Sessions hiện sở hữu:
 
-```text
-Session nhận currentRequest
-    ↓
-đọc một snapshot: requestsBeforeCurrent + requestsCurrent
-    ↓
-build Usage Context trong RAM
-    ↓
-tính token usage
-    ↓
-Compaction tự quyết định có cần nén hay không
-    ↓
-history sau compaction (nếu có)
-    ↓
-hard-limit check
-    ↓
-PASS
-    ↓
-commit pending compaction/currentRequest/contextUsage vào DB
-    ↓
-Provider.call
-    ↓
-persist stream / tool result
-    ↓
-nếu có Request tiếp theo → quay lại đúng pipeline trên
-```
+~~~text
+request/tool loop
+context usage accounting + caller-provided threshold comparison
+assistant stream projection
+Provider-to-EventPort adapter và registration lifecycle
+tool-call canonicalization
+per-loop credential lifetime
+workspace-refresh consumption
+history conversion from event rows
+~~~
 
-Trước khi `hard-limit check` PASS, preflight không được ghi row của Request hiện
-tại, không được ghi compaction row và không được cập nhật `contextUsage`.
+Sessions hiện không sở hữu:
 
-Scope context:
+~~~text
+SQLite persistence trong loop
+Electron/UI state
+selected-model UI registry
+provider/model/endpoint resolution
+context safety/approval policy
+compaction prompt loading
+transport implementation
+EventPort queue/wakeup primitive
+tool implementation
+sandbox ACL implementation
+~~~
 
-```text
-Request thường
-    = compaction boundary gần nhất + toàn bộ Session hiện tại đang diễn ra
-    + system + tool definitions
-
-Request compaction của Session N
-    = history trước Session N, bắt đầu từ bản compaction mới nhất nếu có
-    = không system
-    = không tool definitions
-    = không bất kỳ row nào của Session N
-```
-
-Nếu compaction chỉ phát sinh ở Request 2/3/... của Session N, Database vẫn đặt
-row `compaction` theo thứ tự logic ngay trước row đầu tiên của Session N. `id`
-row đã tồn tại không bị đổi; Database dùng thứ tự logic riêng để giữ boundary.
-
-Preflight được chạy lại trước provider invocation sau tool result. Mỗi lần đều
-hỏi Compaction qua public API; Session không tự quyết định ngưỡng hoặc bỏ qua
-vì đã nén một lần. History trả về (kể cả khi không nén) được ghép với nguyên
-requestsCurrent để gọi Provider. requestsCurrent chứa prompt hiện tại và mọi
-request/tool result đã hoàn tất trong Session này.
-
-Một hội thoại chỉ có một Session đang chạy. Hội thoại khác vẫn có thể chạy
-độc lập. Cancel/close hủy cùng vòng đời, bao gồm request đặc biệt của Compaction.
-
-Tool call được gom đủ stream, parse JSON rồi kiểm tra theo definition public
-của tool (required, type, enum, properties, items, additionalProperties).
-Call sai được thay bằng invalid_tool_call có ID duy nhất và arguments hợp lệ,
-sau đó tạo tool result lỗi qua cùng đường thực thi; không gọi executor gốc.
-Call hợp lệ giữ nguyên toàn bộ kết quả executor, kể cả lỗi nghiệp vụ.
-
-Reply/reasoning được append ngay từng delta. Các đoạn khác loại không bị gom
-ngược thứ tự. Tool call hoàn chỉnh và từng tool result được append tuần tự;
-chỉ sau khi kết quả đã được ghi và thông báo mới bắt đầu request tiếp theo.
-
-## 4. Database truth
-
-Session không stream content trực tiếp cho UI.
-
-Session notification chỉ báo trạng thái hoặc vị trí dữ liệu đã thay đổi:
-
-```text
-row
-session
-contextUsage
-error
-```
-
-UI nhận `rowId` rồi đọc Database để render truth.
-
-## 5. Private
-
-Không public:
-
-```text
-context projection
-system prompt
-reasoning history selection
-provider stream parser
-tool-call parser
-dispatcher
-request state map
-AbortController
-eventIndex
-tool execution routing
-```
-
-> Session chỉ sở hữu thứ tự, thời điểm và vòng đời phối hợp các block; không sở hữu implementation của các block đó.
+> Sessions là C++ orchestration state machine; Provider làm HTTP/SSE và callback raw event, EventPort cung cấp registration/read/backpressure, Tool Runtime chạy tool, Secrets giữ credential và Events chỉ được dùng khi gọi history projection.

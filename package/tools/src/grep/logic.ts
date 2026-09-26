@@ -28,8 +28,7 @@ export async function executeGrepToolCall(
   const args = requireArguments(toolCall, GREP_TOOL_NAME);
   const pattern = requireString(args.pattern, "pattern");
   const requested = resolveToolPath(context, args.path);
-  const info = await stat(requested).catch(() => null);
-  if (!info) throw new Error(`Path not found: ${requested}`);
+  const info = await stat(requested);
 
   let regex: RegExp;
   try {

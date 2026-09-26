@@ -1,115 +1,227 @@
 # BLOCK CHAT THREAD
 
-## 1. Vai trò
+## 1. Trạng thái source hiện tại
 
-`@hh/chat-thread` là UI block.
+package/chat_thread vẫn tồn tại như Electron/React UI package với tên:
 
-ChatThread không điều phối model/tool/compaction và không sở hữu dữ liệu hội thoại.
+~~~text
+@hh/chat-thread
+~~~
 
-```text
-Renderer
-   ↓ IPC bridge
-Desktop adapter
-   ├─ @hh/session
-   ├─ @hh/database
-   └─ @hh/provider
-```
+Các export khai báo trong package.json:
 
-## 2. Boundary
-
-Package export:
-
-```text
+~~~text
 @hh/chat-thread/embed
 @hh/chat-thread/desktop
 @hh/chat-thread/preload
-```
+~~~
 
-Renderer không import runtime backend block.
+Tuy nhiên ChatThread hiện chưa được nối sang core C++ mới.
 
-Chỉ `desktop/main.ts` gọi public API của Database / Provider / Session.
+Root CMake hiện tại không add package/chat_thread. package/chat_thread/package.json và desktop/main.ts vẫn tham chiếu các backend TypeScript cũ:
 
-## 3. Database truth
+~~~text
+@hh/database
+@hh/provider
+@hh/session
+~~~
 
-Session notification không mang content để renderer tin trực tiếp.
+Trong cây package hiện tại không còn package/database hoặc package/session TypeScript; package/provider hiện là C++ package. Vì vậy không được mô tả adapter này như integration đã hoàn tất với sessions_loop/core C++.
 
-```text
-Session
-   ↓ rowId + conversation
-Desktop IPC
-   ↓
-Renderer
-   ↓ query readConversationRow(...)
-Database
-   ↓
-Renderer render truth
-```
+## 2. Source architecture đang có
 
-Conversation row dùng DTO public camelCase:
+Code ChatThread hiện tại có ba lớp:
 
-```text
-sessionId
-requestId
-eventIndex
-sortOrder
-createdAt
-```
+~~~text
+React renderer
+    ↓
+preload bridge
+    ↓ IPC
+Electron desktop adapter
+    ↓
+legacy TypeScript backend API imports
+~~~
 
-Renderer merge snapshot/row mới bằng sortOrder, rồi id để phá hòa.
-Không sort chỉ bằng ID: compaction tạo ở request sau có ID lớn nhưng đứng trước
-prompt của Session. Notification kết thúc Session đi cùng hàng đợi đọc row,
-nên UI hoàn tất các row trước khi bỏ trạng thái đang chạy.
+Renderer không import trực tiếp Node/Electron backend API.
 
-Không tồn tại DTO UI riêng dùng raw SQLite column name.
+preload.ts dùng:
 
-## 4. Model
+~~~text
+contextBridge
+ipcRenderer
+~~~
 
-UI thao tác model qua desktop bridge.
+để expose ChatThreadDesktopBridge vào renderer.
 
-Desktop adapter chỉ gọi:
+## 3. Electron app shell
 
-```ts
-provider.model.list()
-provider.model.getSelected()
-provider.model.setSelected(...)
-provider.model.addCustom(...)
-provider.model.getCustom(...)
-provider.model.updateCustom(...)
-provider.model.deleteCustom(...)
-```
+desktop/app.ts hiện:
 
-ChatThread không biết credential hoặc model runtime routing.
+- gọi app.whenReady();
+- install desktop adapter;
+- tạo BrowserWindow;
+- gắn preload;
+- load CHAT_THREAD_RENDERER_URL khi có, nếu không load built renderer index;
+- xử lý activate/window-all-closed/before-quit.
 
-## 5. Request
+BrowserWindow hiện cấu hình:
 
-Renderer gửi:
+~~~text
+contextIsolation = true
+nodeIntegration   = false
+sandbox           = false
+~~~
 
-```text
-conversation target
-prompt
-reasoning-history preference
-```
+Đây là app/window lifecycle của source ChatThread hiện tại.
 
-Desktop chuyển sang:
+## 4. Desktop adapter hiện tại
 
-```ts
-session.send(target, prompt, options)
-```
+desktop/main.ts đăng ký IPC handler cho:
 
-Renderer không truyền provider/model vào Session.
+~~~text
+model registry
+selected model
+conversation list/read/create/delete
+repository list/add
+context usage
+active conversation
+send chat request
+cancel session
+active sessions
+session/provider/compaction notifications
+~~~
 
-## 6. Không thuộc ChatThread
+Nó gọi trực tiếp API TypeScript cũ:
 
-```text
-context projection
-system prompt
-token counting
-compaction
-provider invocation loop
-tool execution
-database persistence
-model runtime routing
-API key / endpoint
-```
+~~~text
+database.repository.*
+database.conversation.*
+database.contextUsage.*
+providerModel.*
+session.send(...)
+session.cancel(...)
+session.active()
+session.subscribe(...)
+~~~
 
-> ChatThread chỉ phát lệnh UI, nhận notification, query public data API và render.
+Đây là trạng thái source hiện tại của ChatThread, không phải API của core C++ mới.
+
+## 5. IPC event hiện tại
+
+Session event type=row được desktop adapter forward với:
+
+~~~text
+repositoryPath
+conversationId
+sessionId?
+requestId?
+rowPosition
+row
+~~~
+
+Tức notification hiện tại có cả row payload; tài liệu cũ nói renderer chỉ nhận rowId rồi bắt buộc query lại Database là không đúng với source này.
+
+Các event khác được forward gồm:
+
+~~~text
+session state
+context-usage updated
+compaction debug
+provider error notice
+~~~
+
+## 6. Renderer row ordering
+
+HistoryRow hiện chỉ là alias của ConversationRow từ @hh/database cũ.
+
+history_rows.ts merge row bằng:
+
+~~~text
+key = rowPosition
+sort = rowPosition tăng dần
+~~~
+
+Không còn logic sortOrder rồi id trong source hiện tại của ChatThread.
+
+## 7. Model UI hiện tại
+
+Desktop adapter vẫn gọi providerModel:
+
+~~~text
+list
+addCustom
+deleteCustom
+getCustom
+updateCustom
+getSelected
+setSelected
+~~~
+
+Đây là contract của UI source cũ. C++ package/provider hiện tại không public provider.model.* tương ứng, nên phần này đang là integration gap.
+
+## 8. Send/cancel hiện tại
+
+IPC send hiện gọi:
+
+~~~ts
+session.send(
+  conversationRef(repositoryPath, conversationId),
+  prompt,
+  { reasoningHistory }
+)
+~~~
+
+IPC cancel gọi:
+
+~~~ts
+session.cancel(sessionId)
+~~~
+
+Khi dispose desktop adapter:
+
+- unsubscribe session event;
+- remove toàn bộ IPC handlers;
+- gọi session.cancel cho các active session còn lại.
+
+Các API này thuộc backend TypeScript cũ và chưa được thay bằng process/IPC contract tới sessions_loop C++ trong code ChatThread hiện tại.
+
+## 9. Build status
+
+package/chat_thread/package.json vẫn có build:desktop/typecheck chạy:
+
+~~~text
+npm --prefix ../database run build
+npm --prefix ../provider run build
+npm --prefix ../session run build
+~~~
+
+Các path/backend assumption này không khớp package graph C++ hiện tại.
+
+Do đó:
+
+~~~text
+package/chat_thread = UI source còn tồn tại
+root CMake          = không build ChatThread
+core C++ process    = chưa được ChatThread source hiện tại launch/connect
+~~~
+
+Không nên ghi Electron main hiện đã là thin shell cho core process cho tới khi source thực sự được chuyển sang contract đó.
+
+## 10. Boundary mong muốn không được giả làm trạng thái hiện tại
+
+Core mới hiện có:
+
+~~~text
+sessions
+provider
+events
+tool_runtime
+sandbox
+secrets
+~~~
+
+Nhưng ChatThread source chưa dùng các boundary C++ này.
+
+Vì vậy BLOCK_CHAT_THREAD chỉ mô tả phần source UI hiện có và đánh dấu integration gap; không gán cho renderer/main các trách nhiệm mà code chưa triển khai.
+
+> Điểm cần cập nhật tiếp trong code ở một task khác là thay legacy TS backend adapter bằng IPC/process contract tới core C++; task tài liệu hiện tại không sửa phần đó.

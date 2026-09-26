@@ -1,13 +1,11 @@
 #include <provider>
 #include <chrono>
 #include <cstdlib>
-#include <exception>
 #include <fstream>
 #include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <thread>
 
 namespace
 {
@@ -139,7 +137,14 @@ namespace
 int main()
 {
     const std::string url = "https://trickle-crewless-smasher.ngrok-free.dev/v1/chat/completions";
-    const std::string api_key = "Bearer NgKFxGR8k3w2LtkMzgrHM04cCdgUx0EPbF4HoOGKTTw";
+    const char* raw_api_key = std::getenv("HH_API_KEY");
+    if (raw_api_key == nullptr || *raw_api_key == '\0')
+    {
+        std::cerr << "HH_API_KEY is not set\n";
+        return 2;
+    }
+
+    const std::string api_key = raw_api_key;
     const std::string model = "bonsai";
 
     const nlohmann::json messages = nlohmann::json::array({
@@ -172,105 +177,60 @@ int main()
 
     try
     {
-        provider::RawResponse raw_response;
-        provider::CompletionPort completion_port;
-        std::exception_ptr request_error;
-        std::optional<provider::RequestUsage> usage;
         std::size_t events = 0;
         std::size_t payload_bytes = 0;
         bool have_first_event = false;
         clock::time_point first_event_at{};
-
-        completion_port.register_response(&raw_response);
 
         if (!benchmark)
         {
             std::cout << "===== RESPONSE =====\n";
         }
 
-        std::thread provider_thread([&]
+        struct StreamContext
         {
-            try
-            {
-                usage = provider::request(
-                    provider::Provider::bonsai,
-                    url,
-                    api_key,
-                    body,
-                    &raw_response);
-            }
-            catch (...)
-            {
-                request_error = std::current_exception();
-            }
-        });
+            bool benchmark;
+            std::size_t* events;
+            std::size_t* payload_bytes;
+            bool* have_first_event;
+            clock::time_point* first_event_at;
+        } context{
+            benchmark,
+            &events,
+            &payload_bytes,
+            &have_first_event,
+            &first_event_at
+        };
 
-        std::thread output_thread([&]
-        {
-            bool finished = false;
-
-            while (!finished)
-            {
-                provider::Completion completion;
-
-                completion_port.wait(&completion);
-
-                if (
-                    completion.type == provider::CompletionType::finished ||
-                    completion.type == provider::CompletionType::failed)
+        provider::RequestUsage usage = provider::request(
+            provider::Provider::bonsai,
+            url,
+            api_key,
+            body,
+            provider::EventSink{
+                &context,
+                [](void* raw_context, std::string&& event)
                 {
-                    if (completion.type == provider::CompletionType::failed)
+                    auto* context = static_cast<StreamContext*>(raw_context);
+
+                    if (!*context->have_first_event)
                     {
-                        std::cerr << "provider error="
-                                  << completion.error
-                                  << '\n';
+                        *context->first_event_at = clock::now();
+                        *context->have_first_event = true;
                     }
 
-                    finished = true;
-                    continue;
-                }
+                    ++*context->events;
+                    *context->payload_bytes += event.size();
 
-                if (!have_first_event)
-                {
-                    first_event_at = clock::now();
-                    have_first_event = true;
-                }
-
-                provider::read(
-                    completion.response,
-                    [&](std::string_view buffer)
+                    if (!context->benchmark)
                     {
-                        const std::string_view delta = buffer.substr(
-                            completion.offset,
-                            completion.bytes);
+                        stream_text(event);
+                    }
+                },
+                nullptr
+            });
 
-                        ++events;
-                        payload_bytes += delta.size();
-
-                        if (benchmark)
-                        {
-                            return;
-                        }
-
-                        stream_text(delta);
-                    });
-            }
-        });
-
-        provider_thread.join();
-        output_thread.join();
-
-        if (request_error)
-        {
-            std::rethrow_exception(request_error);
-        }
-
-        if (!usage.has_value())
-        {
-            throw std::runtime_error("request completed without usage");
-        }
-
-        print_usage(*usage);
+        print_usage(usage);
 
         if (benchmark)
         {

@@ -1,104 +1,68 @@
 #include "compaction.h"
 #include "buld_transcript.h"
-#include "request/catalog.h"
 
-#include <exception>
-#include <fstream>
-#include <iterator>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 
 namespace provider
 {
     namespace
     {
-        struct CompactionModel
+        void append_messages(
+            nlohmann::json& destination,
+            const nlohmann::json& source)
         {
-            Provider provider;
-            std::string endpoint;
-            std::string api_key;
-        };
-
-        CompactionModel compaction_model(const std::string& model_id)
-        {
-            std::ifstream file(catalog_path());
-
-            if (!file)
+            if (source.empty())
             {
-                throw std::runtime_error("cannot open catalog.json");
+                return;
             }
 
-            nlohmann::json catalog;
-            file >> catalog;
-
-            const nlohmann::json* selected = nullptr;
-            const nlohmann::json* selected_provider = nullptr;
-            std::string selected_provider_name;
-
-            for (const auto& [provider_name, provider_entry] : catalog.items())
+            if (source.is_array())
             {
-                if (!provider_entry.is_object())
+                for (const nlohmann::json& message : source)
                 {
-                    throw std::runtime_error(
-                        "catalog provider entry is not an object");
+                    destination.push_back(message);
                 }
-
-                const nlohmann::json& models = provider_entry.at("models");
-
-                if (!models.is_array())
-                {
-                    throw std::runtime_error(
-                        "catalog provider models is not an array");
-                }
-
-                for (const nlohmann::json& model : models)
-                {
-                    if (model.at("id").get<std::string>() != model_id)
-                    {
-                        continue;
-                    }
-
-                    if (selected != nullptr)
-                    {
-                        throw std::runtime_error(
-                            "duplicate model id in catalog: " + model_id);
-                    }
-
-                    selected = &model;
-                    selected_provider = &provider_entry;
-                    selected_provider_name = provider_name;
-                }
+                return;
             }
 
-            if (selected == nullptr || selected_provider == nullptr)
-            {
-                throw std::runtime_error(
-                    "model id not found in catalog: " + model_id);
-            }
-
-            return CompactionModel{
-                provider_from_name(selected_provider_name),
-                selected_provider->at("endpoint").get<std::string>(),
-                selected_provider->at("api_key").get<std::string>()};
+            destination.push_back(source);
         }
 
-        std::string compaction_prompt()
+        struct CurrentSession
         {
-            std::ifstream file("src/compaction/COMPACTION.md");
+            const nlohmann::json* messages = nullptr;
+        };
 
-            if (!file)
+        CurrentSession current_session(const nlohmann::json& session_current)
+        {
+            if (session_current.empty())
             {
-                throw std::runtime_error(
-                    "cannot open src/compaction/COMPACTION.md");
+                return {};
             }
 
-            return std::string(
-                std::istreambuf_iterator<char>(file),
-                std::istreambuf_iterator<char>());
+            if (!session_current.is_object())
+            {
+                throw std::invalid_argument(
+                    "session_current must be an object");
+            }
+
+            CurrentSession result;
+
+            const auto messages = session_current.find("messages");
+            if (messages != session_current.end())
+            {
+                if (!messages->is_array())
+                {
+                    throw std::invalid_argument(
+                        "session_current.messages must be an array");
+                }
+                result.messages = &*messages;
+            }
+
+            return result;
         }
 
         void append_summary_text(
@@ -140,43 +104,131 @@ namespace provider
             }
         }
 
+        struct SummaryDispatch
+        {
+            std::string* summary = nullptr;
+            EventSink downstream;
+        };
+
+        void receive_summary_event(void* context, std::string&& event)
+        {
+            auto* dispatch = static_cast<SummaryDispatch*>(context);
+            append_summary_text(event, dispatch->summary);
+
+            if (dispatch->downstream.on_event != nullptr)
+            {
+                dispatch->downstream.on_event(
+                    dispatch->downstream.context,
+                    std::move(event));
+            }
+        }
+
+        void finish_summary(void* context)
+        {
+            auto* dispatch = static_cast<SummaryDispatch*>(context);
+
+            if (dispatch->downstream.on_finished != nullptr)
+            {
+                dispatch->downstream.on_finished(
+                    dispatch->downstream.context);
+            }
+        }
+
     }
 
     CompactionResult compaction(
+        Provider selected_provider,
+        const std::string& endpoint,
         const std::string& model_id,
-        const nlohmann::json& messages,
-        RawResponse* raw_response,
+        std::string_view api_key,
+        std::string_view compaction_prompt,
+        const nlohmann::json& session_current,
+        const nlohmann::json& tool_definitions,
+        const nlohmann::json& history,
+        EventSink response_sink,
         bool compact,
-        const nlohmann::json& current_sessions,
-        const nlohmann::json& tools)
+        EventSink summary_sink,
+        CompactionResponse* compaction_response)
     {
-        const CompactionModel model = compaction_model(model_id);
-        if (!compact)
+        if (compaction_response != nullptr)
         {
+            compaction_response->usage = UsageState::unavailable;
+        }
+
+        if (!history.empty() && !history.is_array())
+        {
+            throw std::invalid_argument("history must be a message array");
+        }
+        if (!tool_definitions.empty() && !tool_definitions.is_array())
+        {
+            throw std::invalid_argument("tool_definitions must be an array");
+        }
+        if (endpoint.empty())
+        {
+            throw std::invalid_argument("endpoint must not be empty");
+        }
+        if (model_id.empty())
+        {
+            throw std::invalid_argument("model_id must not be empty");
+        }
+
+        const CurrentSession current = current_session(session_current);
+        const bool has_tool_definitions = !tool_definitions.empty();
+        const bool has_current_messages =
+            current.messages != nullptr && !current.messages->empty();
+
+        if (
+            compact &&
+            !history.empty() &&
+            !has_current_messages &&
+            !has_tool_definitions)
+        {
+            throw std::invalid_argument(
+                "compact requires session_current messages or tool_definitions");
+        }
+
+        if (!compact || history.empty())
+        {
+            nlohmann::json request_history = nlohmann::json::array();
+            if (!history.empty())
+            {
+                append_messages(request_history, history);
+            }
+            if (current.messages != nullptr)
+            {
+                append_messages(request_history, *current.messages);
+            }
+
             nlohmann::json body = {
                 {"model", model_id},
-                {"messages", messages},
+                {"messages", std::move(request_history)},
                 {"stream", true}
             };
 
-            if (!tools.empty())
+            if (has_tool_definitions)
             {
-                body["tools"] = tools;
+                body["tools"] = tool_definitions;
             }
 
+            RequestUsage usage = request(
+                selected_provider,
+                endpoint,
+                api_key,
+                body,
+                response_sink);
+
             return CompactionResult{
-                messages,
-                request(
-                    model.provider,
-                    model.endpoint,
-                    model.api_key,
-                    body,
-                    raw_response)};
+                std::move(body.at("messages")),
+                std::move(usage)};
         }
 
-        nlohmann::json transcript = build_transcript(messages);
-        transcript.at("content").get_ref<std::string&>() +=
-            "\n\n" + compaction_prompt();
+        nlohmann::json transcript = build_transcript(history);
+        std::string& transcript_content =
+            transcript.at("content").get_ref<std::string&>();
+        transcript_content += "\n\n";
+        transcript_content.append(
+            compaction_prompt.data(),
+            compaction_prompt.size());
 
         nlohmann::json summary_body = {
             {"model", model_id},
@@ -184,100 +236,32 @@ namespace provider
             {"stream", true}
         };
 
-        const auto summary_from_response = [](const RawResponse& response)
-        {
-            std::string summary;
-            std::size_t offset = 0;
-
-            for (const std::size_t bytes : response.event_sizes)
-            {
-                append_summary_text(
-                    std::string_view(response.buffer).substr(offset, bytes),
-                    &summary);
-                offset += bytes;
-            }
-
-            return summary;
+        std::string summary;
+        SummaryDispatch summary_dispatch{
+            &summary,
+            summary_sink
         };
 
-        RequestUsage usage = UsageState::unavailable;
-        std::string summary;
-        const bool has_current_sessions = !current_sessions.empty();
+        CompactionResponse local_compaction_response;
+        CompactionResponse& compacted = compaction_response == nullptr
+            ? local_compaction_response
+            : *compaction_response;
 
-        if (raw_response != nullptr && !has_current_sessions)
-        {
-            usage = request(
-                model.provider,
-                model.endpoint,
-                model.api_key,
-                summary_body,
-                raw_response);
-
-            summary = summary_from_response(*raw_response);
-        }
-        else
-        {
-            RawResponse response;
-            CompletionPort completion_port;
-            std::optional<RequestUsage> internal_usage;
-            std::exception_ptr request_error;
-
-            completion_port.register_response(&response);
-
-            std::thread request_thread([&]
-            {
-                try
-                {
-                    internal_usage = request(
-                        model.provider,
-                        model.endpoint,
-                        model.api_key,
-                        summary_body,
-                        &response);
-                }
-                catch (...)
-                {
-                    request_error = std::current_exception();
-                }
+        compacted.usage = request(
+            selected_provider,
+            endpoint,
+            api_key,
+            summary_body,
+            EventSink{
+                &summary_dispatch,
+                &receive_summary_event,
+                &finish_summary
             });
 
-            bool finished = false;
-
-            while (!finished)
-            {
-                Completion completion;
-                completion_port.wait(&completion);
-
-                if (
-                    completion.type == CompletionType::finished ||
-                    completion.type == CompletionType::failed)
-                {
-                    finished = true;
-                    continue;
-                }
-
-                read(
-                    completion.response,
-                    [](std::string_view)
-                    {
-                    });
-            }
-
-            request_thread.join();
-
-            if (request_error != nullptr)
-            {
-                std::rethrow_exception(request_error);
-            }
-
-            if (!internal_usage.has_value())
-            {
-                throw std::runtime_error(
-                    "compaction request completed without usage");
-            }
-
-            usage = std::move(*internal_usage);
-            summary = summary_from_response(response);
+        if (std::holds_alternative<UsageState>(compacted.usage))
+        {
+            throw std::runtime_error(
+                "compaction request completed without usage");
         }
 
         if (summary.empty())
@@ -287,42 +271,31 @@ namespace provider
 
         nlohmann::json compacted_messages = nlohmann::json::array();
         compacted_messages.push_back({
-            {"role", "assistant"},
+            {"role", "user"},
             {"content", std::move(summary)}
         });
-
-        if (!current_sessions.empty() && current_sessions.is_array())
+        if (current.messages != nullptr)
         {
-            for (const nlohmann::json& session : current_sessions)
-            {
-                compacted_messages.push_back(session);
-            }
-        }
-        else if (!current_sessions.empty())
-        {
-            compacted_messages.push_back(current_sessions);
+            append_messages(compacted_messages, *current.messages);
         }
 
-        if (has_current_sessions)
+        nlohmann::json request_body = {
+            {"model", model_id},
+            {"messages", compacted_messages},
+            {"stream", true}
+        };
+
+        if (has_tool_definitions)
         {
-            nlohmann::json request_body = {
-                {"model", model_id},
-                {"messages", compacted_messages},
-                {"stream", true}
-            };
-
-            if (!tools.empty())
-            {
-                request_body["tools"] = tools;
-            }
-
-            usage = request(
-                model.provider,
-                model.endpoint,
-                model.api_key,
-                request_body,
-                raw_response);
+            request_body["tools"] = tool_definitions;
         }
+
+        RequestUsage usage = request(
+            selected_provider,
+            endpoint,
+            api_key,
+            request_body,
+            response_sink);
 
         return CompactionResult{
             std::move(compacted_messages),

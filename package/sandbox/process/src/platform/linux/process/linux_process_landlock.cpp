@@ -102,7 +102,7 @@ namespace sandbox::detail::process::linux
             return access;
         }
 
-        std::uint64_t read_modify_access(
+        std::uint64_t read_write_access(
             std::uint64_t handled,
             bool directory) noexcept
         {
@@ -216,7 +216,7 @@ namespace sandbox::detail::process::linux
             const bool directory = is_directory(registered.path);
             const std::uint64_t access = registered.access == permission::read_only
                 ? read_only_access(handled, directory)
-                : read_modify_access(handled, directory);
+                : read_write_access(handled, directory);
             if (!add_path_rule(
                     ruleset_fd,
                     registered.path,
