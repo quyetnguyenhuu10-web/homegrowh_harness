@@ -5,6 +5,7 @@
 
 #include <context_usage>
 
+#include <exception>
 #include <utility>
 
 namespace sessions
@@ -81,7 +82,9 @@ namespace sessions
         }
         catch (...)
         {
-            detail::fail_session(data);
+            detail::fail_session(data, std::current_exception());
+            if (data.failure.has_value())
+                detail::emit_session_failure(*data.failure, data.event_log);
             throw;
         }
     }
@@ -114,7 +117,9 @@ namespace sessions
         }
         catch (...)
         {
-            detail::fail_session(data);
+            detail::fail_session(data, std::current_exception());
+            if (data.failure.has_value())
+                detail::emit_session_failure(*data.failure, data.event_log);
             throw;
         }
     }

@@ -128,10 +128,17 @@ namespace sessions::detail
         data.state = next_state;
     }
 
-    void fail_session(SessionData& data) noexcept
+    void fail_session(
+        SessionData& data,
+        std::exception_ptr exception) noexcept
     {
         if (data.state == SessionState::closed)
             return;
+
+        data.failure = SessionFailure{
+            std::move(exception),
+            data.state
+        };
 
         data.credential.close_after_primary_error();
         emit_secondary_cleanup_error(data);

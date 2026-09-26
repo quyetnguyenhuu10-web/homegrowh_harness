@@ -91,6 +91,69 @@ namespace sessions::detail
                 &finish_provider_stream
             };
         }
+
+        const char* session_failure_phase(SessionState state) noexcept
+        {
+            switch (state)
+            {
+                case SessionState::request: return "request";
+                case SessionState::response: return "response";
+                case SessionState::tool: return "tool";
+                case SessionState::finished: return "finished";
+                case SessionState::closed: return "closed";
+            }
+            return "unknown";
+        }
+    }
+
+    void emit_session_failure(
+        const SessionFailure& failure,
+        const EventLogCallback& event_log) noexcept
+    {
+        try
+        {
+            nlohmann::json raw = nullptr;
+
+            if (failure.exception != nullptr)
+            {
+                try
+                {
+                    std::rethrow_exception(failure.exception);
+                }
+                catch (const std::exception& error)
+                {
+                    raw = error.what();
+                }
+                catch (...)
+                {
+                }
+            }
+
+            event_port::EventPtr event = event_port::port(event_port::Emit{
+                "sessions",
+                event_port::Level::error,
+                "failed",
+                {},
+                nlohmann::json{
+                    {"phase", session_failure_phase(failure.state)},
+                    {"raw", std::move(raw)}
+                }
+            });
+
+            if (event_log && event != nullptr)
+            {
+                try
+                {
+                    event_log(*event);
+                }
+                catch (...)
+                {
+                }
+            }
+        }
+        catch (...)
+        {
+        }
     }
 
     TurnResult run_turn(

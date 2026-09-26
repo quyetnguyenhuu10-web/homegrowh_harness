@@ -236,6 +236,14 @@ type mới. Sessions emit EventPort event `failed` với `Level::error`, giữ n
 `error.what()` trong `data.raw`, rồi vẫn propagate chính exception gốc sau khi
 request thread kết thúc. Caller tự quyết định cách phân loại/hiển thị `raw`.
 
+Khi một stage làm Session fail, `fail_session()` không emit EventPort. Nó nhận
+`std::exception_ptr`, lưu exception gốc cùng state nơi lỗi xảy ra vào
+`SessionData::failure`, rồi thực hiện lifecycle cleanup/close. Tầng `turn` sở hữu
+việc publish: `emit_session_failure()` đọc `SessionFailure` và emit
+`package="sessions"`, `type="failed"`, `Level::error` với `phase` và `raw`.
+Event trả về từ `EventPort::Emit` được chuyển tiếp cho `event_log`; lỗi của
+observer không được phép thay thế exception gốc đang propagate.
+
 ## 7. Assistant response
 
 ResponseBuilder dựng một assistant message từ stream:

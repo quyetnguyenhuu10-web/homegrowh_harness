@@ -30,6 +30,7 @@ add_library(sessions
     src/session/response.h
     src/session/session_state.cpp
     src/session/session_state.h
+    src/session/session_failure.h
     src/session/session_timeout.cpp
     src/session/session_timeout.h
     src/session/session.cpp

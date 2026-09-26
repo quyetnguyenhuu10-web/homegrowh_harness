@@ -4,6 +4,7 @@
 #include <session/session_state.h>
 #include <tool/tool_call.h>
 
+#include <exception>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -75,7 +76,9 @@ namespace sessions
         }
         catch (...)
         {
-            detail::fail_session(data);
+            detail::fail_session(data, std::current_exception());
+            if (data.failure.has_value())
+                detail::emit_session_failure(*data.failure, data.event_log);
             throw;
         }
     }
@@ -116,7 +119,9 @@ namespace sessions
         }
         catch (...)
         {
-            detail::fail_session(data);
+            detail::fail_session(data, std::current_exception());
+            if (data.failure.has_value())
+                detail::emit_session_failure(*data.failure, data.event_log);
             throw;
         }
     }

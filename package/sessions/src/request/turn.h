@@ -1,5 +1,6 @@
 #pragma once
 
+#include <session/session_failure.h>
 #include <stream/stream.h>
 
 #include <string>
@@ -28,4 +29,8 @@ namespace sessions::detail
         const nlohmann::json& history,
         const StreamCallback& stream,
         const EventLogCallback& event_log);
+
+    void emit_session_failure(
+        const SessionFailure& failure,
+        const EventLogCallback& event_log) noexcept;
 }

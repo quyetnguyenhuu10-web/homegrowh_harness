@@ -4,6 +4,7 @@
 
 #include <request/turn.h>
 #include <session/credential_owner.h>
+#include <session/session_failure.h>
 #include <session/session_timeout.h>
 #include <tool/tool_call.h>
 
@@ -95,6 +96,7 @@ namespace sessions::detail
         std::size_t tool_index = 0;
         nlohmann::json canonical_tool_calls = nlohmann::json::array();
         nlohmann::json tool_results = nlohmann::json::array();
+        std::optional<SessionFailure> failure;
         SessionTimeout session_timeout;
     };
 
@@ -106,5 +108,7 @@ namespace sessions::detail
         std::uint64_t generation,
         std::uint64_t token);
     void commit_stage(SessionData& data, SessionState next_state) noexcept;
-    void fail_session(SessionData& data) noexcept;
+    void fail_session(
+        SessionData& data,
+        std::exception_ptr exception) noexcept;
 }
