@@ -28,8 +28,8 @@
   "workflowPresets": [
     {
       "name": "setup",
-      "displayName": "Build all C++ packages and runtime executables",
-      "description": "Configure one build tree, prepare dependencies and tools, then build every C++ package and runtime executable.",
+      "displayName": "Build all C++ core modules and runtime executables",
+      "description": "Configure one build tree, prepare dependencies and tools, then build every C++ core module and runtime executable.",
       "steps": [
         {
           "type": "configure",

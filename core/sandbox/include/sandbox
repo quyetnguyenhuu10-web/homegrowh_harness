@@ -1,0 +1,15 @@
+#pragma once
+
+#include <string_view>
+
+namespace sandbox
+{
+    /**
+     * Execute raw body text inside a sandbox-owned process.
+     *
+     * sandbox owns only the process-tree lifetime boundary. The body owns all
+     * semantics inside the spawned shell process and may create arbitrary child
+     * processes; those descendants remain inside the same execution tree.
+     */
+    int run(std::string_view body);
+}

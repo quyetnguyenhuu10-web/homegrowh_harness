@@ -2,7 +2,7 @@
 
 ## 1. Public boundary
 
-Session runtime hiện tại là C++ package package/sessions.
+Session runtime hiện tại là C++ module core/sessions.
 
 Public header:
 
@@ -98,8 +98,7 @@ Input invariant:
 - session_current không được chứa tools;
 - tool_definitions phải là array;
 - model_id, endpoint và API key không được rỗng;
-- context_limit phải lớn hơn 0;
-- workspace_path được tool runtime yêu cầu là directory tồn tại và canonical được.
+- context_limit phải lớn hơn 0.
 
 `src/loop/full_loop.cpp` chỉ là automatic driver ghép đúng ba cặp API stage. Nó không chứa một thuật toán orchestration thứ hai.
 
@@ -191,9 +190,9 @@ Bonsai   -> cache_n + prompt_n + predicted_n
 ~~~
 
 `provider`, `endpoint`, `model_id`, `context_limit`, `compact_threshold`,
-`tool_result_timeout_ms`, `session_timeout_ms` và `compaction_prompt` đều được
-caller truyền qua `SessionConfig`. Sessions không đọc `catalog.json` và không tự
-đọc compaction prompt từ file.
+`session_timeout_ms` và `compaction_prompt` được caller truyền qua `SessionConfig`.
+Tool-result timeout thuộc profile/body, không thuộc SessionConfig. Sessions không
+đọc `catalog.json` và không tự đọc compaction prompt từ file.
 
 Timeout config dùng milliseconds. Public type là `int`: `-1` nghĩa là max,
 số dương là hữu hạn, còn `0` hoặc số nhỏ hơn `-1` là input lỗi. Sau validation,
@@ -282,8 +281,8 @@ Nếu assistant có tool_calls, Sessions xử lý tuần tự từng call, nhưn
 
 - phát StreamType::tool_call;
 - call sai schema tạo tool-result lỗi thay vì chạy runtime;
-- call hợp lệ đi vào tool_runtime::execute(...) với timeout chờ tool result do
-  caller cấu hình;
+- call hợp lệ chạy body/profile; body tự cấu hình timeout chờ tool result và
+  truyền xuống runtime/process adapter;
 - runtime exception được đổi thành tool_execution_error;
 - phát StreamType::tool_result;
 - thay assistant.tool_calls bằng canonical calls sau tool cuối cùng, trước request tiếp theo.
@@ -310,19 +309,13 @@ State `finished` chưa cancel watchdog. Timeout chỉ được cancel sau cleanu
 `fail_session()` hoặc sau credential cleanup thành công trong `close_session()`;
 như vậy cleanup bị kẹt vẫn nằm dưới session timeout.
 
-## 9. Workspace refresh
+## 9. Tool profile boundary
 
-ToolCallHandler giữ refresh_pending từ refresh_workspace.
-
-Chỉ call hợp lệ đầu tiên thực sự đi tới runtime consume cờ này:
-
-~~~cpp
-const bool refresh = std::exchange(refresh_pending_, false);
-~~~
-
-Call không có definition hoặc arguments không hợp lệ không consume refresh.
-
-Sau lần runtime đầu tiên, mọi tool execution còn lại trong cùng Session dùng refresh=false.
+Session không giữ workspace path hoặc filesystem/network permission. Khi chạy
+tool, Session chỉ đưa `tool_call` và `read_files` vào `$HH_INFORMATION_JSON` rồi
+chạy body. Body/profile tự chọn working directory và gọi native adapter với quyền
+mà profile đó cho phép. Cờ `refresh` cũng thuộc body/profile; Session không giữ,
+không truyền và không quyết định refresh/reuse.
 
 ## 10. Credential ownership
 
@@ -386,7 +379,7 @@ sessions::convert_history(database_path, session_id);
 sessions::convert_all_history(database_path);
 ~~~
 
-Hai API này đọc package/events database và dựng lại message history theo provider.
+Hai API này đọc core/events database và dựng lại message history theo provider.
 
 convert_history lọc một session_id.
 
@@ -408,8 +401,8 @@ Projection hỗ trợ openai, deepseek và bonsai; provider khác là lỗi.
 Executable hiện tại:
 
 ~~~text
-sessions_loop.exe <session_current> <id> <workspace_path>
-sessions_loop.exe <history> <session_current> <id> <workspace_path>
+sessions_loop.exe <session_current> <id>
+sessions_loop.exe <history> <session_current> <id>
 ~~~
 
 history và session_current có thể là inline JSON hoặc path tới JSON file.

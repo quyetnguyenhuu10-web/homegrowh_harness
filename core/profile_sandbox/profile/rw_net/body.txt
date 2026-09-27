@@ -1,0 +1,74 @@
+$ErrorActionPreference = 'Stop'
+$utf8 = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding = $utf8
+[Console]::OutputEncoding = $utf8
+
+$toolResultTimeoutMs = 120000
+$network = 'internet_client'
+$refresh = $false
+
+$runtimeExe = (Get-Command tool_runtime -CommandType Application -ErrorAction Stop).Source
+$processExe = (Get-Command process_sandbox -CommandType Application -ErrorAction Stop).Source
+$emitExe = (Get-Command event_port_emit -CommandType Application -ErrorAction Stop).Source
+$runtimeRoot = Split-Path -Parent $runtimeExe
+
+$information = $HH_INFORMATION_JSON | ConvertFrom-Json
+$workspace = (Get-Location).Path
+$callId = [string]$information.tool_call.id
+
+try {
+    $runtimeRequest = @{
+        tool_call = $information.tool_call
+        read_files = @($information.read_files)
+        timeout_ms = $toolResultTimeoutMs
+    } | ConvertTo-Json -Depth 100 -Compress
+
+    $processRequest = @{
+        executable = $runtimeExe
+        arguments = @()
+        working_directory = $workspace
+        stdin = $runtimeRequest
+        timeout_ms = $toolResultTimeoutMs
+        network = $network
+        refresh = $refresh
+        filesystem = @(
+            @{ path = $runtimeRoot; access = 'read_only' },
+            @{ path = $workspace; access = 'read_write' }
+        )
+    } | ConvertTo-Json -Depth 100 -Compress
+
+    $processRaw = $processRequest | & $processExe
+    if ($LASTEXITCODE -ne 0) {
+        throw "process_sandbox exited with code $LASTEXITCODE"
+    }
+    $process = $processRaw | ConvertFrom-Json
+    if (-not $process.started `
+        -or $process.timed_out `
+        -or [int]$process.exit_code -ne 0 `
+        -or $null -ne $process.final_error `
+        -or $null -ne $process.registry_final_error `
+        -or @($process.path_errors).Count -ne 0) {
+        throw ($process | ConvertTo-Json -Depth 100 -Compress)
+    }
+
+    $event = @{
+        package = 'tools'
+        level = 2
+        type = 'result'
+        references = @(@{ type = 'tool_call_id'; value = $callId })
+        data = @{ raw = [string]$process.stdout }
+    } | ConvertTo-Json -Depth 100 -Compress
+    $event | & $emitExe
+    exit $LASTEXITCODE
+}
+catch {
+    $event = @{
+        package = 'tools'
+        level = 4
+        type = 'failed'
+        references = @(@{ type = 'tool_call_id'; value = $callId })
+        data = @{ raw = $_.Exception.Message }
+    } | ConvertTo-Json -Depth 100 -Compress
+    $event | & $emitExe
+    exit 2
+}

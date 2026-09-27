@@ -2,7 +2,7 @@
 
 ## 1. Trạng thái source hiện tại
 
-package/chat_thread vẫn tồn tại như Electron/React UI package với tên:
+core/chat_thread vẫn tồn tại như Electron/React UI package với tên:
 
 ~~~text
 @hh/chat-thread
@@ -18,7 +18,7 @@ Các export khai báo trong package.json:
 
 Tuy nhiên ChatThread hiện chưa được nối sang core C++ mới.
 
-Root CMake hiện tại không add package/chat_thread. package/chat_thread/package.json và desktop/main.ts vẫn tham chiếu các backend TypeScript cũ:
+Root CMake hiện tại không add core/chat_thread. core/chat_thread/package.json và desktop/main.ts vẫn tham chiếu các backend TypeScript cũ:
 
 ~~~text
 @hh/database
@@ -26,7 +26,7 @@ Root CMake hiện tại không add package/chat_thread. package/chat_thread/pack
 @hh/session
 ~~~
 
-Trong cây package hiện tại không còn package/database hoặc package/session TypeScript; package/provider hiện là C++ package. Vì vậy không được mô tả adapter này như integration đã hoàn tất với sessions_loop/core C++.
+Trong cây core hiện tại không còn core/database hoặc core/session TypeScript; core/provider hiện là C++ module. Vì vậy không được mô tả adapter này như integration đã hoàn tất với sessions_loop/core C++.
 
 ## 2. Source architecture đang có
 
@@ -157,7 +157,7 @@ getSelected
 setSelected
 ~~~
 
-Đây là contract của UI source cũ. C++ package/provider hiện tại không public provider.model.* tương ứng, nên phần này đang là integration gap.
+Đây là contract của UI source cũ. C++ core/provider hiện tại không public provider.model.* tương ứng, nên phần này đang là integration gap.
 
 ## 8. Send/cancel hiện tại
 
@@ -187,7 +187,7 @@ Các API này thuộc backend TypeScript cũ và chưa được thay bằng proc
 
 ## 9. Build status
 
-package/chat_thread/package.json vẫn có build:desktop/typecheck chạy:
+core/chat_thread/package.json vẫn có build:desktop/typecheck chạy:
 
 ~~~text
 npm --prefix ../database run build
@@ -200,7 +200,7 @@ Các path/backend assumption này không khớp package graph C++ hiện tại.
 Do đó:
 
 ~~~text
-package/chat_thread = UI source còn tồn tại
+core/chat_thread = UI source còn tồn tại
 root CMake          = không build ChatThread
 core C++ process    = chưa được ChatThread source hiện tại launch/connect
 ~~~

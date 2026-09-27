@@ -1,10 +1,10 @@
 Các Khối lớn độc lập:
-1. Sessions - nơi điều phối toàn bộ lifecycle request; trực tiếp phối hợp public API của Database / Provider / Compaction / Tools - `D:\homegrowh_harness\package\session`
-2. Provider - API gọi provider đúng 1 lần - `D:\homegrowh_harness\package\provider`
-3. compaction - sở hữu toàn bộ nghiệp vụ compact: tự quyết định có cần compact hay không; nếu cần thì gọi public API của Provider, compact history và trả history đã xử lý về Session - `D:\homegrowh_harness\package\compaction`
-4. Execute tool - chỉ có việc chạy tool - `D:\homegrowh_harness\package\tools`
-5. UI - `@hh/chat-thread`: renderer chỉ qua IPC bridge; desktop adapter dùng public API của Session / Database / Provider, nhận thông tin row rồi query Database và render truth - `D:\homegrowh_harness\package\chat_thread`
-6. Database - nơi chứa cơ sở dữ liệu và các API public cho phép nơi khác tương tác lên dữ liệu. - `D:\homegrowh_harness\package\database`
+1. Sessions - nơi điều phối toàn bộ lifecycle request; trực tiếp phối hợp public API của Database / Provider / Compaction / Tools - `D:\homegrowh_harness\core\session`
+2. Provider - API gọi provider đúng 1 lần - `D:\homegrowh_harness\core\provider`
+3. compaction - sở hữu toàn bộ nghiệp vụ compact: tự quyết định có cần compact hay không; nếu cần thì gọi public API của Provider, compact history và trả history đã xử lý về Session - `D:\homegrowh_harness\core\compaction`
+4. Execute tool - chỉ có việc chạy tool - `D:\homegrowh_harness\core\tools`
+5. UI - `@hh/chat-thread`: renderer chỉ qua IPC bridge; desktop adapter dùng public API của Session / Database / Provider, nhận thông tin row rồi query Database và render truth - `D:\homegrowh_harness\core\chat_thread`
+6. Database - nơi chứa cơ sở dữ liệu và các API public cho phép nơi khác tương tác lên dữ liệu. - `D:\homegrowh_harness\core\database`
 
 Quy ước runtime:
 > Session = toàn bộ khoảng thời gian từ lúc user nhấn gửi đến khi agent/tool loop kết thúc.

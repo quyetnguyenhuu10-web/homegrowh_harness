@@ -2,7 +2,7 @@
 
 ## 1. Trạng thái hiện tại
 
-Database block đang được hiện thực bằng package C++ package/events, không còn package TypeScript @hh/database trong cây package hiện tại.
+Database block đang được hiện thực bằng package C++ core/events, không còn package TypeScript @hh/database trong cây package hiện tại.
 
 Public header:
 
@@ -162,4 +162,4 @@ tool execution
 session orchestration
 ~~~
 
-> Nguồn sự thật hiện tại của block Database là package/events và schema events, không phải API @hh/database cũ.
+> Nguồn sự thật hiện tại của block Database là core/events và schema events, không phải API @hh/database cũ.

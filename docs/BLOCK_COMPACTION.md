@@ -4,7 +4,7 @@
 
 Compaction không còn là package TypeScript @hh/compaction riêng.
 
-Implementation hiện nằm trong package/provider/src/compaction và được export qua public header:
+Implementation hiện nằm trong core/provider/src/compaction và được export qua public header:
 
 ~~~cpp
 #include <provider>
@@ -162,7 +162,7 @@ Provider core không tự đọc prompt từ filesystem hay environment.
 như một resource mặc định:
 
 ~~~text
-package/provider/src/compaction/COMPACTION.md
+core/provider/src/compaction/COMPACTION.md
 ~~~
 
 Ví dụ executable/ứng dụng có thể tự đọc path từ environment:

@@ -27,7 +27,6 @@ Các executable dùng để chạy local được sao chép vào `executable/`:
 ```text
 executable/
 ├── sessions_loop.exe
-├── sandbox_process.exe
 └── edit_file.exe
 ```
 

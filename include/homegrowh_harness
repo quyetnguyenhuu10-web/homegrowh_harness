@@ -5,8 +5,6 @@
 #include <events>
 #include <fsystem>
 #include <provider>
-#include <sandbox/process.h>
-#include <sandbox/registry.h>
+#include <sandbox>
 #include <secrets>
 #include <sessions>
-#include <tool_runtime>

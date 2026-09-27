@@ -21,10 +21,12 @@ Sessions C++ gọi:
 ~~~cpp
 tool_runtime::execute(
     tool_call,
-    workspace_path,
-    refresh,
+    read_files,
     timeout_ms);
 ~~~
+
+Workspace của tool runtime là current working directory của process. Profile/body
+chịu trách nhiệm chọn working directory và quyền trước khi spawn tool_runtime.
 
 @hh/tools vẫn là facade public cho consumer TypeScript; tool_runtime là execution facade mà Sessions dùng.
 
@@ -56,7 +58,7 @@ Root facade không yêu cầu consumer import registry, _shared, read_file hoặ
 Schema public của cả bảy tool nằm tại:
 
 ~~~text
-package/tools/src/tool_definitions.json
+core/tools/src/tool_definitions.json
 ~~~
 
 TypeScript toolDefinition(name) đọc file JSON này và trả structured clone.
@@ -83,9 +85,8 @@ C++ tool_runtime đăng ký runtime và capability như sau:
 | todowrite | TypeScript | none | none |
 | edit_file | native C++ | read_write | none |
 
-Timeout process do caller truyền dưới dạng `std::uint32_t timeout_ms`; `0` không
-hợp lệ. Sessions lấy giá trị này từ `SessionConfig::tool_result_timeout_ms` sau
-khi validate/normalize.
+Timeout process do profile/body truyền dưới dạng `std::uint32_t timeout_ms`; `0`
+không hợp lệ. Sessions không mang tool-result timeout.
 
 Workspace luôn phải là directory tồn tại và được canonicalize trước khi chạy tool.
 
@@ -100,7 +101,7 @@ normalize OpenAI function call
   ↓
 Node
   ↓
-package/tools/dist/src/_runtime/tool_host.js
+core/tools/dist/src/_runtime/tool_host.js
   ↓
 selected TypeScript tool
 ~~~
@@ -145,104 +146,59 @@ HOMEGROWPH_EDIT_FILE
 
 TypeScript facade cũng dùng stable executable/edit_file path thay vì build/Debug hoặc build/Release.
 
-## 7. Sandbox process boundary
+## 7. Execution và permission boundary
 
-C++ tool_runtime không spawn target process trực tiếp. Nó tạo sandbox::process_request và gọi sandbox::process(...).
-
-Policy mang:
+Boundary mới tách hoàn toàn execution khỏi permission:
 
 ~~~text
-executable
-arguments
-working directory
-stdin
-timeout
-network capability
-filesystem capabilities
-refresh
+sandbox
+  = tạo worker process
+  = giữ process tree / lifetime
+
+permissions
+  = filesystem packet
+  = network packet
+
+caller/body
+  = tự compose packet
+  = tự spawn Node/native process/workload cần chạy
 ~~~
 
-Process result giữ:
+`permissions` không có process request/result, broker, timeout hoặc executable
+riêng. `sandbox` cũng không biết filesystem/network policy.
 
-~~~text
-started
-timed_out
-terminated
-exit_code
-os_error_before_termination
-final_error
-registry_final_error
-path_errors
-~~~
+## 8. Profile owns execution permissions
 
-Tool runtime không che mất mã lỗi OS khi sandbox/process có lỗi.
+Sessions không truyền workspace hay policy quyền xuống tool runtime. Body/profile
+tự chọn current working directory, filesystem access và network access rồi gọi
+native adapter tương ứng trước khi spawn workload.
 
-Ở public TypeScript facade, process_runner.ts cũng chỉ được phép spawn trusted sandbox broker:
-
-~~~text
-<repo>/executable/sandbox_process[.exe]
-~~~
-
-Có thể override bằng HOMEGROWPH_SANDBOX_PROCESS.
-
-## 8. refresh semantics
-
-refresh không có nghĩa tạo capability identity mới.
-
-Trong Sessions, refresh_workspace chỉ được consume ở valid tool execution đầu tiên:
-
-~~~cpp
-const bool refresh = std::exchange(refresh_pending_, false);
-~~~
-
-Sau đó các tool execution còn lại dùng refresh=false.
-
-### Windows refresh=true
-
-Registry:
-
-1. canonicalize path;
-2. derive deterministic capability name/SID từ capability signature + canonical path + access mode;
-3. nếu registry đã có entry thì kiểm tra name/SID phải khớp;
-4. chạy reconcile_tree trên root và descendants;
-5. ghi lại durable registry state.
-
-reconcile_acl chỉ bỏ qua khi ACL hiện tại đã compatible. Nếu ACE của capability đã bị xóa bên ngoài, refresh=true sẽ apply lại ACL cho cùng deterministic SID rồi verify lại.
-
-Refresh là thao tác explicit tại thời điểm registration. Không có watcher tự động sửa ACL sau đó.
-
-### Windows refresh=false
-
-reuse:
-
-- yêu cầu capability đã có trong durable registry;
-- derive lại deterministic identity để validate;
-- không probe ACL;
-- không repair ACL;
-- không mutate registry state.
+Refresh/reuse thuộc profile/body, không thuộc Sessions. Body truyền `refresh`
+qua process adapter; registry dùng `refresh=true` để reconcile capability và
+`refresh=false` để reuse durable capability hiện có.
 
 Nếu ACL đã bị thay đổi ngoài hệ thống, filesystem operation thật được phép fail và trả lỗi OS gốc.
 
-Release ACL thuộc sandbox registry release/release_all, không thuộc refresh.
+Release ACL thuộc permissions release/release_all, không thuộc refresh.
 
 ## 9. Durable Windows registry
 
 Default state:
 
 ~~~text
-%LOCALAPPDATA%/<capability_signature>/sandbox-registry.state
+%LOCALAPPDATA%/<capability_signature>/permissions-filesystem.state
 ~~~
 
 Override:
 
 ~~~text
-HOMEGROWPH_SANDBOX_REGISTRY_STATE
+HOMEGROWPH_PERMISSIONS_FILESYSTEM_STATE
 ~~~
 
 Registry state được khóa bằng mutex:
 
 ~~~text
-Local\HomegrowphHarness.Sandbox.Registry
+Local\HomegrowphHarness.Permissions.Filesystem
 ~~~
 
 ## 10. Tool result contract
@@ -262,12 +218,9 @@ C++ runtime nhận OpenAI-style function tool call:
 
 Runtime normalize arguments, dispatch theo registry rồi trả message role=tool.
 
-Process/runtime failures được encode thành structured result như:
+Runtime failures được encode thành structured result như:
 
 ~~~text
-process_timeout
-sandbox_registry_failed
-sandbox_process_failed
 invalid_tool_output
 tool_execution_error
 unsupported_tool
@@ -285,7 +238,6 @@ TypeScript tool implementation
 native edit_file route
 tool dispatch
 runtime permission policy
-sandbox process request
 structured tool result
 ~~~
 
@@ -300,4 +252,4 @@ database persistence
 UI rendering
 ~~~
 
-> Schema có một nguồn tại package/tools/src/tool_definitions.json; Sessions dùng C++ tool_runtime để thực thi cùng tập tool qua sandbox.
+> Schema có một nguồn tại core/tools/src/tool_definitions.json; execution boundary và permission packet là hai khối độc lập.
