@@ -185,10 +185,10 @@ namespace sessions
         if (config.api_key_raw.empty())
             throw std::invalid_argument("api_key_raw must not be empty");
 
-        const std::uint32_t tool_result_timeout_ms = normalize_timeout_ms(
+        const std::uint32_t tool_result_timeout_ms = detail::normalize_timeout_ms(
             config.tool_result_timeout_ms,
             "tool_result_timeout_ms");
-        const std::uint32_t session_timeout_ms = normalize_timeout_ms(
+        const std::uint32_t session_timeout_ms = detail::normalize_timeout_ms(
             config.session_timeout_ms,
             "session_timeout_ms");
 
