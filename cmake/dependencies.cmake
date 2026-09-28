@@ -5,7 +5,6 @@ set(HH_NLOHMANN_JSON_VERSION 3.12.0)
 set(HH_CLI11_VERSION 2.6.1)
 set(HH_CURL_GIT_TAG curl-8_16_0)
 set(HH_CPR_VERSION 1.14.2)
-set(HH_SQLITE_AMALGAMATION_VERSION 3530400)
 
 get_filename_component(HH_REPOSITORY_ROOT "${CMAKE_CURRENT_LIST_DIR}/.." ABSOLUTE)
 set(HH_EXECUTABLE_DIR "${HH_REPOSITORY_ROOT}/executable"
@@ -55,18 +54,8 @@ function(hh_add_dependencies)
         GIT_REPOSITORY https://github.com/libcpr/cpr.git
         GIT_TAG "${HH_CPR_VERSION}"
         GIT_SHALLOW TRUE)
-    FetchContent_Declare(sqlite_amalgamation
-        URL "https://www.sqlite.org/2026/sqlite-amalgamation-${HH_SQLITE_AMALGAMATION_VERSION}.zip"
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
-
     FetchContent_MakeAvailable(
-        nlohmann_json cli11 curl cpr sqlite_amalgamation)
-
-    add_library(hh_sqlite3 STATIC "${sqlite_amalgamation_SOURCE_DIR}/sqlite3.c")
-    add_library(SQLite::SQLite3 ALIAS hh_sqlite3)
-    target_include_directories(hh_sqlite3 PUBLIC
-        "${sqlite_amalgamation_SOURCE_DIR}")
-    target_link_libraries(hh_sqlite3 PRIVATE Threads::Threads ${CMAKE_DL_LIBS})
+        nlohmann_json cli11 curl cpr)
 endfunction()
 
 function(hh_require_target name)
@@ -93,14 +82,9 @@ function(hh_require_http)
     hh_require_target(cpr::cpr)
 endfunction()
 
-function(hh_require_sqlite)
-    hh_require_target(SQLite::SQLite3)
-endfunction()
-
 function(hh_require_all_dependencies)
     hh_require_threads()
     hh_require_nlohmann_json()
     hh_require_cli11()
     hh_require_http()
-    hh_require_sqlite()
 endfunction()

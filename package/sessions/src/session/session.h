@@ -1,6 +1,6 @@
 #pragma once
 
-#include <stream/stream.h>
+#include <config.h>
 
 #include <filesystem>
 #include <cstdint>
@@ -45,9 +45,9 @@ namespace sessions
         int session_timeout_ms = -1;
         std::string compaction_prompt;
         std::filesystem::path workspace_path;
+        std::filesystem::path tool_runtime_executable;
+        sandbox::config sandbox_config;
         bool refresh_workspace = false;
-        StreamCallback stream;
-        EventLogCallback event_log;
     };
 
     struct SessionResult

@@ -271,21 +271,22 @@ Nếu assistant có tool_calls, Sessions xử lý tuần tự từng call, nhưn
 
 `declare_tool()`:
 
-- tìm definition theo function name;
-- chuẩn hóa id/name/arguments;
-- trả `ToolStage` để CLI/UI inspect;
+- chọn raw tool call tiếp theo từ assistant history;
+- trả `ToolStage` để CLI/UI inspect bằng call_id(), name(), arguments()
+  và raw_call();
 - không emit `tool_call`;
 - không chạy runtime;
 - không consume `refresh_pending`.
 
 `run_tool()`:
 
-- phát StreamType::tool_call;
-- call sai schema tạo tool-result lỗi thay vì chạy runtime;
-- call hợp lệ đi vào tool_runtime::execute(...) với timeout chờ tool result do
-  caller cấu hình;
-- runtime exception được đổi thành tool_execution_error;
-- phát StreamType::tool_result;
+- chạy executable tool_runtime qua sandbox::process với timeout do caller cấu
+  hình;
+- nhận canonical tool call và tool result từ stdout; lỗi schema được runtime
+  trả trong tool result;
+- phát StreamType::tool_call và StreamType::tool_result sau khi nhận kết quả;
+- lỗi sandbox, timeout hoặc JSON output sai khiến Session chuyển sang closed và
+  exception được trả cho caller;
 - thay assistant.tool_calls bằng canonical calls sau tool cuối cùng, trước request tiếp theo.
 
 Tool results của một cycle trở thành:
@@ -314,13 +315,14 @@ như vậy cleanup bị kẹt vẫn nằm dưới session timeout.
 
 ToolCallHandler giữ refresh_pending từ refresh_workspace.
 
-Chỉ call hợp lệ đầu tiên thực sự đi tới runtime consume cờ này:
+Tool call đầu tiên được đưa tới sandbox::process consume cờ này:
 
 ~~~cpp
 const bool refresh = std::exchange(refresh_pending_, false);
 ~~~
 
-Call không có definition hoặc arguments không hợp lệ không consume refresh.
+Runtime kiểm tra definition và arguments sau khi process đã bắt đầu, vì vậy
+những call sai schema cũng consume refresh.
 
 Sau lần runtime đầu tiên, mọi tool execution còn lại trong cùng Session dùng refresh=false.
 
@@ -377,33 +379,7 @@ context_usage mang JSON:
 
 Session stream là observer callback; history hoàn chỉnh vẫn được trả bằng LoopResult.
 
-## 11. History projection từ event database
-
-Sessions còn công khai:
-
-~~~cpp
-sessions::convert_history(database_path, session_id);
-sessions::convert_all_history(database_path);
-~~~
-
-Hai API này đọc package/events database và dựng lại message history theo provider.
-
-convert_history lọc một session_id.
-
-convert_all_history đọc toàn bộ row_position order rồi trả các nhóm:
-
-~~~json
-[
-  {
-    "session_id": "...",
-    "history": ["..."]
-  }
-]
-~~~
-
-Projection hỗ trợ openai, deepseek và bonsai; provider khác là lỗi.
-
-## 12. CLI
+## 11. CLI
 
 Executable hiện tại:
 
@@ -429,7 +405,7 @@ TOOLS_DEFINITIONS=<optional path>
 
 Nếu TOOLS_DEFINITIONS không set, CLI tìm tool_definitions.json từ working directory đi lên.
 
-## 13. Boundary
+## 12. Boundary
 
 Sessions hiện sở hữu:
 
@@ -441,7 +417,6 @@ Provider-to-EventPort adapter và registration lifecycle
 tool-call canonicalization
 per-loop credential lifetime
 workspace-refresh consumption
-history conversion from event rows
 ~~~
 
 Sessions hiện không sở hữu:
@@ -459,4 +434,4 @@ tool implementation
 sandbox ACL implementation
 ~~~
 
-> Sessions là C++ orchestration state machine; Provider làm HTTP/SSE và callback raw event, EventPort cung cấp registration/read/backpressure, Tool Runtime chạy tool, Secrets giữ credential và Events chỉ được dùng khi gọi history projection.
+> Sessions là C++ orchestration state machine; Provider làm HTTP/SSE, EventPort cung cấp registration/read/backpressure, Tool Runtime chạy tool và Secrets giữ credential.

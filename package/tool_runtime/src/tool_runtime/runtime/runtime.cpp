@@ -1,12 +1,10 @@
 #include "runtime.h"
 
-#include <sandbox/process.h>
-
 #include <algorithm>
-#include <chrono>
-#include <cstdint>
+#include <cerrno>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -20,12 +18,12 @@
 
 #include <nlohmann/json.hpp>
 
-#ifndef TOOL_RUNTIME_TOOL_HOST_PATH
-#error "TOOL_RUNTIME_TOOL_HOST_PATH is not defined"
-#endif
-
-#ifndef TOOL_RUNTIME_EDIT_FILE_PATH
-#error "TOOL_RUNTIME_EDIT_FILE_PATH is not defined"
+#if defined(_WIN32)
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#elif defined(__linux__)
+#include <unistd.h>
 #endif
 
 namespace tool_runtime::detail
@@ -41,8 +39,6 @@ namespace tool_runtime::detail
         struct ToolSpec
         {
             Runtime runtime;
-            std::optional<sandbox::permission> filesystem;
-            sandbox::network_access network = sandbox::network_access::none;
         };
 
         struct ToolCall
@@ -59,34 +55,13 @@ namespace tool_runtime::detail
         const std::map<std::string, ToolSpec>& tool_specs()
         {
             static const std::map<std::string, ToolSpec> specs{
-                {"read", {
-                    Runtime::typescript,
-                    sandbox::permission::read_only,
-                    sandbox::network_access::none}},
-                {"write", {
-                    Runtime::typescript,
-                    sandbox::permission::read_write,
-                    sandbox::network_access::none}},
-                {"glob", {
-                    Runtime::typescript,
-                    sandbox::permission::read_only,
-                    sandbox::network_access::none}},
-                {"grep", {
-                    Runtime::typescript,
-                    sandbox::permission::read_only,
-                    sandbox::network_access::none}},
-                {"webfetch", {
-                    Runtime::typescript,
-                    std::nullopt,
-                    sandbox::network_access::internet_client}},
-                {"todowrite", {
-                    Runtime::typescript,
-                    std::nullopt,
-                    sandbox::network_access::none}},
-                {"edit_file", {
-                    Runtime::native,
-                    sandbox::permission::read_write,
-                    sandbox::network_access::none}},
+                {"read", {Runtime::typescript}},
+                {"write", {Runtime::typescript}},
+                {"glob", {Runtime::typescript}},
+                {"grep", {Runtime::typescript}},
+                {"webfetch", {Runtime::typescript}},
+                {"todowrite", {Runtime::typescript}},
+                {"edit_file", {Runtime::native}},
             };
             return specs;
         }
@@ -120,16 +95,7 @@ namespace tool_runtime::detail
                     std::make_error_code(std::errc::not_a_directory));
             }
 
-            const std::filesystem::path canonical =
-                std::filesystem::canonical(path, error);
-            if (error)
-            {
-                throw std::filesystem::filesystem_error(
-                    "tool_runtime: cannot canonicalize workspace",
-                    path,
-                    error);
-            }
-            return canonical;
+            return path.lexically_normal();
         }
 
         nlohmann::json tool_result(
@@ -277,9 +243,60 @@ namespace tool_runtime::detail
             return {};
         }
 
+        std::filesystem::path current_executable()
+        {
+#if defined(_WIN32)
+            std::wstring buffer(32768, L'\0');
+            const DWORD written = GetModuleFileNameW(
+                nullptr,
+                buffer.data(),
+                static_cast<DWORD>(buffer.size()));
+            if (written == 0 || written >= buffer.size())
+            {
+                throw std::system_error(
+                    static_cast<int>(GetLastError()),
+                    std::system_category(),
+                    "GetModuleFileNameW(tool_runtime)");
+            }
+            buffer.resize(written);
+            return std::filesystem::path(std::move(buffer));
+#elif defined(__linux__)
+            std::string buffer(4096, '\0');
+            const ssize_t written = readlink(
+                "/proc/self/exe",
+                buffer.data(),
+                buffer.size());
+            if (written < 0)
+            {
+                throw std::system_error(
+                    errno,
+                    std::generic_category(),
+                    "readlink(/proc/self/exe)");
+            }
+            buffer.resize(static_cast<std::size_t>(written));
+            return std::filesystem::path(std::move(buffer));
+#endif
+        }
+
         std::filesystem::path node_executable()
         {
-            std::filesystem::path node = environment_path("HOMEGROWPH_NODE");
+            std::filesystem::path node =
+                current_executable().parent_path()
+#if defined(_WIN32)
+                / "node.exe";
+#else
+                / "node";
+#endif
+
+            std::error_code bundled_error;
+            if (std::filesystem::is_regular_file(node, bundled_error))
+            {
+                const std::filesystem::path canonical =
+                    std::filesystem::canonical(node, bundled_error);
+                return bundled_error ? node : canonical;
+            }
+
+            node = environment_path("HOMEGROWPH_NODE");
             if (!node.empty())
             {
                 std::error_code error;
@@ -306,7 +323,14 @@ namespace tool_runtime::detail
             std::filesystem::path path =
                 environment_path("HOMEGROWPH_TOOL_HOST");
             if (path.empty())
-                path = std::filesystem::path(TOOL_RUNTIME_TOOL_HOST_PATH);
+            {
+                path =
+                    current_executable().parent_path()
+                    / "tool_runtime_tools"
+                    / "src"
+                    / "_runtime"
+                    / "tool_host.js";
+            }
 
             std::error_code error;
             if (!std::filesystem::is_regular_file(path, error))
@@ -326,7 +350,14 @@ namespace tool_runtime::detail
             std::filesystem::path path =
                 environment_path("HOMEGROWPH_EDIT_FILE");
             if (path.empty())
-                path = std::filesystem::path(TOOL_RUNTIME_EDIT_FILE_PATH);
+            {
+                path = current_executable().parent_path()
+#if defined(_WIN32)
+                    / "edit_file.exe";
+#else
+                    / "edit_file";
+#endif
+            }
 
             std::error_code error;
             if (!std::filesystem::is_regular_file(path, error))
@@ -341,100 +372,33 @@ namespace tool_runtime::detail
             return error ? path : canonical;
         }
 
-        nlohmann::json process_details(const sandbox::process_result& result)
+        nlohmann::json process_details(const process_result_view& result)
         {
-            nlohmann::json path_errors = nlohmann::json::array();
-            for (const sandbox::registry_path_error& item :
-                 result.state.registry.path_errors)
-            {
-                path_errors.push_back({
-                    {"path", path_text(item.path)},
-                    {"code", item.error.value()},
-                    {"message", item.error.message()}
-                });
-            }
-
             return {
-                {"started", result.state.started},
-                {"timed_out", result.state.timed_out},
-                {"terminated", result.state.terminated},
-                {"exit_code", result.state.exit_code},
-                {"os_error_before_termination", {
-                    {"code", result.state.os_error_before_termination.value()},
-                    {"message", result.state.os_error_before_termination.message()}
-                }},
+                {"started", result.started},
+                {"exit_code", result.exit_code},
                 {"final_error", {
-                    {"code", result.state.final_error.value()},
-                    {"message", result.state.final_error.message()}
-                }},
-                {"registry_final_error", {
-                    {"code", result.state.registry.final_error.value()},
-                    {"message", result.state.registry.final_error.message()}
-                }},
-                {"path_errors", std::move(path_errors)}
+                    {"code", result.final_error.value()},
+                    {"message", result.final_error.message()}
+                }}
             };
         }
 
         std::optional<nlohmann::json> process_failure(
             const ToolCall& call,
-            const sandbox::process_result& result)
+            const process_result_view& result)
         {
-            if (result.state.timed_out)
+            if (result.final_error)
             {
                 return error_result(
                     call.id,
                     call.name,
-                    "process_timeout",
-                    "Tool process timed out",
-                    process_details(result));
-            }
-
-            if (result.state.registry.final_error
-                || (!result.state.started
-                    && !result.state.registry.path_errors.empty()))
-            {
-                return error_result(
-                    call.id,
-                    call.name,
-                    "sandbox_registry_failed",
-                    "Sandbox registry failed",
-                    process_details(result));
-            }
-
-            if (result.state.final_error)
-            {
-                return error_result(
-                    call.id,
-                    call.name,
-                    "sandbox_process_failed",
-                    "Sandbox process failed",
+                    "tool_process_failed",
+                    "Tool process failed",
                     process_details(result));
             }
 
             return std::nullopt;
-        }
-
-        void add_filesystem(
-            std::vector<sandbox::registry_request>& filesystem,
-            const std::filesystem::path& path,
-            sandbox::permission permission)
-        {
-            const auto found = std::find_if(
-                filesystem.begin(),
-                filesystem.end(),
-                [&](const sandbox::registry_request& item)
-                {
-                    return item.path == path;
-                });
-
-            if (found == filesystem.end())
-            {
-                filesystem.push_back({path, permission});
-                return;
-            }
-
-            if (permission == sandbox::permission::read_write)
-                found->access = sandbox::permission::read_write;
         }
 
         std::vector<std::string> read_files(const std::string& workspace_key)
@@ -466,18 +430,11 @@ namespace tool_runtime::detail
             }
         }
 
-        nlohmann::json execute_typescript(
+        process_plan dispatch_typescript(
             const ToolCall& call,
-            const ToolSpec& spec,
-            const std::filesystem::path& workspace,
-            bool refresh,
-            std::uint32_t timeout_ms)
+            const std::filesystem::path& workspace)
         {
             const std::filesystem::path host = tool_host_path();
-            const std::filesystem::path runtime_root =
-                host.parent_path().parent_path();
-            const std::filesystem::path package_json =
-                runtime_root.parent_path().parent_path() / "package.json";
             const std::filesystem::path node = node_executable();
             const std::string workspace_key = path_text(workspace);
 
@@ -491,37 +448,23 @@ namespace tool_runtime::detail
                 {"readFiles", read_files(workspace_key)}
             };
 
-            sandbox::process_request process;
-            process.executable = node;
-            process.arguments = {
+            process_plan plan;
+            plan.executable = node;
+            plan.arguments = {
                 "--preserve-symlinks",
                 "--preserve-symlinks-main",
                 path_text(host)
             };
-            process.working_directory =
-                spec.filesystem.has_value() ? workspace : runtime_root;
-            process.stdin_data = request.dump();
-            process.timeout = std::chrono::milliseconds(timeout_ms);
-            process.network = spec.network;
-            process.refresh = refresh;
+            plan.working_directory = workspace;
+            plan.stdin_data = request.dump();
+            return plan;
+        }
 
-            add_filesystem(
-                process.filesystem,
-                runtime_root,
-                sandbox::permission::read_only);
-            add_filesystem(
-                process.filesystem,
-                package_json,
-                sandbox::permission::read_only);
-            add_filesystem(
-                process.filesystem,
-                node.parent_path(),
-                sandbox::permission::read_only);
-
-            if (spec.filesystem.has_value())
-                add_filesystem(process.filesystem, workspace, *spec.filesystem);
-
-            const sandbox::process_result result = sandbox::process(process);
+        nlohmann::json normalize_typescript(
+            const ToolCall& call,
+            const std::filesystem::path& workspace,
+            const process_result_view& result)
+        {
             if (const auto failure = process_failure(call, result))
                 return *failure;
 
@@ -537,7 +480,7 @@ namespace tool_runtime::detail
                     "invalid_tool_output",
                     "TypeScript tool worker returned invalid JSON",
                     {
-                        {"exit_code", result.state.exit_code},
+                        {"exit_code", result.exit_code},
                         {"stderr", result.stderr_text}
                     });
             }
@@ -590,24 +533,24 @@ namespace tool_runtime::detail
                     "TypeScript tool worker response is incomplete");
             }
 
-            merge_read_files(workspace_key, *files);
+            merge_read_files(path_text(workspace), *files);
             return *tool_result_message;
         }
 
-        nlohmann::json execute_native(
+        process_plan dispatch_native(
             const ToolCall& call,
-            const ToolSpec& spec,
-            const std::filesystem::path& workspace,
-            bool refresh,
-            std::uint32_t timeout_ms)
+            const std::filesystem::path& workspace)
         {
             if (call.name != "edit_file")
             {
-                return error_result(
+                process_plan plan;
+                plan.process_required = false;
+                plan.immediate_result = error_result(
                     call.id,
                     call.name,
                     "unsupported_native_tool",
                     "Native tool is not implemented");
+                return plan;
             }
 
             nlohmann::json requests = nlohmann::json::array();
@@ -617,11 +560,14 @@ namespace tool_runtime::detail
                 {
                     if (!item.is_object())
                     {
-                        return error_result(
+                        process_plan plan;
+                        plan.process_required = false;
+                        plan.immediate_result = error_result(
                             call.id,
                             call.name,
                             "invalid_arguments",
                             "Tool arguments array must contain only objects");
+                        return plan;
                     }
                     requests.push_back(item);
                 }
@@ -633,11 +579,14 @@ namespace tool_runtime::detail
 
             if (requests.empty())
             {
-                return error_result(
+                process_plan plan;
+                plan.process_required = false;
+                plan.immediate_result = error_result(
                     call.id,
                     call.name,
                     "invalid_arguments",
                     "Tool arguments must not be empty");
+                return plan;
             }
 
             const nlohmann::json envelope = {
@@ -650,23 +599,18 @@ namespace tool_runtime::detail
             };
 
             const std::filesystem::path executable = edit_file_path();
-            sandbox::process_request process;
-            process.executable = executable;
-            process.arguments = {"--toolcall-stdin"};
-            process.working_directory = workspace;
-            process.stdin_data = envelope.dump();
-            process.timeout = std::chrono::milliseconds(timeout_ms);
-            process.network = spec.network;
-            process.refresh = refresh;
+            process_plan plan;
+            plan.executable = executable;
+            plan.arguments = {"--toolcall-stdin"};
+            plan.working_directory = workspace;
+            plan.stdin_data = envelope.dump();
+            return plan;
+        }
 
-            if (spec.filesystem.has_value())
-                add_filesystem(process.filesystem, workspace, *spec.filesystem);
-            add_filesystem(
-                process.filesystem,
-                executable,
-                sandbox::permission::read_only);
-
-            const sandbox::process_result result = sandbox::process(process);
+        nlohmann::json normalize_native(
+            const ToolCall& call,
+            const process_result_view& result)
+        {
             if (const auto failure = process_failure(call, result))
                 return *failure;
 
@@ -682,7 +626,7 @@ namespace tool_runtime::detail
                     "invalid_tool_output",
                     "Native tool returned invalid JSON",
                     {
-                        {"exit_code", result.state.exit_code},
+                        {"exit_code", result.exit_code},
                         {"stderr", result.stderr_text}
                     });
             }
@@ -691,47 +635,74 @@ namespace tool_runtime::detail
         }
     }
 
-    nlohmann::json execute_tool(
-        const nlohmann::json& tool_call,
-        const std::filesystem::path& workspace_path,
-        bool refresh,
-        std::uint32_t timeout_ms)
+    process_plan dispatch_tool(const nlohmann::json& input)
     {
-        if (timeout_ms == 0)
-        {
-            throw std::invalid_argument(
-                "tool_runtime: timeout_ms must be positive");
-        }
-
-        const ToolCall call = parse_tool_call(tool_call);
+        const ToolCall call = parse_tool_call(input);
+        const std::filesystem::path workspace =
+            canonical_existing_directory(std::filesystem::current_path());
         const auto spec = tool_specs().find(call.name);
         if (spec == tool_specs().end())
         {
-            return error_result(
+            process_plan plan;
+            plan.process_required = false;
+            plan.immediate_result = error_result(
                 call.id,
                 call.name,
                 "unsupported_tool",
                 "Tool is not registered: " + call.name);
+            return plan;
         }
-
-        const std::filesystem::path workspace =
-            canonical_existing_directory(workspace_path);
 
         if (spec->second.runtime == Runtime::typescript)
         {
-            return execute_typescript(
+            return dispatch_typescript(
                 call,
-                spec->second,
-                workspace,
-                refresh,
-                timeout_ms);
+                workspace);
         }
 
-        return execute_native(
+        return dispatch_native(
             call,
-            spec->second,
-            workspace,
-            refresh,
-            timeout_ms);
+            workspace);
+    }
+
+    normalized_result normalize_tool(
+        const nlohmann::json& input,
+        const process_result_view& result)
+    {
+        const ToolCall call = parse_tool_call(input);
+        const std::filesystem::path workspace =
+            canonical_existing_directory(std::filesystem::current_path());
+        const auto spec = tool_specs().find(call.name);
+        if (spec == tool_specs().end())
+        {
+            return {
+                error_result(
+                    call.id,
+                    call.name,
+                    "unsupported_tool",
+                    "Tool is not registered: " + call.name),
+                result.stderr_text,
+            };
+        }
+
+        nlohmann::json normalized;
+        if (spec->second.runtime == Runtime::typescript)
+        {
+            normalized = normalize_typescript(
+                call,
+                workspace,
+                result);
+        }
+        else
+        {
+            normalized = normalize_native(
+                call,
+                result);
+        }
+
+        return {
+            std::move(normalized),
+            result.stderr_text,
+        };
     }
 }

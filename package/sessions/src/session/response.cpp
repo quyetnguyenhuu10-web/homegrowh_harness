@@ -4,6 +4,8 @@
 #include <context/context.h>
 #include <session/session_state.h>
 
+#include <event_port>
+
 #include <exception>
 #include <stdexcept>
 #include <string>
@@ -47,11 +49,9 @@ namespace sessions
         if (!data.pending_turn.has_value())
             throw std::logic_error("sessions response has no pending request result");
 
-        const nlohmann::json& assistant = data.pending_turn->assistant;
-        const bool has_tools = detail::has_tool_calls(assistant);
-        const std::size_t tool_count = has_tools
-            ? assistant.at("tool_calls").size()
-            : 0;
+        const nlohmann::json& tool_calls = data.pending_turn->tool_calls;
+        const bool has_tools = tool_calls.is_array() && !tool_calls.empty();
+        const std::size_t tool_count = has_tools ? tool_calls.size() : 0;
         const std::uint64_t token = detail::declare_stage(data);
 
         return ResponseStage(
@@ -79,19 +79,26 @@ namespace sessions
             data.pending_turn.reset();
 
             data.history = std::move(turn.request.messages);
-            data.history.push_back(std::move(turn.assistant));
+            if (stage.has_tool_calls_)
+            {
+                data.history.push_back(nlohmann::json{
+                    {"role", "assistant"},
+                    {"tool_calls", std::move(turn.tool_calls)}
+                });
+            }
             data.last_usage = std::move(turn.request.usage);
             data.usage_checkpoint = detail::exact_context_usage(data.last_usage);
 
-            if (data.stream)
-            {
-                const nlohmann::json payload = {
+            event_port::port(event_port::Emit{
+                "sessions",
+                event_port::Level::info,
+                "context_usage",
+                {},
+                nlohmann::json{
                     {"used", data.usage_checkpoint},
                     {"limit", data.context_limit}
-                };
-                const std::string serialized = payload.dump();
-                data.stream(StreamType::context_usage, serialized);
-            }
+                }
+            });
 
             if (!stage.has_tool_calls_)
             {
@@ -100,7 +107,7 @@ namespace sessions
             }
 
             data.tool_index = 0;
-            data.canonical_tool_calls = nlohmann::json::array();
+            data.runtime_tool_calls = nlohmann::json::array();
             data.tool_results = nlohmann::json::array();
             detail::commit_stage(data, SessionState::tool);
         }
@@ -108,7 +115,7 @@ namespace sessions
         {
             detail::fail_session(data, std::current_exception());
             if (data.failure.has_value())
-                detail::emit_session_failure(*data.failure, data.event_log);
+                detail::emit_session_failure(*data.failure);
             throw;
         }
     }

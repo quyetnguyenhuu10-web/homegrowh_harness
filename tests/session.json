@@ -1,0 +1,24 @@
+{
+  "api_key": "gpNHFvq7om3t6MNqlrgWimCiyVma7dUhMam9g0xDtlQ",
+  "provider": "bonsai",
+  "endpoint": "https://trickle-crewless-smasher.ngrok-free.dev/v1/chat/completions",
+  "model_id": "bonsai",
+  "context_limit": 64000,
+  "compact_threshold": 50000,
+  "history": [],
+  "session_current": "D:/homegrowh_harness/tests/session_current.review_tool.json",
+  "workspace_path": "D:/tools",
+  "tool_runtime_executable": "D:/homegrowh_harness/executable/tool_runtime.exe",
+  "tool_definitions": "D:/homegrowh_harness/package/tools/src/tool_definitions.json",
+  "compaction_prompt_path": "D:/homegrowh_harness/package/provider/src/compaction/COMPACTION.md",
+  "tool_result_timeout_ms": -1,
+  "session_timeout_ms": -1,
+  "refresh_workspace": false,
+  "sandbox_config": {
+    "read_only": [],
+    "read_write": [
+      "D:/tools"
+    ],
+    "network": "none"
+  }
+}

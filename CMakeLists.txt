@@ -16,18 +16,17 @@ set(EVENT_PORT_BUILD_TESTS ${HH_BUILD_TESTS} CACHE BOOL "" FORCE)
 set(SECRETS_BUILD_TESTS ${HH_BUILD_TESTS} CACHE BOOL "" FORCE)
 set(SANDBOX_BUILD_TESTS ${HH_BUILD_TESTS} CACHE BOOL "" FORCE)
 set(FILESYSTEMS_BUILD_TESTS ${HH_BUILD_TESTS} CACHE BOOL "" FORCE)
-set(TOOL_RUNTIME_BUILD_TESTS ${HH_BUILD_TESTS} CACHE BOOL "" FORCE)
 set(SESSIONS_BUILD_TESTS ${HH_BUILD_TESTS} CACHE BOOL "" FORCE)
 
 # Each package declares its own target; all dependencies are shared here.
 add_subdirectory(package/context_usage)
 add_subdirectory(package/event_port)
+add_subdirectory(package/ipc)
 add_subdirectory(package/provider)
 add_subdirectory(package/secrets)
-add_subdirectory(package/events)
-add_subdirectory(package/sandbox)
 add_subdirectory(package/tools/filesystems)
 add_subdirectory(package/tool_runtime)
+add_subdirectory(package/sandbox)
 add_subdirectory(package/sessions)
 
 add_library(homegrowh_harness INTERFACE)
@@ -36,8 +35,8 @@ target_compile_features(homegrowh_harness INTERFACE cxx_std_20)
 target_include_directories(homegrowh_harness INTERFACE
     "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_link_libraries(homegrowh_harness INTERFACE
-    context_usage event_port provider secrets events sandbox
-    filesystems tool_runtime sessions)
+    context_usage event_port ipc provider secrets sandbox
+    filesystems sessions)
 
 # A fresh checkout should not require a separate manual `npm ci` step.
 find_program(HH_NPM_EXECUTABLE NAMES npm npm.cmd)
@@ -74,7 +73,8 @@ add_dependencies(tool_runtime_typescript_tools tools_node_modules)
 add_custom_target(executable
     DEPENDS
         sessions_loop
-        sandbox_process
+        session_runtime
+        tool_runtime
         edit_file
     COMMAND "${CMAKE_COMMAND}" -E make_directory
         "${HH_EXECUTABLE_DIR}"
@@ -82,8 +82,8 @@ add_custom_target(executable
         "$<TARGET_FILE:sessions_loop>"
         "${HH_EXECUTABLE_DIR}/$<TARGET_FILE_NAME:sessions_loop>"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-        "$<TARGET_FILE:sandbox_process>"
-        "${HH_EXECUTABLE_DIR}/$<TARGET_FILE_NAME:sandbox_process>"
+        "$<TARGET_FILE:session_runtime>"
+        "${HH_EXECUTABLE_DIR}/$<TARGET_FILE_NAME:session_runtime>"
     COMMAND "${CMAKE_COMMAND}" -E copy_if_different
         "$<TARGET_FILE:edit_file>"
         "${HH_EXECUTABLE_DIR}/$<TARGET_FILE_NAME:edit_file>"
@@ -92,6 +92,6 @@ add_custom_target(executable
 
 add_custom_target(harness_all
     DEPENDS
-        context_usage event_port provider secrets events sandbox
+        context_usage event_port ipc provider secrets sandbox
         filesystems tool_runtime sessions executable
 )

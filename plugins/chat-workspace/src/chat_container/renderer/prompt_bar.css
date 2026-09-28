@@ -1,0 +1,90 @@
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities);
+@source "./PromptBar.tsx";
+
+@theme {
+  --color-surface: #ffffff;
+  --color-ink: #15171a;
+  --color-ink-2: #4f5660;
+  --color-ink-3: #8b929c;
+  --color-line: #e6e8eb;
+  --color-line-strong: #d2d6da;
+  --color-hover: #f3f4f6;
+  --color-field: #f6f7f8;
+  --color-green: #15803d;
+  --color-accent-ink: #335cff;
+  --color-accent-tint: #eef2ff;
+
+  --shadow-raised: 0 10px 30px rgba(20, 24, 32, 0.12), 0 2px 8px rgba(20, 24, 32, 0.08);
+  --shadow-card: 0 1px 2px rgba(20, 24, 32, 0.05), 0 5px 18px rgba(20, 24, 32, 0.06);
+  --shadow-hairline: inset 0 0 0 1px rgba(20, 24, 32, 0.08);
+  --radius-chip: 7px;
+}
+
+[data-promptbar] {
+  --surface: #ffffff;
+  --ink: #15171a;
+  --ink-2: #4f5660;
+  --line-strong: #d2d6da;
+
+  box-sizing: border-box;
+  color: var(--ink);
+  font-family: "Segoe UI Variable Text", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+[data-promptbar],
+[data-promptbar] *,
+[data-promptbar] *::before,
+[data-promptbar] *::after {
+  box-sizing: border-box;
+}
+
+[data-promptbar] button,
+[data-promptbar] textarea {
+  appearance: none;
+  font: inherit;
+}
+
+[data-promptbar] button {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+[data-promptbar] button:disabled {
+  cursor: default;
+}
+
+[data-promptbar] textarea {
+  border: 0;
+  margin: 0;
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes eq-bounce {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-promptbar] *,
+  [data-promptbar] *::before,
+  [data-promptbar] *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

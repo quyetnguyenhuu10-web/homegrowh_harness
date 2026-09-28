@@ -36,7 +36,7 @@ export interface SandboxBrokerResult {
 
 interface SandboxBrokerRequest {
   executable: string;
-  args: readonly string[];
+  args: unknown;
   cwd: string;
   stdin?: string;
   timeoutMs: number;
@@ -44,7 +44,7 @@ interface SandboxBrokerRequest {
   sandbox: SandboxPolicy;
 }
 
-const REQUEST_MAGIC = Buffer.from("HHSBX002", "ascii");
+const REQUEST_MAGIC = Buffer.from("HHSBX003", "ascii");
 const RESULT_MAGIC = Buffer.from("HHSBR001", "ascii");
 
 function u32(value: number): Buffer {
@@ -68,7 +68,7 @@ export function encodeSandboxRequest(request: SandboxBrokerRequest): Buffer {
   if (request.timeoutMs > 0xffffffff) {
     throw new Error("Sandbox timeoutMs exceeds protocol range.");
   }
-  if (request.args.length > 0xffffffff || request.sandbox.filesystem.length > 0xffffffff) {
+  if (request.sandbox.filesystem.length > 0xffffffff) {
     throw new Error("Sandbox protocol item count exceeds uint32 range.");
   }
 
@@ -79,12 +79,8 @@ export function encodeSandboxRequest(request: SandboxBrokerRequest): Buffer {
     u32(request.refresh ? 1 : 0),
     ...stringField(request.executable),
     ...stringField(request.cwd),
-    u32(request.args.length),
+    ...stringField(JSON.stringify(request.args)),
   ];
-
-  for (const argument of request.args) {
-    chunks.push(...stringField(argument));
-  }
 
   chunks.push(u32(request.sandbox.filesystem.length));
   for (const rule of request.sandbox.filesystem) {

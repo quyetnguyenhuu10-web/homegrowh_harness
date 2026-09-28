@@ -22,10 +22,6 @@ int main()
     sessions::SessionConfig config;
     config.tool_result_timeout_ms = -1;
     config.session_timeout_ms = -1;
-    config.event_log = [](const event_port::Event& event)
-    {
-        (void)event.sequence;
-    };
 
     return 0;
 }

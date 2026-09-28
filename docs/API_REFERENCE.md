@@ -4,29 +4,30 @@ Tài liệu này là danh mục API public đang có trong thư mục package.
 
 ## 1. Quy ước public
 
-Các header facade là điểm include được hỗ trợ:
+Các điểm include hoặc giao tiếp được hỗ trợ:
 
 | Package          | Header                                               | Namespace chính      | CMake target                         |
 | ---------------- | ---------------------------------------------------- | -------------------- | ------------------------------------ |
 | Context usage    | <code>&lt;context_usage&gt;</code>                   | context_usage        | context_usage::context_usage         |
 | Event port       | <code>&lt;event_port&gt;</code>                      | event_port           | event_port::event_port               |
-| Events           | <code>&lt;events&gt;</code>                          | events               | events::events                       |
 | Provider         | <code>&lt;provider&gt;</code>                        | provider             | provider                             |
-| Sandbox          | process.h and registry.h                             | sandbox              | sandbox                              |
+| Sandbox          | <code>&lt;config.h&gt;</code>, <code>&lt;process_request.h&gt;</code>, <code>&lt;process_results.h&gt;</code>, <code>&lt;sandbox_process.h&gt;</code> | sandbox | sandbox |
 | Secrets          | <code>&lt;secrets&gt;</code>                         | secrets              | secrets::secrets                     |
 | Sessions         | <code>&lt;sessions&gt;</code>                        | sessions             | sessions::sessions                   |
-| Tool runtime     | <code>&lt;tool_runtime&gt;</code>                    | tool_runtime         | tool_runtime::tool_runtime           |
+| Tool runtime     | Không có header C++ public; giao tiếp JSON qua executable | process boundary | tool_runtime (executable) |
 | Filesystems      | <code>&lt;fsystem&gt;</code>                         | fsystem              | filesystems                          |
-| Toàn bộ C++ core | <code>&lt;homegrowh_harness&gt;</code>              | các namespace ở trên | homegrowh_harness::homegrowh_harness |
+| Toàn bộ C++ core | <code>&lt;homegrowh_harness&gt;</code>              | các namespace thư viện | homegrowh_harness::homegrowh_harness |
 
-Ví dụ link CLI C++ bên ngoài:
+Ví dụ include toàn bộ API thư viện C++ trong CLI bên ngoài:
 
 ~~~cpp
 #include <homegrowh_harness>
 ~~~
 
-Target umbrella là INTERFACE; nó mang theo include directory và các target
-package. Dependency bên thứ ba được CMake gốc quản lý trong cùng build tree.
+Target umbrella là INTERFACE; nó link các thư viện C++ core. Header
+<code>&lt;homegrowh_harness&gt;</code> gom các header public của những thư viện
+đó. Executable tool_runtime dùng giao tiếp JSON nên không có header C++ trong
+umbrella. Dependency bên thứ ba được CMake gốc quản lý trong cùng build tree.
 
 Các header nằm trong src, detail, platform, tests hoặc codegen không được xem
 là API ổn định, dù một số include directory được expose để package khác biên
@@ -37,10 +38,10 @@ không copy generated header vào source tree.
 
 ### Mô hình kiến trúc
 
-Project dùng kiến trúc module theo contract, với tầng điều phối có thể thay
-thế. Mỗi package sở hữu một capability và công khai contract qua header facade.
-Package khác gọi contract đó; implementation, storage và platform backend nằm
-phía sau boundary của package.
+Core C++ theo hướng thư viện trước, với tầng điều phối có thể thay thế. Mỗi
+thư viện sở hữu một capability và công khai contract qua header public. Package
+khác gọi contract đó; implementation, storage và platform backend nằm phía sau
+boundary của package. tool_runtime là executable phục vụ giao tiếp qua process.
 
 Sessions cũng chỉ là một package trong hệ thống. Session kernel cung cấp state,
 invariant và các stage API. sessions::loop là driver mặc định để chạy workflow
@@ -245,126 +246,7 @@ struct Event
 };
 ~~~
 
-## 4. events
-
-Header:
-
-~~~cpp
-#include <events>
-~~~
-
-events là SQLite event store cross-platform, không có executable riêng.
-
-### Mô hình dữ liệu
-
-~~~cpp
-struct EventInput
-{
-    std::string events;
-    std::optional<std::string> create_at;
-    std::string session_id;
-    std::string provider;
-    std::string model;
-};
-
-struct Event
-{
-    std::int64_t row_position = 0;
-    std::string events;
-    std::string create_at;
-    std::string session_id;
-    std::string provider;
-    std::string model;
-};
-~~~
-
-Schema SQLite:
-
-~~~sql
-CREATE TABLE IF NOT EXISTS events (
-    row_position INTEGER PRIMARY KEY,
-    events TEXT NOT NULL,
-    create_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    Session_ID TEXT NOT NULL,
-    provider TEXT NOT NULL,
-    model TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS events_session_position
-ON events(Session_ID, row_position);
-~~~
-
-session_id trong C++ ánh xạ tới cột Session_ID. events được lưu dưới dạng
-text nguyên bản; store không tự parse thành message.
-
-### Store
-
-~~~cpp
-class Store
-{
-public:
-    explicit Store(const std::filesystem::path& database_path);
-    ~Store();
-
-    Store(const Store&) = delete;
-    Store& operator=(const Store&) = delete;
-    Store(Store&&) noexcept;
-    Store& operator=(Store&&) noexcept;
-};
-~~~
-
-Constructor mở hoặc tạo SQLite database, tạo thư mục cha khi cần và khởi tạo
-schema. :memory: được hỗ trợ. Các lời gọi trên cùng một Store được tuần tự
-hóa. Store đã move thì không còn dùng được.
-
-### Tạo database theo id
-
-~~~cpp
-Store create(
-    const std::string& id,
-    const std::filesystem::path& path);
-~~~
-
-Tạo path/id.db và trả về Store đang mở. id phải là tên file đơn, không được
-rỗng và không được chứa path. File đã tồn tại gây
-std::filesystem::filesystem_error.
-
-### Ghi, xóa và đọc row
-
-~~~cpp
-std::int64_t append(Store& store, const EventInput& event);
-
-bool erase(Store& store, std::int64_t row_position);
-
-std::vector<Event> query(const Store& store);
-
-std::vector<Event> query(
-    const Store& store,
-    const std::string& session_id);
-
-std::int64_t insert_after(
-    Store& store,
-    std::int64_t row_position,
-    const EventInput& event);
-~~~
-
-Invariant của row_position:
-
-- database rỗng bắt đầu ở 0;
-- append thêm sau row cuối;
-- insert_after(P) chèn tại P + 1 và dịch các row phía sau lên một;
-- erase(P) xóa P và dịch các row phía sau xuống một;
-- query luôn trả theo thứ tự row_position;
-- overload có session_id lọc chính xác theo Session_ID;
-- insert và erase chạy trong transaction;
-- insert_after ném std::out_of_range nếu P không tồn tại;
-- overflow vị trí ném std::overflow_error;
-- gọi trên Store đã move ném std::logic_error.
-
-Nếu EventInput::create_at là std::nullopt, SQLite tạo timestamp UTC
-YYYY-MM-DDTHH:MM:SS.sssZ. Lỗi SQLite được báo bằng std::runtime_error.
-
-## 5. provider
+## 4. provider
 
 Header:
 
@@ -618,86 +500,22 @@ Provider, endpoint, model_id và compaction_prompt đều do caller truyền tr�
 tiếp. Provider core không resolve model qua catalog và không tự đọc prompt từ
 filesystem/environment. Summary rỗng hoặc usage không có sẽ ném exception.
 
-## 6. sandbox
+## 5. sandbox
 
-Headers:
-
-~~~cpp
-#include <sandbox/registry.h>
-#include <sandbox/process.h>
-~~~
-
-Package này chọn implementation theo hệ điều hành:
-
-- Windows: AppContainer, Job Object và ACL;
-- Linux: Landlock và cơ chế process tương ứng.
-
-### Filesystem capability registry
+Các header public:
 
 ~~~cpp
-enum class permission
-{
-    read_only,
-    read_write,
-};
-
-struct registry_request
-{
-    std::filesystem::path path;
-    permission access = permission::read_only;
-};
-
-struct registered_permission
-{
-    std::filesystem::path path;
-    permission access = permission::read_only;
-    std::wstring capability_name;
-    std::wstring sid;
-    bool reused = false;
-};
-
-struct registry_path_error
-{
-    std::filesystem::path path;
-    std::error_code error;
-};
-
-struct registry_result
-{
-    std::vector<registered_permission> permissions;
-    std::error_code final_error;
-    std::vector<registry_path_error> path_errors;
-};
-
-struct release_result
-{
-    std::error_code final_error;
-    std::vector<registry_path_error> path_errors;
-};
+#include <config.h>
+#include <process_request.h>
+#include <process_results.h>
+#include <sandbox_process.h>
 ~~~
 
-### Registry API
+Target CMake là thư viện <code>sandbox</code>. Implementation chọn theo hệ
+điều hành: Windows dùng AppContainer, Job Object và ACL; Linux dùng Landlock
+và process group. Không có broker executable <code>sandbox_process</code>.
 
-~~~cpp
-registry_result registry(
-    const std::vector<registry_request>& requests,
-    bool refresh);
-
-release_result release(const std::filesystem::path& path);
-
-release_result release_all();
-~~~
-
-registry đăng ký capability lâu bền cho các path. refresh=true reconcile trạng
-thái platform; refresh=false chỉ reuse entry đã có và không sửa ACL. Lỗi theo
-path nằm trong path_errors; lỗi toàn registry nằm trong final_error.
-
-release gỡ mọi capability của một canonical path. release_all gỡ toàn bộ
-capability của sandbox. Trên Windows chỉ ACE có SID đúng với capability đã
-lưu mới bị revoke. Trên Linux release xóa durable registry tương ứng, không
-mutate host ACL.
-
-### Process API
+### Khai báo quyền bằng config
 
 ~~~cpp
 enum class network_access : std::uint32_t
@@ -706,16 +524,60 @@ enum class network_access : std::uint32_t
     internet_client = 1,
 };
 
-struct process_request
+// Các factory trả về option dùng cho config.
+detail::read_only_config read_only(std::filesystem::path path);
+detail::read_write_config read_write(std::filesystem::path path);
+detail::network_config network(network_access access) noexcept;
+
+using config_option = std::variant<
+    detail::read_only_config,
+    detail::read_write_config,
+    detail::network_config>;
+
+class config final
 {
-    std::filesystem::path executable;
-    std::vector<std::string> arguments;
-    std::filesystem::path working_directory;
-    std::vector<registry_request> filesystem;
-    std::string stdin_data;
-    std::chrono::milliseconds timeout{120000};
-    network_access network = network_access::none;
-    bool refresh = false;
+public:
+    config() = default;
+    config(std::initializer_list<config_option> options);
+    config& add(config_option option);
+};
+~~~
+
+<code>read_only(path)</code>, <code>read_write(path)</code> và
+<code>network(access)</code> tạo option; caller ghép bằng initializer list hoặc
+<code>config.add(...)</code>. Path rỗng, cùng path được khai báo cả quyền đọc
+và ghi, hoặc các network policy khác nhau sẽ ném
+<code>std::invalid_argument</code>. Khai báo lặp cùng quyền được giữ một lần;
+không thêm network option thì mặc định là <code>none</code>.
+
+Ví dụ:
+
+~~~cpp
+sandbox::config permissions{
+    sandbox::read_only(executable),
+    sandbox::read_write(workspace),
+    sandbox::network(sandbox::network_access::none),
+};
+~~~
+
+Registry capability vẫn được dùng bên trong sandbox để áp filesystem config.
+Các hàm <code>registry</code>, <code>release</code> và
+<code>release_all</code> nằm trong header <code>src/registry.h</code>, không
+thuộc API public cho consumer.
+
+### Process API
+
+~~~cpp
+struct config_path_error
+{
+    std::filesystem::path path;
+    std::error_code error;
+};
+
+struct config_results
+{
+    std::error_code final_error;
+    std::vector<config_path_error> path_errors;
 };
 
 struct process_final_state
@@ -726,28 +588,50 @@ struct process_final_state
     int exit_code = -1;
     std::error_code os_error_before_termination;
     std::error_code final_error;
-    registry_result registry;
+    config_results config;
 };
 
-struct process_result
+struct process_results
 {
     process_final_state state;
     std::string stdout_text;
     std::string stderr_text;
 };
 
-process_result process(const process_request& request);
+struct process_request
+{
+    std::filesystem::path executable;
+    std::filesystem::path working_directory;
+    sandbox::config config;
+    std::string stdin_data;
+    std::chrono::milliseconds timeout{120000};
+    bool refresh = false;
+    process_results results;
+};
+
+void process(process_request& request);
 ~~~
 
-process chạy executable với filesystem capability, network capability, stdin,
-working directory và timeout. state.registry giữ lỗi đăng ký path;
-final_error giữ lỗi launch/supervision; os_error_before_termination giữ
-snapshot lỗi trước khi teardown do timeout.
+<code>process(request)</code> chạy executable và ghi kết quả vào
+<code>request.results</code>. Input gồm working directory, stdin, timeout và
+config quyền; không có trường arguments. <code>refresh=true</code> yêu cầu
+registry refresh/reconcile quyền filesystem, còn <code>false</code> chỉ reuse
+registration đã có. <code>state.config</code> giữ lỗi áp config theo từng path
+và lỗi chung; <code>state.final_error</code> giữ lỗi launch/supervision.
+<code>timed_out</code>, <code>terminated</code> và
+<code>os_error_before_termination</code> mô tả trạng thái khi timeout.
 
-Executable broker sandbox_process là executable CMake riêng; API library không
-tự tạo process broker cho consumer.
+~~~cpp
+sandbox::process_request request;
+request.executable = executable;
+request.working_directory = workspace;
+request.config = permissions;
+request.stdin_data = "{}";
+sandbox::process(request);
+const sandbox::process_results& result = request.results;
+~~~
 
-## 7. secrets
+## 6. secrets
 
 Header:
 
@@ -844,7 +728,7 @@ SecureString move-only; buffer được zero trước khi giải phóng. view() 
 giá trị trong lifetime của SecureString. secure_string_from yêu cầu source
 string không rỗng, copy vào secure buffer rồi wipe source string.
 
-## 8. sessions
+## 7. sessions
 
 Header:
 
@@ -915,6 +799,8 @@ struct SessionConfig
     int session_timeout_ms = -1;
     std::string compaction_prompt;
     std::filesystem::path workspace_path;
+    std::filesystem::path tool_runtime_executable;
+    sandbox::config sandbox_config;
     bool refresh_workspace = false;
     StreamCallback stream;
     EventLogCallback event_log;
@@ -944,9 +830,13 @@ SessionResult close_session(Session&& session);
 ~~~
 
 register_session kiểm tra input, lưu API key vào credential session và khởi tạo
-context checkpoint từ config caller truyền. Sessions không resolve provider,
-endpoint, model, context limit hoặc compaction prompt từ catalog. Session là
-move-only.
+context checkpoint từ config caller truyền. <code>tool_runtime_executable</code>
+phải trỏ tới file đang tồn tại; Sessions thêm quyền
+<code>sandbox::read_write(tool_runtime_executable.parent_path())</code> vào
+<code>sandbox_config</code> để runtime dùng các artifact cùng thư mục. Nếu
+config đã khai báo cùng path là read_only, <code>config.add</code> báo xung đột.
+Sessions không resolve provider, endpoint, model, context limit hoặc compaction
+prompt từ catalog. Session là move-only.
 close_session dọn credential và trả history cùng usage cuối.
 
 Hai timeout trong config dùng milliseconds và nhận `int` ở public boundary:
@@ -955,9 +845,12 @@ Hai timeout trong config dùng milliseconds và nhận `int` ở public boundary
 - số dương: timeout hữu hạn;
 - `0` và mọi số nhỏ hơn `-1`: `std::invalid_argument`.
 
-`tool_result_timeout_ms` được truyền xuyên Sessions -> ToolCallHandler ->
-`tool_runtime::execute(...)` -> `sandbox::process`; khi process timeout,
-tool_runtime trả tool result lỗi `process_timeout` theo cơ chế hiện có.
+<code>tool_result_timeout_ms</code> là timeout của process tool_runtime do
+Sessions khởi chạy qua <code>sandbox::process</code>. Sessions gửi raw tool call
+qua stdin, đọc cặp <code>tool_call</code>/<code>result</code> từ stdout. Lỗi
+config, launch, timeout, exit code khác 0 hoặc JSON output sai khiến stage ném
+exception và Session chuyển sang closed. Đây không phải tool result lỗi do
+tool_runtime tạo trong trường hợp process chưa trả kết quả hợp lệ.
 
 `session_timeout_ms` thuộc trực tiếp lifetime của Session. Khi `register_session()`
 tạo `SessionData`, Session arm một watchdog thread với timeout đã normalize. Nếu
@@ -1058,15 +951,16 @@ public:
     std::string_view call_id() const;
     std::string_view name() const;
     std::string_view arguments() const;
-    const nlohmann::json& canonical_call() const;
+    const nlohmann::json& raw_call() const noexcept;
 };
 
 ToolStage declare_tool(Session& session);
 void run_tool(Session& session, ToolStage&& stage);
 ~~~
 
-declare_tool chuẩn bị tool call tiếp theo trong assistant. run_tool thực thi
-tool, ghi canonical tool call và tool result, sau đó:
+declare_tool chuẩn bị raw tool call tiếp theo trong assistant;
+<code>raw_call()</code> trả chính giá trị đó. run_tool nhận canonical tool call
+và tool result do executable tool_runtime trả về, ghi vào history, sau đó:
 
 - chuyển sang tool stage tiếp theo nếu còn tool call;
 - chuyển về request nếu cycle đã hoàn tất.
@@ -1079,12 +973,8 @@ std::logic_error. Driver bên ngoài không tự tạo stage bằng constructor;
 State transition chuẩn:
 
 ~~~text
-request
-  -> response
-  -> finished
-  -> tool
-  -> tool
-  -> request
+request -> response -> finished
+                  -> tool -> [tool ...] -> request
 ~~~
 
 Nhánh tool lặp lại cho tới khi assistant không còn tool call. Một driver khác
@@ -1109,12 +999,14 @@ LoopResult loop(
 - tool_definitions phải là array;
 - API key, endpoint và model_id không được rỗng;
 - context_limit phải lớn hơn 0;
-- workspace_path phải là directory tồn tại;
+- tool_runtime_executable phải là regular file tồn tại.
 
 loop nhận nguyên SessionConfig, lưu session credential tạm qua secrets, resolve
 thành SecureString khi gửi request và dọn credential khi kết thúc. Khi
-assistant có tool calls, loop chạy tool cycle rồi gửi vòng tiếp theo. Kết quả
-cuối trả history và usage của final provider request.
+assistant có tool calls, loop chạy tool cycle qua sandboxed tool_runtime rồi
+gửi vòng tiếp theo. Kết quả cuối trả history và usage của final provider
+request. CLI <code>sessions_loop</code> kiểm tra thêm workspace_path là directory
+và canonicalize nó trước khi tạo SessionConfig.
 
 loop là driver mặc định và reference implementation của state machine. Nó
 không phải entrypoint bắt buộc của Session; consumer có thể gọi
@@ -1127,67 +1019,18 @@ caller tự áp approval/safety policy giữa declare và run.
 Usage thật UsageState::unavailable sau request là lỗi runtime vì loop cần usage
 để cập nhật checkpoint.
 
-### API request/compaction mức thấp
+## 8. tool_runtime
 
-~~~cpp
-provider::CompactionResult request(
-    const std::string& api_key_signature,
-    provider::Provider selected_provider,
-    const std::string& endpoint,
-    const std::string& model_id,
-    std::string_view compaction_prompt,
-    const nlohmann::json& session_current,
-    const nlohmann::json& tool_definitions,
-    bool compact,
-    const nlohmann::json& history = {},
-    provider::EventSink response_sink = {},
-    provider::EventSink summary_sink = {},
-    provider::CompactionResponse* compaction_response = nullptr);
-~~~
+<code>tool_runtime</code> là executable CMake, không có header hoặc hàm C++
+public. Sessions khởi chạy executable này trong <code>sandbox::process</code>,
+đặt working directory bằng workspace, ghi một JSON tool call vào stdin và đọc
+một JSON response từ stdout. Runtime dùng working directory của process làm
+workspace; quyền filesystem và network do <code>SessionConfig.sandbox_config</code>
+quyết định trước khi process bắt đầu.
 
-API này nhận signature đã lưu trong Secrets, resolve bằng
-resolve_secure_session, sau đó gọi provider::compaction. Nó không nhận raw
-API key. Đây là adapter request mức thấp; nó không thay thế Session kernel và
-không điều phối ba stage.
+### Giao thức stdin/stdout
 
-### Chuyển event history thành message history
-
-~~~cpp
-nlohmann::json convert_history(
-    const std::filesystem::path& database_path,
-    const std::string& session_id);
-
-nlohmann::json convert_all_history(
-    const std::filesystem::path& database_path);
-~~~
-
-Hai hàm đọc database của events, parse raw provider event theo row_position,
-hỗ trợ openai, deepseek, bonsai và dựng message array.
-
-- convert_history trả trực tiếp message array cho một session;
-- convert_all_history trả array các object
-  {"session_id": "...", "history": [...]};
-- database path rỗng/không tồn tại hoặc session id rỗng gây exception;
-- event JSON không đúng protocol provider gây std::runtime_error.
-
-## 9. tool_runtime
-
-Header:
-
-~~~cpp
-#include <tool_runtime>
-~~~
-
-### API duy nhất
-
-~~~cpp
-nlohmann::json execute(
-    const nlohmann::json& tool_call,
-    const std::filesystem::path& workspace_path,
-    bool refresh);
-~~~
-
-tool_call là OpenAI function call:
+Stdin là một OpenAI function tool call:
 
 ~~~json
 {
@@ -1195,57 +1038,79 @@ tool_call là OpenAI function call:
   "type": "function",
   "function": {
     "name": "read",
-    "arguments": {"filePath": "README.md"}
+    "arguments": "{\"filePath\":\"README.md\"}"
   }
 }
 ~~~
 
-arguments cũng có thể là JSON string chứa object hoặc array object.
-workspace_path phải là directory tồn tại và được canonicalize trước khi
-dispatch.
+<code>function.arguments</code> cũng có thể là JSON object hoặc array; dạng
+string phải parse được thành JSON. Runtime nạp định nghĩa tool từ
+<code>tool_runtime_tools/tool_definitions.json</code> cạnh executable, hoặc
+đường dẫn trong <code>HOMEGROWPH_TOOL_DEFINITIONS</code>, rồi chuẩn hóa call và
+kiểm tra arguments theo schema trước khi dispatch.
 
-Runtime hiện đăng ký:
-
-| Tool      | Runtime               | Filesystem | Network         |
-| --------- | --------------------- | ---------- | --------------- |
-| read      | TypeScript/Node       | read-only  | none            |
-| write     | TypeScript/Node       | read-write | none            |
-| glob      | TypeScript/Node       | read-only  | none            |
-| grep      | TypeScript/Node       | read-only  | none            |
-| webfetch  | TypeScript/Node       | none       | internet client |
-| todowrite | TypeScript/Node       | none       | none            |
-| edit_file | native C++ executable | read-write | none            |
-
-Kết quả là tool message:
+Stdout là một JSON object:
 
 ~~~json
 {
-  "role": "tool",
-  "tool_call_id": "call-1",
-  "content": "<JSON payload>"
+  "tool_call": {
+    "id": "call-1",
+    "type": "function",
+    "function": {"name": "read", "arguments": "{\"filePath\":\"README.md\"}"}
+  },
+  "result": {
+    "role": "tool",
+    "tool_call_id": "call-1",
+    "content": "<JSON envelope>"
+  }
 }
 ~~~
 
-Lỗi dispatch/runtime được trả trong payload với các code như
-unsupported_tool, invalid_arguments, process_timeout, sandbox_registry_failed,
-sandbox_process_failed, invalid_tool_output hoặc tool_execution_error. Input
-tool call không hợp lệ ở mức cấu trúc có thể ném std::invalid_argument.
+<code>tool_call</code> là canonical call để ghi vào assistant history.
+<code>result.content</code> là JSON được serialize thành string; envelope có
+<code>version: 1</code>, định nghĩa <code>tool</code>, <code>call_id</code> và
+array <code>results</code>. Mỗi item trong <code>results</code> biểu thị
+<code>ok</code>, kết quả hoặc lỗi. Input JSON không hợp lệ cũng được chuyển
+thành response lỗi với call ID dự phòng.
 
-Runtime mặc định dùng Node tìm từ PATH, TypeScript tool host được build từ
-package/tools, còn executable native lấy từ artifact executable. Có thể
-override bằng:
+### Tool được dispatch
+
+Runtime hiện đăng ký:
+
+| Tool      | Worker được gọi       |
+| --------- | --------------------- |
+| read      | TypeScript/Node       |
+| write     | TypeScript/Node       |
+| glob      | TypeScript/Node       |
+| grep      | TypeScript/Node       |
+| webfetch  | TypeScript/Node       |
+| todowrite | TypeScript/Node       |
+| edit_file | native C++ executable |
+
+Quyền được khai báo cho process tool_runtime ở Sessions/sandbox, không được
+chọn riêng theo tên tool trong runtime. Runtime gọi worker Node hoặc
+<code>edit_file</code> như child process. Node được tìm cạnh executable, sau
+đó qua <code>HOMEGROWPH_NODE</code> hoặc PATH. Có thể override các đường dẫn:
 
 ~~~text
 HOMEGROWPH_NODE
 HOMEGROWPH_TOOL_HOST
 HOMEGROWPH_EDIT_FILE
+HOMEGROWPH_TOOL_DEFINITIONS
 ~~~
 
-Timeout mặc định của một tool process là 120000 ms. Header
-tool_runtime/runtime/runtime.h và namespace tool_runtime::detail là
-implementation detail, không phải API consumer.
+Các lỗi như <code>invalid_tool_call</code>,
+<code>tool_schema_not_found</code>, <code>invalid_tool_call_schema</code>,
+<code>invalid_arguments</code>, <code>unsupported_tool</code>,
+<code>unsupported_native_tool</code>, <code>tool_process_failed</code>,
+<code>invalid_tool_output</code>, <code>invalid_tool_result</code> và
+<code>tool_execution_error</code> nằm trong item lỗi của
+<code>result.content</code>. Timeout của process tool_runtime do Sessions quản
+lý, không phải một mã lỗi do executable này tạo. Header trong
+<code>src/tool_runtime</code> và namespace <code>tool_runtime::detail</code>
+thuộc implementation nội bộ.
 
-## 10. fsystem
+## 9. fsystem
 
 Header:
 
@@ -1327,35 +1192,19 @@ hết timeout không có event và lỗi OS.
 Executable edit_file là adapter JSON/CLI cho tool runtime; nó không thay đổi
 API C++ của fsystem.
 
-## 11. Umbrella C++ API
+## 10. Umbrella C++ target và executable
 
-Header:
-
-~~~cpp
-#include <homegrowh_harness>
-~~~
-
-Header này include:
-
-~~~text
-context_usage
-event_port
-events
-fsystem
-provider
-sandbox/process.h
-sandbox/registry.h
-secrets
-sessions
-tool_runtime
-~~~
-
-Consumer C++ bên ngoài chỉ cần link:
+Target <code>homegrowh_harness::homegrowh_harness</code> là INTERFACE và link
+các thư viện C++ core, gồm sandbox và sessions. Nó không link executable
+<code>tool_runtime</code> vào ứng dụng. Consumer C++ có thể link:
 
 ~~~cmake
 add_subdirectory("D:/homegrowh_harness" homegrowh_harness-build)
 target_link_libraries(my_cli PRIVATE homegrowh_harness::homegrowh_harness)
 ~~~
+
+Consumer có thể include <code>&lt;homegrowh_harness&gt;</code> để dùng các
+thư viện C++ core hoặc include từng header package khi chỉ cần một phần API.
 
 ### Artifact executable
 
@@ -1363,36 +1212,57 @@ Build tổng tạo các artifact ổn định trong thư mục executable:
 
 ~~~text
 sessions_loop[.exe]
-sandbox_process[.exe]
+tool_runtime[.exe]
 edit_file[.exe]
+tool_runtime_tools/
 ~~~
 
-sessions_loop nhận một trong hai dạng:
+CLI session nhận một file JSON:
 
 ~~~text
-sessions_loop <session_current> <id> <workspace_path>
-sessions_loop <history> <session_current> <id> <workspace_path>
+sessions_loop <config.json>
 ~~~
 
-Mỗi đối số JSON có thể là inline JSON hoặc path tới file JSON. Environment
-chính của CLI:
+Các trường bắt buộc trong <code>config.json</code>:
 
-~~~text
-HH_API_KEY
-HH_PROVIDER
-HH_ENDPOINT
-HH_CONTEXT_LIMIT
-HH_COMPACT_THRESHOLD
-PROVIDER_COMPACTION_PROMPT
-HH_REFRESH_WORKSPACE
-TOOLS_DEFINITIONS
+~~~json
+{
+  "api_key": "<provider key>",
+  "provider": "openai",
+  "endpoint": "https://example.com/v1/chat/completions",
+  "model_id": "<model>",
+  "context_limit": 100000,
+  "compact_threshold": 80000,
+  "session_current": {"messages": [{"role": "user", "content": "Xin chào"}]},
+  "tool_definitions": [],
+  "workspace_path": "<workspace directory>",
+  "tool_runtime_executable": "<path to tool_runtime executable>",
+  "compaction_prompt_path": "<path to text file>",
+  "sandbox_config": {
+    "read_only": [],
+    "read_write": ["<workspace directory>"],
+    "network": "none"
+  }
+}
 ~~~
 
-sandbox_process và edit_file là helper executable được tool runtime gọi qua
-process boundary. Consumer C++ nên dùng sandbox::process và fsystem::edit;
-không phụ thuộc trực tiếp vào protocol nhị phân của helper.
+<code>history</code> là tùy chọn, mặc định array rỗng.
+<code>history</code>, <code>session_current</code> và
+<code>tool_definitions</code> nhận inline JSON hoặc path tới JSON file.
+<code>refresh_workspace</code> mặc định false;
+<code>tool_result_timeout_ms</code> và <code>session_timeout_ms</code> mặc định
+-1. Trong <code>sandbox_config</code>, hai array path là tùy chọn, còn
+<code>network</code> phải là <code>none</code> hoặc
+<code>internet_client</code>. CLI đọc <code>api_key</code> từ file JSON; nó
+không đọc các biến môi trường <code>HH_API_KEY</code>,
+<code>HH_PROVIDER</code> hay <code>HH_ENDPOINT</code>.
 
-## 12. TypeScript @hh/tools
+Sessions chạy <code>tool_runtime</code> qua API thư viện
+<code>sandbox::process</code>. Tool runtime gọi <code>edit_file</code> hoặc
+TypeScript tool host khi cần; <code>tool_runtime_tools/</code> chứa các artifact
+TypeScript và định nghĩa tool được đóng gói cùng executable.
+
+## 11. TypeScript @hh/tools
 
 Package:
 
@@ -1463,25 +1333,26 @@ package/tools/src/tool_definitions.json:
 | webfetch  | url, format?, timeout?                |
 | todowrite | todos[] gồm content, status, priority |
 
-Filesystem/network policy:
+Quyền mà các tool cần để làm việc:
 
 - read, glob, grep: read-only workspace;
 - write, edit_file: read-write workspace;
-- webfetch: network internet_client, không cấp filesystem workspace;
-- todowrite: không cấp filesystem và network.
+- webfetch: internet_client;
+- todowrite: không cần filesystem hoặc network.
+
+Trong đường C++ hiện tại, <code>sandbox_config</code> được áp cho cả process
+tool_runtime; runtime không tự đổi quyền sandbox theo từng tên tool.
 
 edit_file đi qua executable/edit_file[.exe]; sáu tool còn lại chạy qua
-TypeScript tool host. Đây là facade TypeScript riêng, còn C++ Sessions gọi
-tool_runtime::execute.
+TypeScript tool host. Đây là facade TypeScript riêng; C++ Sessions gọi
+executable tool_runtime qua sandbox::process.
 
-## 13. TypeScript @hh/chat-thread
+## 12. TypeScript @hh/chat-thread
 
-package/chat_thread/package.json khai báo ba entrypoint:
+UI plugin nằm tại `plugins/chat-workspace` và hiện chỉ public bundle browser:
 
 ~~~text
 @hh/chat-thread/embed
-@hh/chat-thread/desktop
-@hh/chat-thread/preload
 ~~~
 
 ### Embed
@@ -1500,88 +1371,21 @@ mountChatThread mount React app vào element hoặc selector và trả disposer.
 unmountChatThread an toàn khi target không tồn tại hoặc chưa mount. Khi bundle
 embed được nạp trong browser, custom element <chat-thread> cũng được đăng ký.
 
-### Desktop adapter
+Plugin không còn desktop/preload adapter. Tích hợp Session dùng
+`@hh/session-client` và process `session_runtime.exe` theo command/event protocol.
 
-~~~ts
-interface RegisterChatThreadDesktopOptions {
-  dialogTitle?: string;
-  dialogButtonLabel?: string;
-}
-
-interface ChatThreadDesktopInstallation {
-  preloadPath: string;
-  dispose(): void;
-}
-
-function registerChatThreadDesktop(
-  options?: RegisterChatThreadDesktopOptions,
-): () => void;
-
-function getChatThreadPreloadPath(): string;
-
-function installChatThreadDesktop(
-  options?: RegisterChatThreadDesktopOptions,
-): ChatThreadDesktopInstallation;
-~~~
-
-Preload expose bridge window.__homegrowhChatThreadDesktop với các nhóm method:
-
-~~~text
-model registry:
-  listModelRegistry
-  addCustomModel
-  deleteCustomModel
-  getCustomModel
-  updateCustomModel
-  getSelectedModel
-  setSelectedModel
-
-history:
-  listConversations
-  listRepositories
-  addRepository
-  addConversation
-  deleteConversation
-  readConversation
-  readConversationRow
-  readConversationContextUsage
-  setActiveConversation
-  getActiveConversation
-
-session:
-  sendChatRequest
-  cancelChatSession
-  listActiveChatSessions
-
-events:
-  onChatSessionState
-  onProviderErrorNotice
-  onConversationContextUsageUpdated
-  onCompactionDebug
-  onConversationRow
-~~~
-
-Các method event trả về hàm unsubscribe.
-
-### Trạng thái tích hợp
-
-chat_thread hiện là UI package riêng và không được add vào root CMake. Desktop
-adapter trong source hiện tại vẫn import @hh/database, @hh/provider,
-@hh/session kiểu TypeScript cũ. Vì các backend đó không còn nằm trong graph
-C++ hiện tại, các export ChatThread được ghi nhận như API source hiện có,
-chưa phải adapter đã nối tới sessions_loop C++.
-
-## 14. Không thuộc public API
+## 13. Không thuộc public API
 
 Các thành phần sau không được xem là API consumer:
 
 - provider::SSE, provider::RequestState và các header trong
   package/provider/src/request;
 - sessions::detail::*, tool_runtime::detail::* và event_port::detail::*;
-- repository/SQLite statement implementation của events;
+- adapter sessions::request trong package/sessions/src/request;
 - platform backend trong sandbox, secrets, fsystem;
 - code generator provider và generated file path trong build;
-- executable protocol header của sandbox_process và edit_file;
+- executable protocol nội bộ của edit_file và các header dưới
+  package/tool_runtime/src;
 - test helpers, benchmark và mọi header dưới tests.
 
 Consumer nên include facade header và link target CMake tương ứng. Những symbol

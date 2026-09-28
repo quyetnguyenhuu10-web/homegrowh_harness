@@ -32,8 +32,8 @@ namespace sessions::detail
             std::uint32_t session_timeout_ms_value,
             std::string&& compaction_prompt_value,
             std::filesystem::path&& workspace_path_value,
-            StreamCallback&& stream_value,
-            EventLogCallback&& event_log_value,
+            std::filesystem::path&& tool_runtime_executable_value,
+            sandbox::config&& sandbox_config_value,
             CredentialOwner&& credential_value,
             std::uint64_t tools_estimate_value,
             std::uint64_t usage_checkpoint_value,
@@ -50,17 +50,17 @@ namespace sessions::detail
               session_timeout_ms(session_timeout_ms_value),
               compaction_prompt(std::move(compaction_prompt_value)),
               workspace_path(std::move(workspace_path_value)),
-              stream(std::move(stream_value)),
-              event_log(std::move(event_log_value)),
+              tool_runtime_executable(std::move(tool_runtime_executable_value)),
+              sandbox_config(std::move(sandbox_config_value)),
               credential(std::move(credential_value)),
               tools_estimate(tools_estimate_value),
               usage_checkpoint(usage_checkpoint_value),
               tool_handler(
-                  tool_definitions,
                   workspace_path,
+                  tool_runtime_executable,
+                  sandbox_config,
                   tool_result_timeout_ms,
-                  refresh_workspace,
-                  &stream),
+                  refresh_workspace),
               session_timeout(session_timeout_ms)
         {
         }
@@ -82,9 +82,8 @@ namespace sessions::detail
         std::uint32_t session_timeout_ms = 0;
         std::string compaction_prompt;
         std::filesystem::path workspace_path;
-        StreamCallback stream;
-        EventLogCallback event_log;
-
+        std::filesystem::path tool_runtime_executable;
+        sandbox::config sandbox_config;
         CredentialOwner credential;
         std::uint64_t tools_estimate = 0;
         std::uint64_t usage_checkpoint = 0;
@@ -94,7 +93,7 @@ namespace sessions::detail
         std::optional<TurnResult> pending_turn;
 
         std::size_t tool_index = 0;
-        nlohmann::json canonical_tool_calls = nlohmann::json::array();
+        nlohmann::json runtime_tool_calls = nlohmann::json::array();
         nlohmann::json tool_results = nlohmann::json::array();
         std::optional<SessionFailure> failure;
         SessionTimeout session_timeout;

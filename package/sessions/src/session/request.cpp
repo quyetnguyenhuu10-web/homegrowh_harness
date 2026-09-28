@@ -84,7 +84,7 @@ namespace sessions
         {
             detail::fail_session(data, std::current_exception());
             if (data.failure.has_value())
-                detail::emit_session_failure(*data.failure, data.event_log);
+                detail::emit_session_failure(*data.failure);
             throw;
         }
     }
@@ -109,9 +109,7 @@ namespace sessions
                 data.session_current,
                 data.tool_definitions,
                 stage.compact_,
-                data.history,
-                data.stream,
-                data.event_log);
+                data.history);
 
             detail::commit_stage(data, SessionState::response);
         }
@@ -119,7 +117,7 @@ namespace sessions
         {
             detail::fail_session(data, std::current_exception());
             if (data.failure.has_value())
-                detail::emit_session_failure(*data.failure, data.event_log);
+                detail::emit_session_failure(*data.failure);
             throw;
         }
     }

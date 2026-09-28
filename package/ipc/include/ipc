@@ -1,0 +1,99 @@
+#pragma once
+
+#include <memory>
+#include <cstdint>
+#include <span>
+#include <string>
+#include <system_error>
+#include <vector>
+
+namespace ipc
+{
+    class server;
+    class connection;
+
+    struct server_result;
+    struct connection_result;
+    struct write_result;
+    struct read_result;
+
+    class server final
+    {
+    public:
+        server() noexcept;
+        server(const server&) = delete;
+        server& operator=(const server&) = delete;
+        server(server&&) noexcept;
+        server& operator=(server&&) noexcept;
+        ~server();
+
+    private:
+        struct impl;
+
+        explicit server(std::unique_ptr<impl>&& implementation) noexcept;
+
+        std::unique_ptr<impl> impl_;
+
+        friend server_result listen(std::string name);
+        friend connection_result accept(server& listener);
+    };
+
+    class connection final
+    {
+    public:
+        connection() noexcept;
+        connection(const connection&) = delete;
+        connection& operator=(const connection&) = delete;
+        connection(connection&&) noexcept;
+        connection& operator=(connection&&) noexcept;
+        ~connection();
+
+    private:
+        struct impl;
+
+        explicit connection(std::unique_ptr<impl>&& implementation) noexcept;
+
+        std::unique_ptr<impl> impl_;
+
+        friend connection_result accept(server& listener);
+        friend connection_result connect(std::string name);
+        friend write_result write(
+            connection& target,
+            std::span<const std::uint8_t> data);
+        friend read_result read(connection& source);
+    };
+
+    struct server_result
+    {
+        server value;
+        std::error_code error;
+    };
+
+    struct connection_result
+    {
+        connection value;
+        std::error_code error;
+    };
+
+    struct write_result
+    {
+        std::error_code error;
+    };
+
+    struct read_result
+    {
+        std::vector<std::uint8_t> data;
+        bool closed = false;
+        std::error_code error;
+    };
+
+    [[nodiscard]] server_result listen(std::string name);
+    [[nodiscard]] connection_result accept(server& listener);
+    [[nodiscard]] connection_result connect(std::string name);
+
+    [[nodiscard]] write_result write(
+        connection& target,
+        std::span<const std::uint8_t> data);
+
+    [[nodiscard]] read_result read(connection& source);
+}

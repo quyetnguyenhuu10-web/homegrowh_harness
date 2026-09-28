@@ -1,7 +1,6 @@
 #include <sessions>
+#include "util/terminal_event_ui.h"
 
-#include <cstdlib>
-#include <charconv>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -20,76 +19,77 @@
 
 namespace
 {
-    std::filesystem::path tool_definitions_path()
+    nlohmann::json load_json_file(
+        const std::filesystem::path& path,
+        const char* label)
     {
-        if (const char* explicit_path = std::getenv("TOOLS_DEFINITIONS"))
-        {
-            if (*explicit_path == '\0')
-                throw std::runtime_error("TOOLS_DEFINITIONS is empty");
-            return explicit_path;
-        }
-
-        std::filesystem::path directory = std::filesystem::current_path();
-        while (true)
-        {
-            const std::filesystem::path candidates[] = {
-                directory / "tools" / "src" / "tool_definitions.json",
-                directory / "package" / "tools" / "src" / "tool_definitions.json"
-            };
-
-            for (const std::filesystem::path& candidate : candidates)
-            {
-                if (std::filesystem::is_regular_file(candidate))
-                    return candidate;
-            }
-
-            const std::filesystem::path parent = directory.parent_path();
-            if (parent == directory || parent.empty())
-                break;
-            directory = parent;
-        }
-
-        throw std::runtime_error("tool_definitions.json not found");
-    }
-
-    nlohmann::json load_tool_definitions()
-    {
-        const std::filesystem::path path = tool_definitions_path();
         std::ifstream file(path);
         if (!file)
-            throw std::runtime_error("cannot open tool_definitions.json");
-
-        nlohmann::json definitions;
-        file >> definitions;
-        if (!definitions.is_array())
-            throw std::runtime_error("tool_definitions.json root must be an array");
-        return definitions;
-    }
-
-    std::string required_environment(const char* name)
-    {
-        const char* value = std::getenv(name);
-        if (value == nullptr || *value == '\0')
         {
-            throw std::runtime_error(std::string(name) + " is not set");
+            throw std::runtime_error(
+                std::string("cannot open ") + label + " file: " +
+                path.string());
         }
-        return value;
-    }
 
-    std::uint64_t required_uint64_environment(const char* name)
-    {
-        const std::string value = required_environment(name);
-        std::uint64_t result = 0;
-        const auto parsed = std::from_chars(
-            value.data(),
-            value.data() + value.size(),
-            result);
-        if (parsed.ec != std::errc{} || parsed.ptr != value.data() + value.size())
-        {
-            throw std::invalid_argument(
-                std::string(name) + " must be an unsigned integer");
-        }
+        nlohmann::json result;
+        file >> result;
         return result;
+    }
+
+    const nlohmann::json& required_field(
+        const nlohmann::json& config,
+        const char* key)
+    {
+        const auto found = config.find(key);
+        if (found == config.end())
+            throw std::invalid_argument(std::string("missing config field: ") + key);
+        return *found;
+    }
+
+    std::string required_string(
+        const nlohmann::json& config,
+        const char* key)
+    {
+        const nlohmann::json& value = required_field(config, key);
+        if (!value.is_string() || value.get_ref<const std::string&>().empty())
+            throw std::invalid_argument(std::string(key) + " must be a non-empty string");
+        return value.get<std::string>();
+    }
+
+    std::uint64_t required_uint64(
+        const nlohmann::json& config,
+        const char* key)
+    {
+        const nlohmann::json& value = required_field(config, key);
+        if (!value.is_number_unsigned())
+            throw std::invalid_argument(std::string(key) + " must be an unsigned integer");
+        return value.get<std::uint64_t>();
+    }
+
+    int optional_int(
+        const nlohmann::json& config,
+        const char* key,
+        int fallback)
+    {
+        const auto found = config.find(key);
+        if (found == config.end())
+            return fallback;
+        if (!found->is_number_integer())
+            throw std::invalid_argument(std::string(key) + " must be an integer");
+        return found->get<int>();
+    }
+
+    bool optional_bool(
+        const nlohmann::json& config,
+        const char* key,
+        bool fallback)
+    {
+        const auto found = config.find(key);
+        if (found == config.end())
+            return fallback;
+        if (!found->is_boolean())
+            throw std::invalid_argument(std::string(key) + " must be a boolean");
+        return found->get<bool>();
     }
 
     std::string load_text_file(const std::filesystem::path& path)
@@ -106,55 +106,87 @@ namespace
             std::istreambuf_iterator<char>());
     }
 
-    bool parse_bool(std::string_view value)
-    {
-        if (value == "true" || value == "1")
-            return true;
-        if (value == "false" || value == "0")
-            return false;
-        throw std::invalid_argument("refresh must be true, false, 1, or 0");
-    }
-
-    bool refresh_workspace_from_environment()
-    {
-        const char* value = std::getenv("HH_REFRESH_WORKSPACE");
-        if (value == nullptr || *value == '\0')
-            return false;
-        return parse_bool(value);
-    }
-
-    nlohmann::json load_json_argument(
-        const std::string& value,
+    nlohmann::json json_value_or_file(
+        const nlohmann::json& value,
         const char* label)
     {
-        const std::filesystem::path path(value);
-        std::error_code error;
-        const bool is_file = std::filesystem::is_regular_file(path, error);
-        if (!error && is_file)
-        {
-            std::ifstream file(path);
-            if (!file)
-            {
-                throw std::runtime_error(
-                    std::string("cannot open ") + label + " file: " + value);
-            }
+        if (!value.is_string())
+            return value;
 
-            nlohmann::json result;
-            file >> result;
-            return result;
-        }
+        const std::filesystem::path path =
+            value.get_ref<const std::string&>();
+        return load_json_file(path, label);
+    }
 
-        nlohmann::json result = nlohmann::json::parse(
-            value,
-            nullptr,
-            false);
-        if (result.is_discarded())
+    sandbox::config load_sandbox_config(const nlohmann::json& input)
+    {
+        if (!input.is_object())
         {
             throw std::invalid_argument(
-                std::string(label) +
-                " must be inline JSON or a path to a JSON file");
+                "sandbox_config must be a JSON object");
         }
-        return result;
+
+        sandbox::config config;
+
+        const auto add_paths = [&](const char* key, bool read_write)
+        {
+            const auto paths = input.find(key);
+            if (paths == input.end())
+                return;
+            if (!paths->is_array())
+            {
+                throw std::invalid_argument(
+                    std::string("sandbox_config.") + key +
+                    " must be an array");
+            }
+
+            for (const nlohmann::json& item : *paths)
+            {
+                if (!item.is_string())
+                {
+                    throw std::invalid_argument(
+                        std::string("sandbox_config.") + key +
+                        " entries must be strings");
+                }
+
+                const std::filesystem::path path =
+                    item.get_ref<const std::string&>();
+                config.add(
+                    read_write
+                        ? sandbox::config_option(sandbox::read_write(path))
+                        : sandbox::config_option(sandbox::read_only(path)));
+            }
+        };
+
+        add_paths("read_only", false);
+        add_paths("read_write", true);
+
+        const auto network = input.find("network");
+        if (network == input.end() || !network->is_string())
+        {
+            throw std::invalid_argument(
+                "sandbox_config.network must be none or internet_client");
+        }
+
+        const std::string& network_value =
+            network->get_ref<const std::string&>();
+        if (network_value == "none")
+        {
+            config.add(sandbox::network(
+                sandbox::network_access::none));
+        }
+        else if (network_value == "internet_client")
+        {
+            config.add(sandbox::network(
+                sandbox::network_access::internet_client));
+        }
+        else
+        {
+            throw std::invalid_argument(
+                "sandbox_config.network must be none or internet_client");
+        }
+
+        return config;
     }
 
     std::filesystem::path load_workspace_path(const std::string& value)
@@ -189,205 +221,12 @@ namespace
         return canonical;
     }
 
-    class TerminalStream final
-    {
-    public:
-        void operator()(sessions::StreamType type, std::string_view value)
-        {
-            switch (type)
-            {
-                case sessions::StreamType::reasoning:
-                    begin_text(TextMode::reasoning, "[reasoning] ");
-                    std::cout << value;
-                    std::cout.flush();
-                    return;
-
-                case sessions::StreamType::content:
-                    begin_text(TextMode::content, "[content] ");
-                    std::cout << value;
-                    std::cout.flush();
-                    return;
-
-                case sessions::StreamType::summary_start:
-                    finish_text();
-                    std::cout << "[summary]\n";
-                    std::cout.flush();
-                    return;
-
-                case sessions::StreamType::summary_reasoning:
-                    begin_text(TextMode::reasoning, "[reasoning] ");
-                    std::cout << value;
-                    std::cout.flush();
-                    return;
-
-                case sessions::StreamType::summary_content:
-                    begin_text(TextMode::content, "[content] ");
-                    std::cout << value;
-                    std::cout.flush();
-                    return;
-
-                case sessions::StreamType::summary_end:
-                    finish_text();
-                    std::cout << "[/summary]\n";
-                    std::cout.flush();
-                    return;
-
-                case sessions::StreamType::http_error:
-                {
-                    finish_text();
-                    const nlohmann::json payload = nlohmann::json::parse(value);
-                    const std::string phase = payload.value(
-                        "phase",
-                        std::string("request"));
-                    const long status_code = payload.value("status_code", 0L);
-                    const std::string status_line = payload.value(
-                        "status_line",
-                        std::string{});
-                    const std::string reason = payload.value(
-                        "reason",
-                        std::string{});
-                    const std::string body = payload.value(
-                        "body",
-                        std::string{});
-
-                    std::cerr << "HTTP error [" << phase << "]\n";
-                    if (!status_line.empty())
-                    {
-                        std::cerr << "status: " << status_line << '\n';
-                    }
-                    else
-                    {
-                        std::cerr << "status: " << status_code;
-                        if (!reason.empty())
-                            std::cerr << ' ' << reason;
-                        std::cerr << '\n';
-                    }
-
-                    if (!body.empty())
-                        std::cerr << "body: " << body << '\n';
-                    std::cerr.flush();
-                    return;
-                }
-
-                case sessions::StreamType::secondary_error:
-                {
-                    finish_text();
-                    const nlohmann::json payload = nlohmann::json::parse(value);
-                    std::cerr
-                        << "Secondary error ["
-                        << payload.value("source", std::string("unknown"))
-                        << "]";
-
-                    const std::string operation = payload.value(
-                        "operation",
-                        std::string{});
-                    if (!operation.empty())
-                        std::cerr << " operation=" << operation;
-
-                    if (payload.contains("code"))
-                        std::cerr << " code=" << payload.at("code");
-
-                    const std::string exception = payload.value(
-                        "exception",
-                        std::string{});
-                    if (!exception.empty())
-                        std::cerr << " exception=" << exception;
-
-                    std::cerr << '\n';
-                    std::cerr.flush();
-                    return;
-                }
-
-                case sessions::StreamType::tool_call:
-                    finish_text();
-                    std::cout << "Đã gọi tool với id: " << value << '\n';
-                    std::cout.flush();
-                    return;
-
-                case sessions::StreamType::tool_result:
-                    finish_text();
-                    std::cout << "Tool result của id: " << value << '\n';
-                    std::cout.flush();
-                    return;
-
-                case sessions::StreamType::context_usage:
-                {
-                    finish_text();
-                    const nlohmann::json payload = nlohmann::json::parse(value);
-                    const std::uint64_t used = payload.at("used").get<std::uint64_t>();
-                    const std::uint64_t limit = payload.at("limit").get<std::uint64_t>();
-                    const double ratio = limit == 0
-                        ? 0.0
-                        : (static_cast<double>(used) * 100.0) /
-                            static_cast<double>(limit);
-
-                    std::cout
-                        << "Context usage: "
-                        << used
-                        << " / "
-                        << limit
-                        << " ("
-                        << ratio
-                        << "%)\n";
-                    std::cout.flush();
-                    return;
-                }
-            }
-        }
-
-        void finish()
-        {
-            finish_text();
-        }
-
-    private:
-        enum class TextMode
-        {
-            none,
-            reasoning,
-            content,
-        };
-
-        void begin_text(TextMode mode, const char* label)
-        {
-            if (mode_ == mode)
-                return;
-
-            finish_text();
-            std::cout << label;
-            mode_ = mode;
-        }
-
-        void finish_text()
-        {
-            if (mode_ == TextMode::none)
-                return;
-
-            std::cout << '\n';
-            mode_ = TextMode::none;
-        }
-
-        TextMode mode_ = TextMode::none;
-    };
-
     void print_usage(const char* executable)
     {
         std::cerr
             << "usage:\n"
             << "  " << executable
-            << " <session_current> <id> <workspace_path>\n"
-            << "  " << executable
-            << " <history> <session_current> <id> <workspace_path>\n"
-            << "history is optional; when omitted it defaults to []\n"
-            << "history/session_current: inline JSON or path to JSON file\n"
-            << "environment:\n"
-            << "  HH_API_KEY=<raw api key>\n"
-            << "  HH_PROVIDER=<openai|deepseek|bonsai>\n"
-            << "  HH_ENDPOINT=<request endpoint>\n"
-            << "  HH_CONTEXT_LIMIT=<tokens>\n"
-            << "  HH_COMPACT_THRESHOLD=<tokens>\n"
-            << "  PROVIDER_COMPACTION_PROMPT=<prompt file path>\n"
-            << "  HH_REFRESH_WORKSPACE=<true|false> (default false)\n";
+            << " <config.json>\n";
     }
 }
 
@@ -397,7 +236,7 @@ int main(int argc, char** argv)
     SetConsoleOutputCP(CP_UTF8);
 #endif
 
-    if (argc != 4 && argc != 5)
+    if (argc != 2)
     {
         print_usage(argv[0]);
         return 2;
@@ -405,37 +244,49 @@ int main(int argc, char** argv)
 
     try
     {
-        const char* raw_api_key = std::getenv("HH_API_KEY");
-        if (raw_api_key == nullptr || *raw_api_key == '\0')
-            throw std::runtime_error("HH_API_KEY is not set");
+        const nlohmann::json input =
+            load_json_file(argv[1], "session config");
+        if (!input.is_object())
+            throw std::invalid_argument("session config root must be an object");
 
-        const bool has_history = argc == 5;
-        nlohmann::json history = has_history
-            ? load_json_argument(argv[1], "history")
-            : nlohmann::json::array();
-        const int session_current_index = has_history ? 2 : 1;
-        const int model_id_index = has_history ? 3 : 2;
-        const int workspace_path_index = has_history ? 4 : 3;
-
-        nlohmann::json session_current =
-            load_json_argument(argv[session_current_index], "session_current");
-        const std::string model_id = argv[model_id_index];
-        const std::filesystem::path workspace_path =
-            load_workspace_path(argv[workspace_path_index]);
-        const bool refresh_workspace = refresh_workspace_from_environment();
-
-        nlohmann::json tool_definitions = load_tool_definitions();
-        std::string api_key(raw_api_key);
-        const provider::Provider selected_provider = provider::provider_from_name(
-            required_environment("HH_PROVIDER"));
-        std::string endpoint = required_environment("HH_ENDPOINT");
+        std::string api_key = required_string(input, "api_key");
+        const provider::Provider selected_provider =
+            provider::provider_from_name(required_string(input, "provider"));
+        std::string endpoint = required_string(input, "endpoint");
+        std::string model_id = required_string(input, "model_id");
         const std::uint64_t context_limit =
-            required_uint64_environment("HH_CONTEXT_LIMIT");
+            required_uint64(input, "context_limit");
         const std::uint64_t compact_threshold =
-            required_uint64_environment("HH_COMPACT_THRESHOLD");
+            required_uint64(input, "compact_threshold");
+
+        nlohmann::json history = nlohmann::json::array();
+        if (const auto found = input.find("history"); found != input.end())
+            history = json_value_or_file(*found, "history");
+
+        nlohmann::json session_current = json_value_or_file(
+            required_field(input, "session_current"),
+            "session_current");
+        nlohmann::json tool_definitions = json_value_or_file(
+            required_field(input, "tool_definitions"),
+            "tool_definitions");
+
+        const std::filesystem::path workspace_path =
+            load_workspace_path(required_string(input, "workspace_path"));
+        const std::filesystem::path tool_runtime_executable =
+            required_string(input, "tool_runtime_executable");
+
         std::string compaction_prompt = load_text_file(
-            required_environment("PROVIDER_COMPACTION_PROMPT"));
-        TerminalStream terminal;
+            required_string(input, "compaction_prompt_path"));
+        sandbox::config sandbox_config = load_sandbox_config(
+            required_field(input, "sandbox_config"));
+        const bool refresh_workspace =
+            optional_bool(input, "refresh_workspace", false);
+        const int tool_result_timeout_ms =
+            optional_int(input, "tool_result_timeout_ms", -1);
+        const int session_timeout_ms =
+            optional_int(input, "session_timeout_ms", -1);
+
+        sessions_loop::util::TerminalEventUi terminal(selected_provider);
 
         sessions::SessionConfig config;
         config.api_key_raw = std::move(api_key);
@@ -447,17 +298,16 @@ int main(int argc, char** argv)
         config.model_id = model_id;
         config.context_limit = context_limit;
         config.compact_threshold = compact_threshold;
+        config.tool_result_timeout_ms = tool_result_timeout_ms;
+        config.session_timeout_ms = session_timeout_ms;
         config.compaction_prompt = std::move(compaction_prompt);
         config.workspace_path = workspace_path;
+        config.tool_runtime_executable = tool_runtime_executable;
+        config.sandbox_config = std::move(sandbox_config);
         config.refresh_workspace = refresh_workspace;
-        config.stream = [&](sessions::StreamType type, std::string_view value)
-        {
-            terminal(type, value);
-        };
-
         (void)sessions::loop(std::move(config));
 
-        terminal.finish();
+        terminal.stop();
         return 0;
     }
     catch (const std::exception& error)

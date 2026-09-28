@@ -70,11 +70,6 @@ function toolPackageJsonPath(): string {
   return resolve(toolRuntimeRoot(), "../..", "package.json");
 }
 
-function childEnvironment(): NodeJS.ProcessEnv {
-  if (!("electron" in process.versions)) return process.env;
-  return { ...process.env, ELECTRON_RUN_AS_NODE: "1" };
-}
-
 /**
  * Runs one TypeScript tool in a dedicated Node process.
  *
@@ -118,7 +113,7 @@ export async function runOpenAITypeScriptTool(
       args: [toolHostPath()],
       cwd: options.filesystemAccess === undefined ? runtimeRoot : context.repositoryPath,
       stdin: JSON.stringify(request),
-      env: childEnvironment(),
+      env: process.env,
       signal: context.signal,
       timeoutMs: DEFAULT_TOOL_PROCESS_TIMEOUT_MS,
       refresh: false,

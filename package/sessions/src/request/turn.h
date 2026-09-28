@@ -1,7 +1,6 @@
 #pragma once
 
 #include <session/session_failure.h>
-#include <stream/stream.h>
 
 #include <string>
 #include <string_view>
@@ -14,7 +13,7 @@ namespace sessions::detail
     struct TurnResult
     {
         provider::CompactionResult request;
-        nlohmann::json assistant;
+        nlohmann::json tool_calls = nlohmann::json::array();
     };
 
     TurnResult run_turn(
@@ -26,11 +25,7 @@ namespace sessions::detail
         const nlohmann::json& session_current,
         const nlohmann::json& tool_definitions,
         bool compact,
-        const nlohmann::json& history,
-        const StreamCallback& stream,
-        const EventLogCallback& event_log);
+        const nlohmann::json& history);
 
-    void emit_session_failure(
-        const SessionFailure& failure,
-        const EventLogCallback& event_log) noexcept;
+    void emit_session_failure(const SessionFailure& failure) noexcept;
 }

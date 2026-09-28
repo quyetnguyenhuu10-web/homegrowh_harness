@@ -11,15 +11,33 @@
 
 namespace sessions
 {
+    namespace
+    {
+        std::string_view string_field(
+            const nlohmann::json& object,
+            std::string_view key)
+        {
+            static constexpr std::string_view empty;
+            if (!object.is_object())
+                return empty;
+
+            const auto value = object.find(std::string(key));
+            if (value == object.end() || !value->is_string())
+                return empty;
+
+            return value->get_ref<const std::string&>();
+        }
+    }
+
     ToolStage::ToolStage(
         std::uint64_t generation,
         std::uint64_t token,
         std::size_t index,
-        std::unique_ptr<detail::PreparedToolCall>&& prepared) noexcept
+        nlohmann::json raw_tool_call) noexcept
         : generation_(generation),
           token_(token),
           index_(index),
-          prepared_(std::move(prepared))
+          raw_tool_call_(std::move(raw_tool_call))
     {
     }
 
@@ -29,24 +47,36 @@ namespace sessions
 
     std::string_view ToolStage::call_id() const
     {
-        return prepared_->tool_call.at("id").get_ref<const std::string&>();
+        return string_field(raw_tool_call_, "id");
     }
 
     std::string_view ToolStage::name() const
     {
-        return prepared_->tool_call.at("function").at("name")
-            .get_ref<const std::string&>();
+        if (!raw_tool_call_.is_object())
+            return {};
+
+        const auto function = raw_tool_call_.find("function");
+        if (function == raw_tool_call_.end() || !function->is_object())
+            return {};
+
+        return string_field(*function, "name");
     }
 
     std::string_view ToolStage::arguments() const
     {
-        return prepared_->tool_call.at("function").at("arguments")
-            .get_ref<const std::string&>();
+        if (!raw_tool_call_.is_object())
+            return {};
+
+        const auto function = raw_tool_call_.find("function");
+        if (function == raw_tool_call_.end() || !function->is_object())
+            return {};
+
+        return string_field(*function, "arguments");
     }
 
-    const nlohmann::json& ToolStage::canonical_call() const
+    const nlohmann::json& ToolStage::raw_call() const noexcept
     {
-        return prepared_->tool_call;
+        return raw_tool_call_;
     }
 
     ToolStage declare_tool(Session& session)
@@ -64,21 +94,19 @@ namespace sessions
             if (data.tool_index >= calls.size())
                 throw std::logic_error("sessions tool index is out of range");
 
-            auto prepared = std::make_unique<detail::PreparedToolCall>(
-                data.tool_handler.prepare(calls.at(data.tool_index)));
             const std::uint64_t token = detail::declare_stage(data);
 
             return ToolStage(
                 data.generation,
                 token,
                 data.tool_index,
-                std::move(prepared));
+                calls.at(data.tool_index));
         }
         catch (...)
         {
             detail::fail_session(data, std::current_exception());
             if (data.failure.has_value())
-                detail::emit_session_failure(*data.failure, data.event_log);
+                detail::emit_session_failure(*data.failure);
             throw;
         }
     }
@@ -91,15 +119,16 @@ namespace sessions
             SessionState::tool,
             stage.generation_,
             stage.token_);
-        if (stage.index_ != data.tool_index || stage.prepared_ == nullptr)
+        if (stage.index_ != data.tool_index)
             throw std::logic_error("sessions tool stage is stale");
 
         try
         {
             detail::HandledToolCall handled =
-                data.tool_handler.execute(std::move(*stage.prepared_));
+                data.tool_handler.execute(
+                    std::move(stage.raw_tool_call_));
 
-            data.canonical_tool_calls.push_back(std::move(handled.tool_call));
+            data.runtime_tool_calls.push_back(std::move(handled.tool_call));
             data.tool_results.push_back(std::move(handled.result_message));
             ++data.tool_index;
 
@@ -111,7 +140,7 @@ namespace sessions
                 return;
             }
 
-            assistant["tool_calls"] = std::move(data.canonical_tool_calls);
+            assistant["tool_calls"] = std::move(data.runtime_tool_calls);
             data.session_current = {
                 {"messages", std::move(data.tool_results)}
             };
@@ -121,7 +150,7 @@ namespace sessions
         {
             detail::fail_session(data, std::current_exception());
             if (data.failure.has_value())
-                detail::emit_session_failure(*data.failure, data.event_log);
+                detail::emit_session_failure(*data.failure);
             throw;
         }
     }

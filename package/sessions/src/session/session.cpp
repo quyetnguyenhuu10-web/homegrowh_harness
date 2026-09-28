@@ -5,6 +5,7 @@
 #include <session/session_state.h>
 
 #include <context_usage>
+#include <event_port>
 #include <secrets>
 
 #include <cstdint>
@@ -52,7 +53,7 @@ namespace sessions::detail
         {
             const CredentialSecondaryCleanupError* secondary =
                 data.credential.secondary_cleanup_error();
-            if (secondary == nullptr || !data.stream)
+            if (secondary == nullptr)
                 return;
 
             try
@@ -82,8 +83,13 @@ namespace sessions::detail
                     }
                 }
 
-                const std::string serialized = payload.dump();
-                data.stream(StreamType::secondary_error, serialized);
+                event_port::port(event_port::Emit{
+                    "sessions",
+                    event_port::Level::error,
+                    "secondary_error",
+                    {},
+                    std::move(payload)
+                });
             }
             catch (...)
             {
@@ -184,6 +190,19 @@ namespace sessions
             throw std::invalid_argument("context_limit must be positive");
         if (config.api_key_raw.empty())
             throw std::invalid_argument("api_key_raw must not be empty");
+        if (config.tool_runtime_executable.empty())
+            throw std::invalid_argument("tool_runtime_executable must not be empty");
+        if (!std::filesystem::is_regular_file(config.tool_runtime_executable))
+        {
+            throw std::filesystem::filesystem_error(
+                "tool_runtime_executable is not a regular file",
+                config.tool_runtime_executable,
+                std::make_error_code(std::errc::no_such_file_or_directory));
+        }
+
+        config.sandbox_config.add(
+            sandbox::read_write(
+                config.tool_runtime_executable.parent_path()));
 
         const std::uint32_t tool_result_timeout_ms = detail::normalize_timeout_ms(
             config.tool_result_timeout_ms,
@@ -216,8 +235,8 @@ namespace sessions
             session_timeout_ms,
             std::move(config.compaction_prompt),
             std::move(config.workspace_path),
-            std::move(config.stream),
-            std::move(config.event_log),
+            std::move(config.tool_runtime_executable),
+            std::move(config.sandbox_config),
             std::move(credential),
             tools_estimate,
             usage_checkpoint,

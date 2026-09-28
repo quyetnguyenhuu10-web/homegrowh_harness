@@ -10,23 +10,10 @@ TypeScript facade:
 import * as tools from "@hh/tools";
 ~~~
 
-C++ runtime:
-
-~~~cpp
-#include <tool_runtime>
-~~~
-
-Sessions C++ gọi:
-
-~~~cpp
-tool_runtime::execute(
-    tool_call,
-    workspace_path,
-    refresh,
-    timeout_ms);
-~~~
-
-@hh/tools vẫn là facade public cho consumer TypeScript; tool_runtime là execution facade mà Sessions dùng.
+C++ Sessions chạy executable `tool_runtime` qua `sandbox::process`, gửi tool
+call dưới dạng JSON qua stdin và nhận kết quả JSON từ stdout. `tool_runtime`
+không còn header hoặc hàm C++ public để include. @hh/tools vẫn là facade public
+cho consumer TypeScript.
 
 ## 2. Public tools
 
@@ -61,51 +48,57 @@ package/tools/src/tool_definitions.json
 
 TypeScript toolDefinition(name) đọc file JSON này và trả structured clone.
 
-Sessions CLI cũng tìm chính tool_definitions.json này, hoặc dùng path từ:
+Build tổng đóng gói file này cạnh executable `tool_runtime` tại
+`executable/tool_runtime_tools/tool_definitions.json`. Runtime có thể đọc file
+khác qua:
 
 ~~~text
-TOOLS_DEFINITIONS
+HOMEGROWPH_TOOL_DEFINITIONS
 ~~~
 
 Không có provider-side bản sao schema cần đồng bộ thủ công.
 
 ## 4. Runtime registry
 
-C++ tool_runtime đăng ký runtime và capability như sau:
+Executable tool_runtime đăng ký worker như sau:
 
-| Tool | Runtime | Filesystem | Network |
-| --- | --- | --- | --- |
-| read | TypeScript | read_only | none |
-| write | TypeScript | read_write | none |
-| glob | TypeScript | read_only | none |
-| grep | TypeScript | read_only | none |
-| webfetch | TypeScript | none | internet_client |
-| todowrite | TypeScript | none | none |
-| edit_file | native C++ | read_write | none |
+| Tool | Worker |
+| --- | --- |
+| read | TypeScript/Node |
+| write | TypeScript/Node |
+| glob | TypeScript/Node |
+| grep | TypeScript/Node |
+| webfetch | TypeScript/Node |
+| todowrite | TypeScript/Node |
+| edit_file | native C++ executable |
 
-Timeout process do caller truyền dưới dạng `std::uint32_t timeout_ms`; `0` không
-hợp lệ. Sessions lấy giá trị này từ `SessionConfig::tool_result_timeout_ms` sau
-khi validate/normalize.
+Sessions lấy timeout process từ `SessionConfig::tool_result_timeout_ms` sau khi
+validate/normalize. Quyền filesystem và network do caller khai báo trong
+`SessionConfig::sandbox_config` cho cả process tool_runtime; runtime không tự
+đổi quyền sandbox theo tên tool.
 
-Workspace luôn phải là directory tồn tại và được canonicalize trước khi chạy tool.
+Sessions CLI kiểm tra và canonicalize workspace trước khi tạo SessionConfig.
 
 ## 5. TypeScript execution path
 
-Trong C++ tool_runtime, sáu TypeScript tool chạy qua Node tool host:
+Sáu TypeScript tool chạy qua Node tool host:
 
 ~~~text
-tool_runtime::execute
+sessions::run_tool
   ↓
-normalize OpenAI function call
+sandbox::process(tool_runtime)
+  ↓
+validate và normalize OpenAI function call
   ↓
 Node
   ↓
-package/tools/dist/src/_runtime/tool_host.js
+tool_runtime_tools/src/_runtime/tool_host.js
   ↓
 selected TypeScript tool
 ~~~
 
-Sandbox request cấp read-only cho runtime files, package.json và thư mục Node executable; workspace chỉ được cấp khi tool cần filesystem.
+Sandbox config được áp khi Sessions khởi chạy tool_runtime. Worker Node là
+child process do tool_runtime tạo.
 
 Tool host nhận:
 
@@ -123,14 +116,16 @@ Sau khi worker thành công, readFiles trả về được merge vào state theo
 edit_file là native tool:
 
 ~~~text
-tool_runtime::execute
+sessions::run_tool
+  ↓
+sandbox::process(tool_runtime)
   ↓
 executable/edit_file[.exe]
   ↓
 --toolcall-stdin
 ~~~
 
-Runtime path mặc định được compile thành stable artifact:
+Runtime tìm edit_file cạnh executable tool_runtime:
 
 ~~~text
 <repo>/executable/edit_file.exe    Windows
@@ -147,22 +142,22 @@ TypeScript facade cũng dùng stable executable/edit_file path thay vì build/De
 
 ## 7. Sandbox process boundary
 
-C++ tool_runtime không spawn target process trực tiếp. Nó tạo sandbox::process_request và gọi sandbox::process(...).
+Sessions tạo `sandbox::process_request` rồi gọi `sandbox::process(...)` để chạy
+executable tool_runtime. Tool runtime dùng process API nội bộ để chạy Node hoặc
+edit_file dưới quyền của process đã được tạo.
 
-Policy mang:
+Request của Sessions mang:
 
 ~~~text
 executable
-arguments
 working directory
 stdin
 timeout
-network capability
-filesystem capabilities
+config gồm filesystem và network
 refresh
 ~~~
 
-Process result giữ:
+`request.results` giữ:
 
 ~~~text
 started
@@ -171,25 +166,19 @@ terminated
 exit_code
 os_error_before_termination
 final_error
-registry_final_error
-path_errors
+config.final_error
+config.path_errors
 ~~~
 
-Tool runtime không che mất mã lỗi OS khi sandbox/process có lỗi.
-
-Ở public TypeScript facade, process_runner.ts cũng chỉ được phép spawn trusted sandbox broker:
-
-~~~text
-<repo>/executable/sandbox_process[.exe]
-~~~
-
-Có thể override bằng HOMEGROWPH_SANDBOX_PROCESS.
+Lỗi config, launch, timeout hoặc output sai được Sessions báo bằng exception;
+nếu runtime đã trả JSON hợp lệ thì lỗi nghiệp vụ của tool nằm trong tool
+result. Không còn executable broker `sandbox_process`.
 
 ## 8. refresh semantics
 
 refresh không có nghĩa tạo capability identity mới.
 
-Trong Sessions, refresh_workspace chỉ được consume ở valid tool execution đầu tiên:
+Trong Sessions, refresh_workspace được consume khi chạy tool call đầu tiên:
 
 ~~~cpp
 const bool refresh = std::exchange(refresh_pending_, false);
@@ -223,7 +212,7 @@ reuse:
 
 Nếu ACL đã bị thay đổi ngoài hệ thống, filesystem operation thật được phép fail và trả lỗi OS gốc.
 
-Release ACL thuộc sandbox registry release/release_all, không thuộc refresh.
+Release ACL thuộc registry nội bộ của sandbox, không thuộc refresh.
 
 ## 9. Durable Windows registry
 
@@ -247,7 +236,7 @@ Local\HomegrowphHarness.Sandbox.Registry
 
 ## 10. Tool result contract
 
-C++ runtime nhận OpenAI-style function tool call:
+Executable tool_runtime nhận OpenAI-style function tool call:
 
 ~~~json
 {
@@ -260,20 +249,23 @@ C++ runtime nhận OpenAI-style function tool call:
 }
 ~~~
 
-Runtime normalize arguments, dispatch theo registry rồi trả message role=tool.
+Runtime normalize arguments, kiểm tra schema, dispatch theo registry nội bộ và
+trả JSON chứa `tool_call` canonical cùng `result` dạng message role=tool.
 
-Process/runtime failures được encode thành structured result như:
+Lỗi do runtime tạo được encode trong `result.content`, ví dụ:
 
 ~~~text
-process_timeout
-sandbox_registry_failed
-sandbox_process_failed
+invalid_tool_call
+tool_schema_not_found
+invalid_arguments
 invalid_tool_output
 tool_execution_error
 unsupported_tool
 ~~~
 
-Sessions còn bọc kết quả này vào envelope của tool definition trước khi gửi lại model.
+Runtime tự bọc kết quả vào envelope của tool definition. Timeout và lỗi
+sandbox::process xảy ra trước khi runtime trả JSON được Sessions báo bằng
+exception.
 
 ## 11. Boundary
 
@@ -284,10 +276,10 @@ public tool schema
 TypeScript tool implementation
 native edit_file route
 tool dispatch
-runtime permission policy
-sandbox process request
 structured tool result
 ~~~
+
+Sessions sở hữu sandbox config và process request để khởi chạy tool_runtime.
 
 Tools stack không chịu trách nhiệm:
 
@@ -300,4 +292,4 @@ database persistence
 UI rendering
 ~~~
 
-> Schema có một nguồn tại package/tools/src/tool_definitions.json; Sessions dùng C++ tool_runtime để thực thi cùng tập tool qua sandbox.
+> Schema có một nguồn tại package/tools/src/tool_definitions.json; Sessions chạy executable tool_runtime qua sandbox để thực thi cùng tập tool.
