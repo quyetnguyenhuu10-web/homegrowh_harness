@@ -1,5 +1,5 @@
 {
-  "api_key": "Bearer tPAE1smQh_MSd5DteWg1djoXTV3pKkTDKA3gwxadr1E",
+  "api_key": "__API_KEY__",
   "provider": "bonsai",
   "endpoint": "https://trickle-crewless-smasher.ngrok-free.dev/v1/chat/completions",
   "model_id": "bonsai",
