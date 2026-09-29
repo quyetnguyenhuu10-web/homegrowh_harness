@@ -16,21 +16,14 @@ homegrowh_harness/
 │   ├── model_architech.md
 │   └── model_architech.png
 ├── host
-│   ├── linux
-│   └── windows
-│       ├── cli
-│       └── desktop
-│           ├── script
-│           ├── src
-│           │   ├── brigde
-│           │   ├── main
-│           │   └── renderer
-│           ├── tests
-│           ├── package-lock.json
-│           └── package.json
+│   └── cli
+│       ├── src
+│       ├── bun.lock
+│       ├── package.json
+│       └── tsconfig.json
 ├── include
 │   └── homegrowh_harness
-├── package
+├── lib
 │   ├── context_usage
 │   │   ├── include
 │   │   │   └── context_usage
@@ -63,6 +56,130 @@ homegrowh_harness/
 │   │   ├── tests
 │   │   │   └── event_port_test.cpp
 │   │   └── CMakeLists.txt
+│   ├── filesystems
+│   │   ├── executables
+│   │   │   ├── edit_file.cpp
+│   │   │   └── toolcall_protocol.h
+│   │   ├── include
+│   │   │   └── fsystem
+│   │   ├── src
+│   │   │   ├── config
+│   │   │   │   └── edit_config.h
+│   │   │   ├── fsystem
+│   │   │   │   ├── edit
+│   │   │   │   │   ├── edit.cpp
+│   │   │   │   │   ├── edit.h
+│   │   │   │   │   └── edit_detail.h
+│   │   │   │   └── watcher
+│   │   │   │       ├── watcher.cpp
+│   │   │   │       └── watcher.h
+│   │   │   └── platform
+│   │   │       ├── linux
+│   │   │       │   └── fsystem
+│   │   │       │       ├── edit
+│   │   │       │       │   ├── detail
+│   │   │       │       │   │   ├── edit_context.h
+│   │   │       │       │   │   ├── linux_handle.h
+│   │   │       │       │   │   ├── replace_transaction.cpp
+│   │   │       │       │   │   ├── replace_transaction.h
+│   │   │       │       │   │   ├── source_stream.cpp
+│   │   │       │       │   │   ├── source_stream.h
+│   │   │       │       │   │   ├── temp_writer.cpp
+│   │   │       │       │   │   └── temp_writer.h
+│   │   │       │       │   ├── linux_edit.cpp
+│   │   │       │       │   └── linux_edit.h
+│   │   │       │       └── watcher
+│   │   │       │           ├── edit_watcher.cpp
+│   │   │       │           ├── edit_watcher.h
+│   │   │       │           ├── linux_watcher.cpp
+│   │   │       │           ├── linux_watcher.h
+│   │   │       │           ├── public_watcher.cpp
+│   │   │       │           └── public_watcher.h
+│   │   │       └── windows
+│   │   │           └── fsystem
+│   │   │               ├── edit
+│   │   │               │   ├── detail
+│   │   │               │   │   ├── edit_context.h
+│   │   │               │   │   ├── replace_transaction.cpp
+│   │   │               │   │   ├── replace_transaction.h
+│   │   │               │   │   ├── source_stream.cpp
+│   │   │               │   │   ├── source_stream.h
+│   │   │               │   │   ├── temp_writer.cpp
+│   │   │               │   │   ├── temp_writer.h
+│   │   │               │   │   └── windows_handle.h
+│   │   │               │   ├── window_edit.h
+│   │   │               │   └── windows_edit.cpp
+│   │   │               └── watcher
+│   │   │                   ├── edit_watcher.cpp
+│   │   │                   ├── edit_watcher.h
+│   │   │                   ├── public_watcher.cpp
+│   │   │                   ├── public_watcher.h
+│   │   │                   ├── windows_watcher.cpp
+│   │   │                   ├── windows_watcher.h
+│   │   │                   ├── windows_watcher_detail.h
+│   │   │                   ├── windows_watcher_events.cpp
+│   │   │                   ├── windows_watcher_io.cpp
+│   │   │                   ├── windows_watcher_loop.cpp
+│   │   │                   ├── windows_watcher_signal.cpp
+│   │   │                   └── windows_watcher_state.cpp
+│   │   ├── tests
+│   │   │   ├── cross_platform
+│   │   │   │   └── fsystem
+│   │   │   │       ├── edit
+│   │   │   │       │   ├── chunk_matcher_stress.cpp
+│   │   │   │       │   └── edit_test.cpp
+│   │   │   │       └── watcher
+│   │   │   │           └── watcher_test.cpp
+│   │   │   ├── fixture
+│   │   │   │   ├── test.txt
+│   │   │   │   └── workflow.json
+│   │   │   ├── include
+│   │   │   │   └── test_support.h
+│   │   │   └── platform
+│   │   │       └── windows
+│   │   │           └── fsystem
+│   │   │               └── edit
+│   │   │                   ├── bench_ram
+│   │   │                   │   ├── gen_html.py
+│   │   │                   │   ├── main.cpp
+│   │   │                   │   ├── results.html
+│   │   │                   │   └── results.jsonl
+│   │   │                   └── Interference_rejection_rate
+│   │   │                       ├── fork
+│   │   │                       │   ├── edit
+│   │   │                       │   │   ├── detail
+│   │   │                       │   │   │   ├── edit_context.h
+│   │   │                       │   │   │   ├── replace_transaction.cpp
+│   │   │                       │   │   │   ├── replace_transaction.h
+│   │   │                       │   │   │   ├── source_stream.cpp
+│   │   │                       │   │   │   ├── source_stream.h
+│   │   │                       │   │   │   ├── temp_writer.cpp
+│   │   │                       │   │   │   ├── temp_writer.h
+│   │   │                       │   │   │   └── windows_handle.h
+│   │   │                       │   │   ├── window_edit.h
+│   │   │                       │   │   └── windows_edit.cpp
+│   │   │                       │   ├── watcher
+│   │   │                       │   │   ├── edit_watcher.cpp
+│   │   │                       │   │   ├── edit_watcher.h
+│   │   │                       │   │   ├── windows_watcher.cpp
+│   │   │                       │   │   ├── windows_watcher.h
+│   │   │                       │   │   ├── windows_watcher_detail.h
+│   │   │                       │   │   ├── windows_watcher_events.cpp
+│   │   │                       │   │   ├── windows_watcher_io.cpp
+│   │   │                       │   │   ├── windows_watcher_loop.cpp
+│   │   │                       │   │   ├── windows_watcher_signal.cpp
+│   │   │                       │   │   └── windows_watcher_state.cpp
+│   │   │                       │   └── irr_probes.h
+│   │   │                       ├── nowatcher
+│   │   │                       │   ├── gen_html.py
+│   │   │                       │   ├── main.cpp
+│   │   │                       │   ├── result.html
+│   │   │                       │   └── results.jsonl
+│   │   │                       ├── gen_html.py
+│   │   │                       ├── main.cpp
+│   │   │                       ├── result.html
+│   │   │                       └── results.jsonl
+│   │   └── CMakeLists.txt
 │   ├── ipc
 │   │   ├── include
 │   │   │   └── ipc
@@ -74,6 +191,16 @@ homegrowh_harness/
 │   │   ├── tests
 │   │   │   └── ipc_test.cpp
 │   │   └── CMakeLists.txt
+│   ├── ipc-client
+│   │   ├── src
+│   │   │   ├── client.ts
+│   │   │   ├── codec.ts
+│   │   │   ├── index.ts
+│   │   │   └── ipc.ts
+│   │   ├── .gitignore
+│   │   ├── package-lock.json
+│   │   ├── package.json
+│   │   └── tsconfig.json
 │   ├── provider
 │   │   ├── codegen
 │   │   │   ├── emit_usage_parser.cpp
@@ -104,10 +231,7 @@ homegrowh_harness/
 │   │   └── CMakeLists.txt
 │   ├── sandbox
 │   │   ├── include
-│   │   │   ├── config.h
-│   │   │   ├── process_request.h
-│   │   │   ├── process_results.h
-│   │   │   └── sandbox_process.h
+│   │   │   └── sandbox
 │   │   ├── src
 │   │   │   ├── linux
 │   │   │   │   ├── filesystem.cpp
@@ -171,85 +295,6 @@ homegrowh_harness/
 │   │   ├── tests
 │   │   │   └── credential_test.cpp
 │   │   └── CMakeLists.txt
-│   ├── session-client
-│   │   ├── src
-│   │   │   ├── ipc
-│   │   │   │   └── index.ts
-│   │   │   ├── runtime
-│   │   │   │   ├── codec.ts
-│   │   │   │   └── index.ts
-│   │   │   └── index.ts
-│   │   ├── .gitignore
-│   │   ├── package-lock.json
-│   │   ├── package.json
-│   │   └── tsconfig.json
-│   ├── sessions
-│   │   ├── excutable
-│   │   │   ├── loop
-│   │   │   │   ├── util
-│   │   │   │   │   ├── terminal_event_ui.cpp
-│   │   │   │   │   └── terminal_event_ui.h
-│   │   │   │   └── main.cpp
-│   │   │   └── runtime
-│   │   │       ├── command.cpp
-│   │   │       ├── command.h
-│   │   │       ├── config_parser.cpp
-│   │   │       ├── config_parser.h
-│   │   │       ├── event_forwarder.cpp
-│   │   │       ├── event_forwarder.h
-│   │   │       ├── main.cpp
-│   │   │       ├── runtime.cpp
-│   │   │       ├── runtime.h
-│   │   │       ├── runtime_event.cpp
-│   │   │       ├── runtime_request.cpp
-│   │   │       ├── runtime_response.cpp
-│   │   │       ├── runtime_session.cpp
-│   │   │       ├── runtime_tool.cpp
-│   │   │       ├── wire_json.cpp
-│   │   │       └── wire_json.h
-│   │   ├── include
-│   │   │   └── sessions
-│   │   ├── src
-│   │   │   ├── context
-│   │   │   │   ├── context.cpp
-│   │   │   │   └── context.h
-│   │   │   ├── loop
-│   │   │   │   ├── full_loop.cpp
-│   │   │   │   └── loop.h
-│   │   │   ├── request
-│   │   │   │   ├── request.cpp
-│   │   │   │   ├── request.h
-│   │   │   │   ├── turn.cpp
-│   │   │   │   └── turn.h
-│   │   │   ├── session
-│   │   │   │   ├── credential_owner.cpp
-│   │   │   │   ├── credential_owner.h
-│   │   │   │   ├── request.cpp
-│   │   │   │   ├── request.h
-│   │   │   │   ├── response.cpp
-│   │   │   │   ├── response.h
-│   │   │   │   ├── session.cpp
-│   │   │   │   ├── session.h
-│   │   │   │   ├── session_failure.h
-│   │   │   │   ├── session_internal.h
-│   │   │   │   ├── session_state.cpp
-│   │   │   │   ├── session_state.h
-│   │   │   │   ├── session_timeout.cpp
-│   │   │   │   ├── session_timeout.h
-│   │   │   │   ├── tool.cpp
-│   │   │   │   └── tool.h
-│   │   │   └── tool
-│   │   │       ├── tool_call.cpp
-│   │   │       ├── tool_call.h
-│   │   │       ├── tool_stream_parser.cpp
-│   │   │       └── tool_stream_parser.h
-│   │   ├── tests
-│   │   │   ├── context_usage_test.cpp
-│   │   │   ├── request_test.cpp
-│   │   │   ├── stage_api_test.cpp
-│   │   │   ├── tool_call_test.cpp
-│   │   │   └── tool_stream_parser_test.cpp
-│   │   └── CMakeLists.txt
 │   ├── tool_runtime
 │   │   ├── include
 │   │   ├── src
@@ -265,130 +310,6 @@ homegrowh_harness/
 │   │   ├── tests
 │   │   └── CMakeLists.txt
 │   └── tools
-│       ├── filesystems
-│       │   ├── executables
-│       │   │   ├── edit_file.cpp
-│       │   │   └── toolcall_protocol.h
-│       │   ├── include
-│       │   │   └── fsystem
-│       │   ├── src
-│       │   │   ├── config
-│       │   │   │   └── edit_config.h
-│       │   │   ├── fsystem
-│       │   │   │   ├── edit
-│       │   │   │   │   ├── edit.cpp
-│       │   │   │   │   ├── edit.h
-│       │   │   │   │   └── edit_detail.h
-│       │   │   │   └── watcher
-│       │   │   │       ├── watcher.cpp
-│       │   │   │       └── watcher.h
-│       │   │   └── platform
-│       │   │       ├── linux
-│       │   │       │   └── fsystem
-│       │   │       │       ├── edit
-│       │   │       │       │   ├── detail
-│       │   │       │       │   │   ├── edit_context.h
-│       │   │       │       │   │   ├── linux_handle.h
-│       │   │       │       │   │   ├── replace_transaction.cpp
-│       │   │       │       │   │   ├── replace_transaction.h
-│       │   │       │       │   │   ├── source_stream.cpp
-│       │   │       │       │   │   ├── source_stream.h
-│       │   │       │       │   │   ├── temp_writer.cpp
-│       │   │       │       │   │   └── temp_writer.h
-│       │   │       │       │   ├── linux_edit.cpp
-│       │   │       │       │   └── linux_edit.h
-│       │   │       │       └── watcher
-│       │   │       │           ├── edit_watcher.cpp
-│       │   │       │           ├── edit_watcher.h
-│       │   │       │           ├── linux_watcher.cpp
-│       │   │       │           ├── linux_watcher.h
-│       │   │       │           ├── public_watcher.cpp
-│       │   │       │           └── public_watcher.h
-│       │   │       └── windows
-│       │   │           └── fsystem
-│       │   │               ├── edit
-│       │   │               │   ├── detail
-│       │   │               │   │   ├── edit_context.h
-│       │   │               │   │   ├── replace_transaction.cpp
-│       │   │               │   │   ├── replace_transaction.h
-│       │   │               │   │   ├── source_stream.cpp
-│       │   │               │   │   ├── source_stream.h
-│       │   │               │   │   ├── temp_writer.cpp
-│       │   │               │   │   ├── temp_writer.h
-│       │   │               │   │   └── windows_handle.h
-│       │   │               │   ├── window_edit.h
-│       │   │               │   └── windows_edit.cpp
-│       │   │               └── watcher
-│       │   │                   ├── edit_watcher.cpp
-│       │   │                   ├── edit_watcher.h
-│       │   │                   ├── public_watcher.cpp
-│       │   │                   ├── public_watcher.h
-│       │   │                   ├── windows_watcher.cpp
-│       │   │                   ├── windows_watcher.h
-│       │   │                   ├── windows_watcher_detail.h
-│       │   │                   ├── windows_watcher_events.cpp
-│       │   │                   ├── windows_watcher_io.cpp
-│       │   │                   ├── windows_watcher_loop.cpp
-│       │   │                   ├── windows_watcher_signal.cpp
-│       │   │                   └── windows_watcher_state.cpp
-│       │   ├── tests
-│       │   │   ├── cross_platform
-│       │   │   │   └── fsystem
-│       │   │   │       ├── edit
-│       │   │   │       │   ├── chunk_matcher_stress.cpp
-│       │   │   │       │   └── edit_test.cpp
-│       │   │   │       └── watcher
-│       │   │   │           └── watcher_test.cpp
-│       │   │   ├── fixture
-│       │   │   │   ├── test.txt
-│       │   │   │   └── workflow.json
-│       │   │   ├── include
-│       │   │   │   └── test_support.h
-│       │   │   └── platform
-│       │   │       └── windows
-│       │   │           └── fsystem
-│       │   │               └── edit
-│       │   │                   ├── bench_ram
-│       │   │                   │   ├── gen_html.py
-│       │   │                   │   ├── main.cpp
-│       │   │                   │   ├── results.html
-│       │   │                   │   └── results.jsonl
-│       │   │                   └── Interference_rejection_rate
-│       │   │                       ├── fork
-│       │   │                       │   ├── edit
-│       │   │                       │   │   ├── detail
-│       │   │                       │   │   │   ├── edit_context.h
-│       │   │                       │   │   │   ├── replace_transaction.cpp
-│       │   │                       │   │   │   ├── replace_transaction.h
-│       │   │                       │   │   │   ├── source_stream.cpp
-│       │   │                       │   │   │   ├── source_stream.h
-│       │   │                       │   │   │   ├── temp_writer.cpp
-│       │   │                       │   │   │   ├── temp_writer.h
-│       │   │                       │   │   │   └── windows_handle.h
-│       │   │                       │   │   ├── window_edit.h
-│       │   │                       │   │   └── windows_edit.cpp
-│       │   │                       │   ├── watcher
-│       │   │                       │   │   ├── edit_watcher.cpp
-│       │   │                       │   │   ├── edit_watcher.h
-│       │   │                       │   │   ├── windows_watcher.cpp
-│       │   │                       │   │   ├── windows_watcher.h
-│       │   │                       │   │   ├── windows_watcher_detail.h
-│       │   │                       │   │   ├── windows_watcher_events.cpp
-│       │   │                       │   │   ├── windows_watcher_io.cpp
-│       │   │                       │   │   ├── windows_watcher_loop.cpp
-│       │   │                       │   │   ├── windows_watcher_signal.cpp
-│       │   │                       │   │   └── windows_watcher_state.cpp
-│       │   │                       │   └── irr_probes.h
-│       │   │                       ├── nowatcher
-│       │   │                       │   ├── gen_html.py
-│       │   │                       │   ├── main.cpp
-│       │   │                       │   ├── result.html
-│       │   │                       │   └── results.jsonl
-│       │   │                       ├── gen_html.py
-│       │   │                       ├── main.cpp
-│       │   │                       ├── result.html
-│       │   │                       └── results.jsonl
-│       │   └── CMakeLists.txt
 │       ├── src
 │       │   ├── _runtime
 │       │   │   ├── process_runner.ts
@@ -432,37 +353,89 @@ homegrowh_harness/
 │       ├── package-lock.json
 │       ├── package.json
 │       └── tsconfig.json
+├── package
+│   └── sessions
+│       ├── excutable
+│       │   ├── loop
+│       │   │   ├── util
+│       │   │   │   ├── terminal_event_ui.cpp
+│       │   │   │   └── terminal_event_ui.h
+│       │   │   └── main.cpp
+│       │   └── runtime
+│       │       ├── command.cpp
+│       │       ├── command.h
+│       │       ├── config_parser.cpp
+│       │       ├── config_parser.h
+│       │       ├── event_forwarder.cpp
+│       │       ├── event_forwarder.h
+│       │       ├── main.cpp
+│       │       ├── runtime.cpp
+│       │       ├── runtime.h
+│       │       ├── runtime_event.cpp
+│       │       ├── runtime_request.cpp
+│       │       ├── runtime_response.cpp
+│       │       ├── runtime_session.cpp
+│       │       ├── runtime_tool.cpp
+│       │       ├── wire_json.cpp
+│       │       └── wire_json.h
+│       ├── include
+│       │   └── sessions
+│       ├── src
+│       │   ├── context
+│       │   │   ├── context.cpp
+│       │   │   └── context.h
+│       │   ├── loop
+│       │   │   ├── full_loop.cpp
+│       │   │   └── loop.h
+│       │   ├── request
+│       │   │   ├── request.cpp
+│       │   │   ├── request.h
+│       │   │   ├── turn.cpp
+│       │   │   └── turn.h
+│       │   ├── session
+│       │   │   ├── credential_owner.cpp
+│       │   │   ├── credential_owner.h
+│       │   │   ├── request.cpp
+│       │   │   ├── request.h
+│       │   │   ├── response.cpp
+│       │   │   ├── response.h
+│       │   │   ├── session.cpp
+│       │   │   ├── session.h
+│       │   │   ├── session_failure.h
+│       │   │   ├── session_internal.h
+│       │   │   ├── session_state.cpp
+│       │   │   ├── session_state.h
+│       │   │   ├── session_timeout.cpp
+│       │   │   ├── session_timeout.h
+│       │   │   ├── tool.cpp
+│       │   │   └── tool.h
+│       │   └── tool
+│       │       ├── tool_call.cpp
+│       │       ├── tool_call.h
+│       │       ├── tool_stream_parser.cpp
+│       │       └── tool_stream_parser.h
+│       ├── tests
+│       │   ├── context_usage_test.cpp
+│       │   ├── request_test.cpp
+│       │   ├── stage_api_test.cpp
+│       │   ├── tool_call_test.cpp
+│       │   └── tool_stream_parser_test.cpp
+│       └── CMakeLists.txt
 ├── plugins
-│   ├── chat-workspace
+│   ├── session-api
 │   │   ├── src
-│   │   │   ├── chat_container
-│   │   │   │   └── renderer
-│   │   │   │       ├── ChatContainer.tsx
-│   │   │   │       ├── index.ts
-│   │   │   │       ├── prompt_bar.css
-│   │   │   │       ├── PromptBar.tsx
-│   │   │   │       ├── style.css
-│   │   │   │       ├── style_tag.ts
-│   │   │   │       ├── view_history.css
-│   │   │   │       └── ViewHistory.tsx
-│   │   │   ├── session
-│   │   │   │   ├── default_flow.ts
-│   │   │   │   └── index.ts
-│   │   │   ├── App.tsx
-│   │   │   ├── embed.tsx
-│   │   │   ├── index.css
-│   │   │   ├── main.tsx
-│   │   │   └── vite-env.d.ts
-│   │   ├── tests
-│   │   ├── package-lock.json
+│   │   │   └── index.ts
 │   │   ├── package.json
-│   │   ├── tsconfig.json
-│   │   ├── vite.config.ts
-│   │   └── vite.embed.config.ts
-│   └── terminal
+│   │   ├── plugin.json
+│   │   └── tsconfig.json
+│   ├── index.ts
+│   ├── loader.ts
+│   ├── plugin.schema.json
+│   └── plugin.ts
 ├── tests
 │   ├── session.json
-│   └── session_current.review_tool.json
+│   ├── session_current.review_tool.json
+│   └── session_runtime_cli.ts
 ├── .gitattributes
 ├── .gitignore
 ├── CMakeLists.txt

@@ -19,14 +19,14 @@ set(FILESYSTEMS_BUILD_TESTS ${HH_BUILD_TESTS} CACHE BOOL "" FORCE)
 set(SESSIONS_BUILD_TESTS ${HH_BUILD_TESTS} CACHE BOOL "" FORCE)
 
 # Each package declares its own target; all dependencies are shared here.
-add_subdirectory(package/context_usage)
-add_subdirectory(package/event_port)
-add_subdirectory(package/ipc)
-add_subdirectory(package/provider)
-add_subdirectory(package/secrets)
-add_subdirectory(package/tools/filesystems)
-add_subdirectory(package/tool_runtime)
-add_subdirectory(package/sandbox)
+add_subdirectory(lib/context_usage)
+add_subdirectory(lib/event_port)
+add_subdirectory(lib/ipc)
+add_subdirectory(lib/provider)
+add_subdirectory(lib/secrets)
+add_subdirectory(lib/filesystems)
+add_subdirectory(lib/tool_runtime)
+add_subdirectory(lib/sandbox)
 add_subdirectory(package/sessions)
 
 add_library(homegrowh_harness INTERFACE)
@@ -41,10 +41,10 @@ target_link_libraries(homegrowh_harness INTERFACE
 # A fresh checkout should not require a separate manual `npm ci` step.
 find_program(HH_NPM_EXECUTABLE NAMES npm npm.cmd)
 if(NOT HH_NPM_EXECUTABLE)
-    message(FATAL_ERROR "npm is required to prepare package/tools")
+    message(FATAL_ERROR "npm is required to prepare lib/tools")
 endif()
 
-set(HH_TOOLS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/package/tools")
+set(HH_TOOLS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/tools")
 set(HH_TOOLS_NPM_STAMP "${CMAKE_CURRENT_BINARY_DIR}/tools-npm-install.stamp")
 
 add_custom_command(
@@ -58,7 +58,7 @@ add_custom_command(
         "${HH_TOOLS_DIR}/package.json"
         "${HH_TOOLS_DIR}/package-lock.json"
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/npm_ci.cmake"
-    COMMENT "Installing package/tools Node dependencies"
+    COMMENT "Installing lib/tools Node dependencies"
     VERBATIM
 )
 

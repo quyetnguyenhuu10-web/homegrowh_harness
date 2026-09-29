@@ -1,0 +1,100 @@
+#pragma once
+
+#include <provider_types.generated.h>
+
+#include <iosfwd>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+
+#include <nlohmann/json.hpp>
+
+namespace provider
+{
+    struct HttpError final : std::runtime_error
+    {
+        HttpError();
+
+        HttpError(
+            long status_code,
+            std::string&& status_line,
+            std::string&& reason,
+            std::string&& body);
+
+        long status_code = 0;
+        std::string status_line;
+        std::string reason;
+        std::string body;
+    };
+
+    using EventHandler = void (*)(void*, std::string&&);
+    using FinishedHandler = void (*)(void*);
+
+    struct EventSink
+    {
+        void* context = nullptr;
+        EventHandler on_event = nullptr;
+        FinishedHandler on_finished = nullptr;
+    };
+
+    RequestUsage request(
+        Provider provider,
+        const std::string& url,
+        std::string_view api_key,
+        const nlohmann::json& body,
+        EventSink sink = {});
+
+    struct CompactionResponse
+    {
+        RequestUsage usage = UsageState::unavailable;
+    };
+
+    struct CompactionResult
+    {
+        nlohmann::json messages;
+        RequestUsage usage = UsageState::unavailable;
+    };
+
+    CompactionResult compaction(
+        Provider selected_provider,
+        const std::string& endpoint,
+        const std::string& model_id,
+        std::string_view api_key,
+        std::string_view compaction_prompt,
+        const nlohmann::json& session_current,
+        const nlohmann::json& tool_definitions,
+        const nlohmann::json& history = {},
+        EventSink response_sink = {},
+        bool compact = false,
+        EventSink summary_sink = {},
+        CompactionResponse* compaction_response = nullptr);
+
+    class Stream
+    {
+    public:
+        Stream(
+            Provider provider,
+            const std::string& url,
+            const std::string& api_key,
+            const nlohmann::json& body);
+
+        ~Stream();
+
+        Stream(const Stream&) = delete;
+        Stream& operator=(const Stream&) = delete;
+
+        Stream(Stream&&) noexcept;
+        Stream& operator=(Stream&&) noexcept;
+
+        const RequestUsage& usage() const;
+
+    private:
+        struct Impl;
+        std::unique_ptr<Impl> impl_;
+
+        friend std::ostream& operator<<(std::ostream& output, Stream& stream);
+    };
+
+    std::ostream& operator<<(std::ostream& output, Stream& stream);
+}

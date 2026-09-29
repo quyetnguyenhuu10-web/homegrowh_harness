@@ -38,15 +38,15 @@ loại bỏ.
 Plugin không sở hữu Session core. Hướng tích hợp mới là dùng package dùng chung:
 
 ~~~text
-@hh/session-client
+@hh/ipc-client
 ~~~
 
 Điều khiển đi theo command từ TypeScript tới `session_runtime.exe`; dữ liệu từ
 core quay về qua EventPort -> session runtime -> binary IPC -> session client.
 
 ~~~text
-plugin -> command -> @hh/session-client -> session_runtime.exe
-plugin <- event   <- @hh/session-client <- EventPort
+plugin -> command -> @hh/ipc-client -> session_runtime.exe
+plugin <- event   <- @hh/ipc-client <- EventPort
 ~~~
 
 Plugin không cần biết RequestStage/ResponseStage/ToolStage hay API C++ nội bộ.

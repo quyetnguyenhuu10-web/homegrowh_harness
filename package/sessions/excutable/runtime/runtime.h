@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <exception>
 #include <optional>
+#include <string_view>
 
 #include <sessions>
 
@@ -20,6 +21,10 @@ namespace sessions_runtime
 
         void emit_ready() const;
         void emit_protocol_error(std::exception_ptr error) const noexcept;
+        void emit_runtime_failure(
+            std::string_view source,
+            std::exception_ptr error,
+            int exit_code) const noexcept;
 
         [[nodiscard]] bool execute(Command&& command);
 

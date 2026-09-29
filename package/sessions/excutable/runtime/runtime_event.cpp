@@ -63,6 +63,28 @@ namespace sessions_runtime
         }
     }
 
+    void Runtime::emit_runtime_failure(
+        std::string_view source,
+        std::exception_ptr error,
+        int exit_code) const noexcept
+    {
+        try
+        {
+            emit_runtime_event(
+                event_port::Level::critical,
+                "runtime_failed",
+                {},
+                nlohmann::json{
+                    {"source", std::string(source)},
+                    {"exit_code", exit_code},
+                    {"error", error_json(error)}
+                });
+        }
+        catch (...)
+        {
+        }
+    }
+
     void Runtime::emit_finished(
         const Command& command,
         nlohmann::json&& result,

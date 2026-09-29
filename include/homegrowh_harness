@@ -4,9 +4,6 @@
 #include <event_port>
 #include <fsystem>
 #include <provider>
-#include <config.h>
-#include <process_request.h>
-#include <process_results.h>
-#include <sandbox_process.h>
+#include <sandbox>
 #include <secrets>
 #include <sessions>

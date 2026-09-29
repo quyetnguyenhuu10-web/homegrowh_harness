@@ -43,7 +43,7 @@ Root facade không yêu cầu consumer import registry, _shared, read_file hoặ
 Schema public của cả bảy tool nằm tại:
 
 ~~~text
-package/tools/src/tool_definitions.json
+lib/tools/src/tool_definitions.json
 ~~~
 
 TypeScript toolDefinition(name) đọc file JSON này và trả structured clone.
@@ -292,4 +292,4 @@ database persistence
 UI rendering
 ~~~
 
-> Schema có một nguồn tại package/tools/src/tool_definitions.json; Sessions chạy executable tool_runtime qua sandbox để thực thi cùng tập tool.
+> Schema có một nguồn tại lib/tools/src/tool_definitions.json; Sessions chạy executable tool_runtime qua sandbox để thực thi cùng tập tool.

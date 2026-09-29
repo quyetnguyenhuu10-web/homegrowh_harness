@@ -1,6 +1,6 @@
 #include "tool_call.h"
 
-#include <sandbox_process.h>
+#include <sandbox>
 #include <event_port>
 
 #include <chrono>

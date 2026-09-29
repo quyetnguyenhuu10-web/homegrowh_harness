@@ -2,7 +2,7 @@
 
 ## 1. Public boundary
 
-Provider hiện tại là C++ package package/provider.
+Provider hiện tại là C++ library `lib/provider`.
 
 Public header:
 
@@ -137,7 +137,7 @@ Consumer cần raw event, reasoning hoặc tool-call data có thể dùng `reque
 `provider::request()` và `provider::compaction()` không đọc `catalog.json`.
 Provider protocol types được generate chỉ từ `src/request/provider_types.json`.
 
-`package/provider/catalog.json` có thể vẫn được application dùng như một nguồn
+`lib/provider/catalog.json` có thể vẫn được application dùng như một nguồn
 config tiện ích, nhưng không phải dependency build/runtime của Provider core.
 Caller có thể lấy model configuration từ JSON, SQLite, UI, CLI, remote config
 hoặc nguồn khác rồi truyền trực tiếp xuống API.
@@ -171,7 +171,7 @@ Sessions
   -> Provider chỉ dùng view trong thời gian gọi
 ~~~
 
-Do đó không mô tả Provider là nơi sở hữu selected model, custom-model registry hoặc persistent API-key store; các API TypeScript đó không tồn tại trong package/provider hiện tại.
+Do đó không mô tả Provider là nơi sở hữu selected model, custom-model registry hoặc persistent API-key store; các API TypeScript đó không tồn tại trong lib/provider hiện tại.
 
 ## 8. Compaction
 

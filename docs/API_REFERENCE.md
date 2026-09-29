@@ -255,7 +255,7 @@ Header:
 ~~~
 
 provider cung cấp kiểu provider, parser usage được generate từ
-package/provider/src/request/provider_types.json, HTTP/SSE request, stream
+lib/provider/src/request/provider_types.json, HTTP/SSE request, stream
 helper và compaction.
 
 ### Provider và usage
@@ -505,10 +505,7 @@ filesystem/environment. Summary rỗng hoặc usage không có sẽ ném excepti
 Các header public:
 
 ~~~cpp
-#include <config.h>
-#include <process_request.h>
-#include <process_results.h>
-#include <sandbox_process.h>
+#include <sandbox>
 ~~~
 
 Target CMake là thư viện <code>sandbox</code>. Implementation chọn theo hệ
@@ -1267,7 +1264,7 @@ TypeScript và định nghĩa tool được đóng gói cùng executable.
 Package:
 
 ~~~text
-package/tools
+lib/tools
 ~~~
 
 Entry export @hh/tools có bảy callable public tool. Mỗi tool có dạng
@@ -1321,7 +1318,7 @@ interface OpenAIToolResultMessage {
 ~~~
 
 Schema đầy đủ của definition nằm tại
-package/tools/src/tool_definitions.json:
+lib/tools/src/tool_definitions.json:
 
 | Tool      | Trường chính                          |
 | --------- | ------------------------------------- |
@@ -1372,20 +1369,20 @@ unmountChatThread an toàn khi target không tồn tại hoặc chưa mount. Khi
 embed được nạp trong browser, custom element <chat-thread> cũng được đăng ký.
 
 Plugin không còn desktop/preload adapter. Tích hợp Session dùng
-`@hh/session-client` và process `session_runtime.exe` theo command/event protocol.
+`@hh/ipc-client` và process `session_runtime.exe` theo command/event protocol.
 
 ## 13. Không thuộc public API
 
 Các thành phần sau không được xem là API consumer:
 
 - provider::SSE, provider::RequestState và các header trong
-  package/provider/src/request;
+  lib/provider/src/request;
 - sessions::detail::*, tool_runtime::detail::* và event_port::detail::*;
 - adapter sessions::request trong package/sessions/src/request;
 - platform backend trong sandbox, secrets, fsystem;
 - code generator provider và generated file path trong build;
 - executable protocol nội bộ của edit_file và các header dưới
-  package/tool_runtime/src;
+  lib/tool_runtime/src;
 - test helpers, benchmark và mọi header dưới tests.
 
 Consumer nên include facade header và link target CMake tương ứng. Những symbol

@@ -1,6 +1,6 @@
 #include "config_parser.h"
 
-#include <config.h>
+#include <sandbox>
 
 #include <cstdint>
 #include <filesystem>
