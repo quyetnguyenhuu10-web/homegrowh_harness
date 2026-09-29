@@ -1,17 +1,19 @@
 export {
     PluginRegistry,
-} from "./loader.ts";
+} from "./loader.js";
 
 export type {
     JsonSchema,
     Plugin,
     PluginApi,
+    PluginApiHandle,
     PluginExecution,
     PluginFilesystemPermission,
+    PluginHandle,
     PluginLifecycle,
     PluginManifest,
     PluginModule,
     PluginReference,
     PluginRequest,
     PluginSandbox,
-} from "./plugin.ts";
+} from "./plugin.js";

@@ -6,7 +6,6 @@ homegrowh_harness/
 │   ├── dependencies.cmake
 │   └── npm_ci.cmake
 ├── docs
-│   ├── AGENTS.md
 │   ├── API_REFERENCE.md
 │   ├── BLOCK_CHAT_THREAD.md
 │   ├── BLOCK_COMPACTION.md
@@ -428,18 +427,23 @@ homegrowh_harness/
 │   │   ├── package.json
 │   │   ├── plugin.json
 │   │   └── tsconfig.json
+│   ├── bun.lock
 │   ├── index.ts
 │   ├── loader.ts
+│   ├── package.json
 │   ├── plugin.schema.json
-│   └── plugin.ts
+│   ├── plugin.ts
+│   └── tsconfig.json
 ├── tests
 │   ├── session.json
 │   ├── session_current.review_tool.json
 │   └── session_runtime_cli.ts
 ├── .gitattributes
 ├── .gitignore
+├── AGENTS.md
 ├── CMakeLists.txt
 ├── CMakePresets.json
 ├── package-lock.json
 ├── package.json
-└── README.md
+├── README.md
+└── tree.txt

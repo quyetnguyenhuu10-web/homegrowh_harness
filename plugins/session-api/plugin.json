@@ -4,8 +4,11 @@
   "api_version": 1,
   "execution": {
     "mode": "module",
-    "runtime": "bun",
-    "entry": "./dist/plugin.js"
+    "runtimes": [
+      "node",
+      "bun"
+    ],
+    "entry": "./dist/index.js"
   },
   "lifecycle": {
     "scope": "host"
@@ -24,8 +27,7 @@
   "apis": [
     {
       "id": 1,
-      "name": "register",
-      "description": "Create a register_session command accepted by session_runtime.",
+      "name": "register_session",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -35,9 +37,7 @@
         ],
         "properties": {
           "command_id": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
+            "x-hh-type": "uint64-positive"
           },
           "config": {
             "$ref": "#/$defs/session_config"
@@ -46,7 +46,6 @@
         "$defs": {
           "session_config": {
             "type": "object",
-            "additionalProperties": false,
             "required": [
               "api_key_raw",
               "history",
@@ -73,13 +72,28 @@
               "history": {
                 "type": "array"
               },
-              "session_current": {},
+              "session_current": {
+                "type": "object",
+                "required": [
+                  "messages"
+                ],
+                "properties": {
+                  "messages": {
+                    "type": "array",
+                    "minItems": 1
+                  },
+                  "tools": false
+                }
+              },
               "tool_definitions": {
                 "type": "array"
               },
               "provider": {
-                "type": "string",
-                "minLength": 1
+                "enum": [
+                  "openai",
+                  "deepseek",
+                  "bonsai"
+                ]
               },
               "endpoint": {
                 "type": "string",
@@ -90,24 +104,34 @@
                 "minLength": 1
               },
               "context_limit": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
+                "x-hh-type": "uint64-positive"
               },
               "compact_threshold": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 9007199254740991
+                "x-hh-type": "uint64"
               },
               "tool_result_timeout_ms": {
-                "type": "integer",
-                "minimum": -2147483648,
-                "maximum": 2147483647
+                "anyOf": [
+                  {
+                    "const": -1
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  }
+                ]
               },
               "session_timeout_ms": {
-                "type": "integer",
-                "minimum": -2147483648,
-                "maximum": 2147483647
+                "anyOf": [
+                  {
+                    "const": -1
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  }
+                ]
               },
               "compaction_prompt": {
                 "type": "string"
@@ -122,7 +146,6 @@
               },
               "sandbox_config": {
                 "type": "object",
-                "additionalProperties": false,
                 "required": [
                   "read_only",
                   "read_write",
@@ -160,27 +183,158 @@
         "type": "array",
         "prefixItems": [
           {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
+            "x-hh-type": "uint64-positive"
           },
           {
             "const": 1
           },
           {
-            "type": "object",
-            "description": "The session config supplied in input."
+            "$ref": "#/$defs/session_config"
           }
         ],
         "items": false,
         "minItems": 3,
-        "maxItems": 3
+        "maxItems": 3,
+        "$defs": {
+          "session_config": {
+            "type": "object",
+            "required": [
+              "api_key_raw",
+              "history",
+              "session_current",
+              "tool_definitions",
+              "provider",
+              "endpoint",
+              "model_id",
+              "context_limit",
+              "compact_threshold",
+              "tool_result_timeout_ms",
+              "session_timeout_ms",
+              "compaction_prompt",
+              "workspace_path",
+              "tool_runtime_executable",
+              "sandbox_config",
+              "refresh_workspace"
+            ],
+            "properties": {
+              "api_key_raw": {
+                "type": "string",
+                "minLength": 1
+              },
+              "history": {
+                "type": "array"
+              },
+              "session_current": {
+                "type": "object",
+                "required": [
+                  "messages"
+                ],
+                "properties": {
+                  "messages": {
+                    "type": "array",
+                    "minItems": 1
+                  },
+                  "tools": false
+                }
+              },
+              "tool_definitions": {
+                "type": "array"
+              },
+              "provider": {
+                "enum": [
+                  "openai",
+                  "deepseek",
+                  "bonsai"
+                ]
+              },
+              "endpoint": {
+                "type": "string",
+                "minLength": 1
+              },
+              "model_id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "context_limit": {
+                "x-hh-type": "uint64-positive"
+              },
+              "compact_threshold": {
+                "x-hh-type": "uint64"
+              },
+              "tool_result_timeout_ms": {
+                "anyOf": [
+                  {
+                    "const": -1
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  }
+                ]
+              },
+              "session_timeout_ms": {
+                "anyOf": [
+                  {
+                    "const": -1
+                  },
+                  {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 2147483647
+                  }
+                ]
+              },
+              "compaction_prompt": {
+                "type": "string"
+              },
+              "workspace_path": {
+                "type": "string",
+                "minLength": 1
+              },
+              "tool_runtime_executable": {
+                "type": "string",
+                "minLength": 1
+              },
+              "sandbox_config": {
+                "type": "object",
+                "required": [
+                  "read_only",
+                  "read_write",
+                  "network"
+                ],
+                "properties": {
+                  "read_only": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "read_write": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "network": {
+                    "enum": [
+                      "none",
+                      "internet_client"
+                    ]
+                  }
+                }
+              },
+              "refresh_workspace": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
       }
     },
     {
       "id": 2,
       "name": "declare_request",
-      "description": "Create a declare_request command accepted by session_runtime.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -189,9 +343,7 @@
         ],
         "properties": {
           "command_id": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
+            "x-hh-type": "uint64-positive"
           }
         }
       },
@@ -199,9 +351,7 @@
         "type": "array",
         "prefixItems": [
           {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
+            "x-hh-type": "uint64-positive"
           },
           {
             "const": 2
@@ -215,7 +365,6 @@
     {
       "id": 3,
       "name": "run_request",
-      "description": "Create a run_request command accepted by session_runtime.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -224,9 +373,7 @@
         ],
         "properties": {
           "command_id": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
+            "x-hh-type": "uint64-positive"
           }
         }
       },
@@ -234,9 +381,7 @@
         "type": "array",
         "prefixItems": [
           {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
+            "x-hh-type": "uint64-positive"
           },
           {
             "const": 3
@@ -250,7 +395,6 @@
     {
       "id": 4,
       "name": "declare_response",
-      "description": "Create a declare_response command accepted by session_runtime.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -259,9 +403,7 @@
         ],
         "properties": {
           "command_id": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
+            "x-hh-type": "uint64-positive"
           }
         }
       },
@@ -269,9 +411,7 @@
         "type": "array",
         "prefixItems": [
           {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
+            "x-hh-type": "uint64-positive"
           },
           {
             "const": 4
@@ -285,7 +425,6 @@
     {
       "id": 5,
       "name": "run_response",
-      "description": "Create a run_response command accepted by session_runtime.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -294,9 +433,7 @@
         ],
         "properties": {
           "command_id": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
+            "x-hh-type": "uint64-positive"
           }
         }
       },
@@ -304,9 +441,7 @@
         "type": "array",
         "prefixItems": [
           {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
+            "x-hh-type": "uint64-positive"
           },
           {
             "const": 5
@@ -320,7 +455,6 @@
     {
       "id": 6,
       "name": "declare_tool",
-      "description": "Create a declare_tool command accepted by session_runtime.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -329,9 +463,7 @@
         ],
         "properties": {
           "command_id": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
+            "x-hh-type": "uint64-positive"
           }
         }
       },
@@ -339,9 +471,7 @@
         "type": "array",
         "prefixItems": [
           {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
+            "x-hh-type": "uint64-positive"
           },
           {
             "const": 6
@@ -355,7 +485,6 @@
     {
       "id": 7,
       "name": "run_tool",
-      "description": "Create a run_tool command accepted by session_runtime.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -364,9 +493,7 @@
         ],
         "properties": {
           "command_id": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
+            "x-hh-type": "uint64-positive"
           }
         }
       },
@@ -374,9 +501,7 @@
         "type": "array",
         "prefixItems": [
           {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
+            "x-hh-type": "uint64-positive"
           },
           {
             "const": 7
@@ -390,7 +515,6 @@
     {
       "id": 8,
       "name": "close",
-      "description": "Create a close command accepted by session_runtime.",
       "input": {
         "type": "object",
         "additionalProperties": false,
@@ -399,9 +523,7 @@
         ],
         "properties": {
           "command_id": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
+            "x-hh-type": "uint64-positive"
           }
         }
       },
@@ -409,9 +531,7 @@
         "type": "array",
         "prefixItems": [
           {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 9007199254740991
+            "x-hh-type": "uint64-positive"
           },
           {
             "const": 8

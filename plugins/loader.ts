@@ -2,7 +2,7 @@ import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-import Ajv2020 from "ajv/dist/2020.js";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import type {
     AnySchema,
     ValidateFunction,
@@ -11,20 +11,63 @@ import type {
 import type {
     JsonSchema,
     PluginApi,
+    PluginApiHandle,
     PluginExecution,
     PluginFilesystemPermission,
+    PluginHandle,
     PluginLifecycle,
     Plugin,
     PluginManifest,
     PluginModule,
-    PluginRequest,
     PluginSandbox,
-} from "./plugin.ts";
+} from "./plugin.js";
 
 const manifestFileName = "plugin.json";
 const ajv = new Ajv2020({
     allErrors: true,
     strict: true,
+});
+
+const uint64Max = (1n << 64n) - 1n;
+
+function validHhInteger(type: string, value: unknown): boolean {
+    let integer: bigint;
+
+    if (typeof value === "bigint") {
+        integer = value;
+    } else if (
+        typeof value === "number"
+        && Number.isSafeInteger(value)
+    ) {
+        integer = BigInt(value);
+    } else {
+        return false;
+    }
+
+    if (integer < 0n || integer > uint64Max) {
+        return false;
+    }
+
+    if (type === "uint64") {
+        return true;
+    }
+    if (type === "uint64-positive") {
+        return integer > 0n;
+    }
+    return false;
+}
+
+ajv.addKeyword({
+    keyword: "x-hh-type",
+    schemaType: "string",
+    metaSchema: {
+        enum: [
+            "uint64",
+            "uint64-positive",
+        ],
+    },
+    errors: false,
+    validate: validHhInteger,
 });
 
 type LoadedApi = {
@@ -119,7 +162,7 @@ function parseManifest(value: unknown): PluginManifest {
     const executionValue = manifest.execution as Record<string, unknown>;
     const executionKeys = new Set([
         "mode",
-        "runtime",
+        "runtimes",
         "entry",
     ]);
     for (const key of Object.keys(executionValue)) {
@@ -135,15 +178,38 @@ function parseManifest(value: unknown): PluginManifest {
             "plugin manifest execution.mode must be module",
         );
     }
-    if (executionValue.runtime !== "bun") {
+    if (!Array.isArray(executionValue.runtimes)) {
         throw new Error(
-            "plugin manifest execution.runtime must be bun",
+            "plugin manifest execution.runtimes must be an array",
         );
+    }
+
+    if (executionValue.runtimes.length === 0) {
+        throw new Error(
+            "plugin manifest execution.runtimes must not be empty",
+        );
+    }
+
+    const runtimes: Array<"node" | "bun"> = [];
+    const seenRuntimes = new Set<string>();
+    for (const runtime of executionValue.runtimes) {
+        if (runtime !== "node" && runtime !== "bun") {
+            throw new Error(
+                "plugin manifest execution.runtimes contains unsupported runtime",
+            );
+        }
+        if (seenRuntimes.has(runtime)) {
+            throw new Error(
+                "plugin manifest execution.runtimes must not contain duplicates",
+            );
+        }
+        seenRuntimes.add(runtime);
+        runtimes.push(runtime);
     }
 
     const execution: PluginExecution = {
         mode: executionValue.mode,
-        runtime: executionValue.runtime,
+        runtimes,
         entry: requireString(
             executionValue.entry,
             "execution.entry",
@@ -315,6 +381,21 @@ function parseManifest(value: unknown): PluginManifest {
         }
 
         const api = value as Record<string, unknown>;
+        const apiKeys = new Set([
+            "id",
+            "name",
+            "input",
+            "output",
+        ]);
+        for (const key of Object.keys(api)) {
+            if (!apiKeys.has(key)) {
+                throw new Error(
+                    "plugin manifest apis[" + index
+                    + "] field is unsupported: " + key,
+                );
+            }
+        }
+
         const id = api.id;
         if (
             typeof id !== "number"
@@ -341,11 +422,6 @@ function parseManifest(value: unknown): PluginManifest {
         }
         apiNames.add(name);
 
-        const description = requireString(
-            api.description,
-            "apis[" + index + "].description",
-        );
-
         if (!Object.prototype.hasOwnProperty.call(api, "input")) {
             throw new Error(
                 "plugin manifest apis[" + index + "].input is required",
@@ -360,7 +436,6 @@ function parseManifest(value: unknown): PluginManifest {
         return {
             id,
             name,
-            description,
             input: requireSchema(
                 api.input,
                 "apis[" + index + "].input",
@@ -472,11 +547,98 @@ function manifestSnapshot(manifest: PluginManifest): PluginManifest {
     return structuredClone(manifest);
 }
 
+function schemaSnapshot(schema: JsonSchema): JsonSchema {
+    return structuredClone(schema);
+}
+
+async function invokeLoadedApi(
+    loaded: LoadedPlugin,
+    api: LoadedApi,
+    input: unknown,
+): Promise<unknown> {
+    if (!api.validateInput(input)) {
+        throw validationError(
+            loaded.manifest.id,
+            api.descriptor,
+            "input",
+            api.validateInput,
+        );
+    }
+
+    const output = await loaded.plugin.invoke({
+        api: api.descriptor.id,
+        input,
+    });
+
+    if (!api.validateOutput(output)) {
+        throw validationError(
+            loaded.manifest.id,
+            api.descriptor,
+            "output",
+            api.validateOutput,
+        );
+    }
+
+    return output;
+}
+
+class PluginApiHandleImpl implements PluginApiHandle {
+    readonly #loaded: LoadedPlugin;
+    readonly #api: LoadedApi;
+
+    constructor(loaded: LoadedPlugin, api: LoadedApi) {
+        this.#loaded = loaded;
+        this.#api = api;
+    }
+
+    get id(): number {
+        return this.#api.descriptor.id;
+    }
+
+    get name(): string {
+        return this.#api.descriptor.name;
+    }
+
+    get input(): JsonSchema {
+        return schemaSnapshot(this.#api.descriptor.input);
+    }
+
+    get output(): JsonSchema {
+        return schemaSnapshot(this.#api.descriptor.output);
+    }
+
+    invoke(input: unknown): Promise<unknown> {
+        return invokeLoadedApi(this.#loaded, this.#api, input);
+    }
+}
+
+class PluginHandleImpl implements PluginHandle {
+    readonly #loaded: LoadedPlugin;
+    readonly #apis: readonly PluginApiHandle[];
+
+    constructor(loaded: LoadedPlugin) {
+        this.#loaded = loaded;
+        this.#apis = Object.freeze(
+            Array.from(
+                loaded.apis.values(),
+                (api) => new PluginApiHandleImpl(loaded, api),
+            ),
+        );
+    }
+
+    get manifest(): PluginManifest {
+        return manifestSnapshot(this.#loaded.manifest);
+    }
+
+    get apis(): readonly PluginApiHandle[] {
+        return this.#apis;
+    }
+}
+
 async function loadPlugin(
-    directory: string,
+    manifestPath: string,
     supportedApiVersion = 1,
 ): Promise<LoadedPlugin> {
-    const manifestPath = path.join(directory, manifestFileName);
     const manifestRaw = await readFile(manifestPath, "utf8");
     const manifest = parseManifest(JSON.parse(manifestRaw));
 
@@ -488,7 +650,7 @@ async function loadPlugin(
         );
     }
 
-    const root = path.resolve(directory);
+    const root = path.dirname(path.resolve(manifestPath));
     const entryPath = path.resolve(root, manifest.execution.entry);
     const relativeEntry = path.relative(root, entryPath);
     if (
@@ -513,32 +675,33 @@ async function loadPlugin(
 }
 
 export class PluginRegistry {
-    readonly #plugins = new Map<string, LoadedPlugin>();
+    readonly #plugins = new Map<string, PluginHandle>();
     readonly #apiVersion: number;
 
     constructor(apiVersion = 1) {
         this.#apiVersion = apiVersion;
     }
 
-    #register(loaded: LoadedPlugin): void {
+    #register(loaded: LoadedPlugin): PluginHandle {
         const id = loaded.manifest.id;
         if (this.#plugins.has(id)) {
             throw new Error("plugin is already registered: " + id);
         }
-        this.#plugins.set(id, loaded);
+        const handle = new PluginHandleImpl(loaded);
+        this.#plugins.set(id, handle);
+        return handle;
     }
 
-    async load(directory: string): Promise<PluginManifest> {
-        const loaded = await loadPlugin(directory, this.#apiVersion);
-        this.#register(loaded);
-        return manifestSnapshot(loaded.manifest);
+    async load(manifestPath: string): Promise<PluginHandle> {
+        const loaded = await loadPlugin(manifestPath, this.#apiVersion);
+        return this.#register(loaded);
     }
 
-    async loadAll(rootDirectory: string): Promise<PluginManifest[]> {
+    async loadAll(rootDirectory: string): Promise<PluginHandle[]> {
         const entries = await readdir(rootDirectory, {
             withFileTypes: true,
         });
-        const loaded: PluginManifest[] = [];
+        const loaded: PluginHandle[] = [];
 
         for (const entry of entries) {
             if (!entry.isDirectory()) {
@@ -554,63 +717,13 @@ export class PluginRegistry {
                 continue;
             }
 
-            loaded.push(await this.load(directory));
+            loaded.push(await this.load(manifestPath));
         }
 
         return loaded;
     }
 
-    #get(id: string): LoadedPlugin {
-        const loaded = this.#plugins.get(id);
-        if (loaded === undefined) {
-            throw new Error("plugin is not registered: " + id);
-        }
-        return loaded;
-    }
-
-    list(): PluginManifest[] {
-        return Array.from(
-            this.#plugins.values(),
-            (loaded) => manifestSnapshot(loaded.manifest),
-        );
-    }
-
-    describe(id: string): PluginManifest {
-        return manifestSnapshot(this.#get(id).manifest);
-    }
-
-    async invoke(
-        id: string,
-        request: PluginRequest,
-    ): Promise<unknown> {
-        const loaded = this.#get(id);
-        const api = loaded.apis.get(request.api);
-        if (api === undefined) {
-            throw new Error(
-                "plugin " + id + " does not declare api id " + request.api,
-            );
-        }
-
-        if (!api.validateInput(request.input)) {
-            throw validationError(
-                id,
-                api.descriptor,
-                "input",
-                api.validateInput,
-            );
-        }
-
-        const output = await loaded.plugin.invoke(request);
-
-        if (!api.validateOutput(output)) {
-            throw validationError(
-                id,
-                api.descriptor,
-                "output",
-                api.validateOutput,
-            );
-        }
-
-        return output;
+    list(): PluginHandle[] {
+        return Array.from(this.#plugins.values());
     }
 }

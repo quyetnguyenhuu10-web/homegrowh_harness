@@ -4,6 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "bun build ./src/index.ts --outfile ./dist/plugin.js --target bun --format esm"
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@hh/plugins": "file:..",
+    "typescript": "^7.0.2"
   }
 }

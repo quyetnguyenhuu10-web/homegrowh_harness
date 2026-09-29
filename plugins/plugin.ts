@@ -16,7 +16,7 @@ export type PluginSandbox = {
 
 export type PluginExecution = {
     mode: "module";
-    runtime: "bun";
+    runtimes: Array<"node" | "bun">;
     entry: string;
 };
 
@@ -29,7 +29,6 @@ export type JsonSchema = boolean | Record<string, unknown>;
 export type PluginApi = {
     id: number;
     name: string;
-    description: string;
     input: JsonSchema;
     output: JsonSchema;
 };
@@ -58,3 +57,17 @@ export interface Plugin {
 export type PluginModule = {
     plugin: Plugin;
 };
+
+export interface PluginApiHandle {
+    readonly id: number;
+    readonly name: string;
+    readonly input: JsonSchema;
+    readonly output: JsonSchema;
+
+    invoke(input: unknown): Promise<unknown>;
+}
+
+export interface PluginHandle {
+    readonly manifest: PluginManifest;
+    readonly apis: readonly PluginApiHandle[];
+}

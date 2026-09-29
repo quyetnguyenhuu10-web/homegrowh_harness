@@ -33,15 +33,23 @@
       "additionalProperties": false,
       "required": [
         "mode",
-        "runtime",
+        "runtimes",
         "entry"
       ],
       "properties": {
         "mode": {
           "const": "module"
         },
-        "runtime": {
-          "const": "bun"
+        "runtimes": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "node",
+              "bun"
+            ]
+          }
         },
         "entry": {
           "type": "string",
@@ -134,7 +142,6 @@
         "required": [
           "id",
           "name",
-          "description",
           "input",
           "output"
         ],
@@ -144,10 +151,6 @@
             "minimum": 1
           },
           "name": {
-            "type": "string",
-            "minLength": 1
-          },
-          "description": {
             "type": "string",
             "minLength": 1
           },

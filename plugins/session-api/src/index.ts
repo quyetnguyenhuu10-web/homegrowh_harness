@@ -1,9 +1,10 @@
 import type {
     Plugin,
     PluginRequest,
-} from "../../plugin.ts";
+} from "@hh/plugins";
 
-type CommandId = number;
+type UInt64 = number | bigint;
+type CommandId = UInt64;
 
 const Api = {
     register: 1,
@@ -30,8 +31,8 @@ type SessionConfig = {
     provider: string;
     endpoint: string;
     model_id: string;
-    context_limit: number;
-    compact_threshold: number;
+    context_limit: UInt64;
+    compact_threshold: UInt64;
     tool_result_timeout_ms: number;
     session_timeout_ms: number;
     compaction_prompt: string;
@@ -42,43 +43,43 @@ type SessionConfig = {
 };
 
 type RegisterSessionCommand = readonly [
-    commandId: CommandId,
+    commandId: bigint,
     opcode: 1,
-    config: SessionConfig,
+    config: SessionConfigWire,
 ];
 
 type DeclareRequestCommand = readonly [
-    commandId: CommandId,
+    commandId: bigint,
     opcode: 2,
 ];
 
 type RunRequestCommand = readonly [
-    commandId: CommandId,
+    commandId: bigint,
     opcode: 3,
 ];
 
 type DeclareResponseCommand = readonly [
-    commandId: CommandId,
+    commandId: bigint,
     opcode: 4,
 ];
 
 type RunResponseCommand = readonly [
-    commandId: CommandId,
+    commandId: bigint,
     opcode: 5,
 ];
 
 type DeclareToolCommand = readonly [
-    commandId: CommandId,
+    commandId: bigint,
     opcode: 6,
 ];
 
 type RunToolCommand = readonly [
-    commandId: CommandId,
+    commandId: bigint,
     opcode: 7,
 ];
 
 type CloseCommand = readonly [
-    commandId: CommandId,
+    commandId: bigint,
     opcode: 8,
 ];
 
@@ -92,53 +93,79 @@ type SessionCommand =
     | RunToolCommand
     | CloseCommand;
 
+type SessionConfigWire = Omit<
+    SessionConfig,
+    "context_limit" | "compact_threshold"
+> & {
+    context_limit: bigint;
+    compact_threshold: bigint;
+};
+
+function uint64(value: UInt64): bigint {
+    return typeof value === "bigint"
+        ? value
+        : BigInt(value);
+}
+
+function sessionConfigWire(config: SessionConfig): SessionConfigWire {
+    return {
+        ...config,
+        context_limit: uint64(config.context_limit),
+        compact_threshold: uint64(config.compact_threshold),
+    };
+}
+
 function register(
     commandId: CommandId,
     config: SessionConfig,
 ): RegisterSessionCommand {
-    return [commandId, 1, config];
+    return [
+        uint64(commandId),
+        1,
+        sessionConfigWire(config),
+    ];
 }
 
 function declareRequest(
     commandId: CommandId,
 ): DeclareRequestCommand {
-    return [commandId, 2];
+    return [uint64(commandId), 2];
 }
 
 function runRequest(
     commandId: CommandId,
 ): RunRequestCommand {
-    return [commandId, 3];
+    return [uint64(commandId), 3];
 }
 
 function declareResponse(
     commandId: CommandId,
 ): DeclareResponseCommand {
-    return [commandId, 4];
+    return [uint64(commandId), 4];
 }
 
 function runResponse(
     commandId: CommandId,
 ): RunResponseCommand {
-    return [commandId, 5];
+    return [uint64(commandId), 5];
 }
 
 function declareTool(
     commandId: CommandId,
 ): DeclareToolCommand {
-    return [commandId, 6];
+    return [uint64(commandId), 6];
 }
 
 function runTool(
     commandId: CommandId,
 ): RunToolCommand {
-    return [commandId, 7];
+    return [uint64(commandId), 7];
 }
 
 function close(
     commandId: CommandId,
 ): CloseCommand {
-    return [commandId, 8];
+    return [uint64(commandId), 8];
 }
 
 type CommandInput = {

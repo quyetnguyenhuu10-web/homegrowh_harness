@@ -1,18 +1,28 @@
 {
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "Preserve",
-    "moduleResolution": "Bundler",
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "esModuleInterop": true,
     "strict": true,
-    "noEmit": true,
-    "allowImportingTsExtensions": true,
+    "declaration": true,
+    "sourceMap": true,
+    "rootDir": ".",
+    "outDir": "dist",
+    "noEmitOnError": true,
     "skipLibCheck": true,
     "types": [
       "node"
     ]
   },
   "include": [
-    "*.ts",
-    "session-api/src/**/*.ts"
+    "index.ts",
+    "loader.ts",
+    "plugin.ts"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules",
+    "session-api"
   ]
 }
