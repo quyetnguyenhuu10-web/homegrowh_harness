@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
+#include <utility>
 
 #if __has_include(<linux/landlock.h>)
 #include <linux/landlock.h>
@@ -119,18 +120,20 @@ namespace sandbox::detail::process::linux
             return access;
         }
 
-        bool add_path_rule(
+        landlock_error add_path_rule(
             int ruleset_fd,
             const std::filesystem::path& path,
             std::uint64_t access,
-            bool optional) noexcept
+            std::size_t permission_index) noexcept
         {
             const int fd = open(path.c_str(), O_PATH | O_CLOEXEC);
             if (fd < 0)
             {
-                if (optional && errno == ENOENT)
-                    return true;
-                return false;
+                return {
+                    errno,
+                    landlock_error_stage::open_path,
+                    permission_index,
+                };
             }
 
             landlock_path_beneath_attr rule{};
@@ -138,25 +141,41 @@ namespace sandbox::detail::process::linux
             rule.parent_fd = fd;
             const int result = add_rule(ruleset_fd, &rule);
             const int saved_errno = errno;
-            close(fd);
-            errno = saved_errno;
-            return result == 0;
-        }
+            const int close_result = close(fd);
+            const int close_error = close_result == 0 ? 0 : errno;
 
-        bool is_directory(const std::filesystem::path& path) noexcept
-        {
-            struct stat status{};
-            if (stat(path.c_str(), &status) != 0)
-                return false;
-            return S_ISDIR(status.st_mode);
+            if (result != 0)
+            {
+                return {
+                    saved_errno,
+                    landlock_error_stage::add_rule,
+                    permission_index,
+                    close_error,
+                    close_error == 0
+                        ? landlock_error_stage::none
+                        : landlock_error_stage::close_path,
+                };
+            }
+            if (close_error != 0)
+            {
+                return {
+                    close_error,
+                    landlock_error_stage::close_path,
+                    permission_index,
+                };
+            }
+            return {};
         }
     }
 #endif
 
-    std::error_code apply_landlock(const registry_result& registry) noexcept
+    landlock_error apply_landlock(const registry_result& registry) noexcept
     {
 #if !HOMEGROWPH_HAS_LANDLOCK
-        return std::error_code(ENOSYS, std::generic_category());
+        return {
+            0,
+            landlock_error_stage::unsupported,
+        };
 #else
         errno = 0;
         const int abi = create_ruleset(
@@ -164,7 +183,13 @@ namespace sandbox::detail::process::linux
             0,
             LANDLOCK_CREATE_RULESET_VERSION);
         if (abi < 1)
-            return std::error_code(errno == 0 ? ENOSYS : errno, std::generic_category());
+        {
+            landlock_error failure;
+            failure.code = errno;
+            failure.stage = landlock_error_stage::query_abi;
+            failure.native_result = abi;
+            return failure;
+        }
 
         const std::uint64_t handled = handled_access_for_abi(abi);
         landlock_ruleset_attr ruleset_attributes{};
@@ -174,36 +199,71 @@ namespace sandbox::detail::process::linux
             sizeof(ruleset_attributes),
             0);
         if (ruleset_fd < 0)
-            return std::error_code(errno, std::generic_category());
+        {
+            return {
+                errno,
+                landlock_error_stage::create_ruleset,
+            };
+        }
 
-        const auto fail = [ruleset_fd]() noexcept {
-            const int error = errno;
-            close(ruleset_fd);
-            return std::error_code(error, std::generic_category());
+        const auto finish_failure = [ruleset_fd](landlock_error failure) noexcept {
+            if (close(ruleset_fd) != 0)
+            {
+                failure.cleanup_code = errno;
+                failure.cleanup_stage = landlock_error_stage::close_ruleset;
+            }
+            return failure;
         };
 
-        for (const registered_permission& registered : registry.permissions)
+        for (std::size_t index = 0; index < registry.permissions.size(); ++index)
         {
-            const bool directory = is_directory(registered.path);
+            const registered_permission& registered = registry.permissions[index];
+            struct stat status{};
+            if (stat(registered.path.c_str(), &status) != 0)
+            {
+                return finish_failure({
+                    errno,
+                    landlock_error_stage::inspect_path,
+                    index,
+                });
+            }
+            const bool directory = S_ISDIR(status.st_mode);
             const std::uint64_t access = registered.access == permission::read_only
                 ? read_only_access(handled, directory)
                 : read_write_access(handled, directory);
-            if (!add_path_rule(
-                    ruleset_fd,
-                    registered.path,
-                    access,
-                    false))
+            landlock_error path_error = add_path_rule(
+                ruleset_fd,
+                registered.path,
+                access,
+                index);
+            if (path_error)
             {
-                return fail();
+                return finish_failure(std::move(path_error));
             }
         }
 
         if (prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0)
-            return fail();
+        {
+            return finish_failure({
+                errno,
+                landlock_error_stage::set_no_new_privileges,
+            });
+        }
         if (restrict_self(ruleset_fd) != 0)
-            return fail();
+        {
+            return finish_failure({
+                errno,
+                landlock_error_stage::restrict_self,
+            });
+        }
 
-        close(ruleset_fd);
+        if (close(ruleset_fd) != 0)
+        {
+            return {
+                errno,
+                landlock_error_stage::close_ruleset,
+            };
+        }
         return {};
 #endif
     }

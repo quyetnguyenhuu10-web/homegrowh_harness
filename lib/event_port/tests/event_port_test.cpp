@@ -21,6 +21,19 @@ namespace
         }
     }
 
+    template <typename Operation>
+    auto checked_port(Operation&& operation)
+    {
+        auto result = event_port::port(std::forward<Operation>(operation));
+        if (!result)
+        {
+            std::cerr << nlohmann::json(*result.error).dump() << '\n';
+            std::exit(EXIT_FAILURE);
+        }
+        if constexpr (!std::is_same_v<std::remove_cvref_t<Operation>, event_port::Close>)
+            return std::move(*result.value);
+    }
+
     event_port::References request_reference(const char* value)
     {
         event_port::References references;
@@ -47,7 +60,7 @@ namespace
 
 int main()
 {
-    event_port::Registration registration = event_port::port(
+    event_port::Registration registration = checked_port(
         event_port::Register{
             "provider",
             request_reference("request-7")
@@ -58,10 +71,10 @@ int main()
         std::launch::async,
         [&]
         {
-            return event_port::port(event_port::Read{registration});
+            return checked_port(event_port::Read{registration});
         });
 
-    event_port::EventPtr emitted = event_port::port(
+    event_port::EventPtr emitted = checked_port(
         provider_event("data", "request-7", 1));
     event_port::EventPtr consumed = reader.get();
     const auto after = std::chrono::system_clock::now();
@@ -77,14 +90,14 @@ int main()
     require(emitted->references.size() == 1, "event_port: reference mismatch");
     require(emitted->data.at("value") == 1, "event_port: data mismatch");
 
-    event_port::EventPtr first = event_port::port(
+    event_port::EventPtr first = checked_port(
         provider_event("data", "request-7", 2));
 
     std::future<event_port::EventPtr> blocked_writer = std::async(
         std::launch::async,
         []
         {
-            return event_port::port(
+            return checked_port(
                 provider_event("data", "request-7", 3));
         });
 
@@ -92,7 +105,7 @@ int main()
         blocked_writer.wait_for(50ms) == std::future_status::timeout,
         "event_port: producer must wait while subscriber slot is occupied");
 
-    event_port::EventPtr first_read = event_port::port(
+    event_port::EventPtr first_read = checked_port(
         event_port::Read{registration});
     require(first_read.get() == first.get(), "event_port: wrong pending event");
 
@@ -101,25 +114,25 @@ int main()
         "event_port: producer was not released after read");
 
     event_port::EventPtr second = blocked_writer.get();
-    event_port::EventPtr second_read = event_port::port(
+    event_port::EventPtr second_read = checked_port(
         event_port::Read{registration});
     require(second_read.get() == second.get(), "event_port: second event mismatch");
     require(
         second->sequence == first->sequence + 1,
         "event_port: sequence must remain monotonic");
 
-    event_port::EventPtr unmatched = event_port::port(
+    event_port::EventPtr unmatched = checked_port(
         provider_event("data", "other-request", 4));
     require(unmatched != nullptr, "event_port: unmatched emit failed");
 
-    event_port::EventPtr pending_before_move = event_port::port(
+    event_port::EventPtr pending_before_move = checked_port(
         provider_event("data", "request-7", 5));
 
     std::future<event_port::EventPtr> blocked_before_move = std::async(
         std::launch::async,
         []
         {
-            return event_port::port(
+            return checked_port(
                 provider_event("data", "request-7", 6));
         });
 
@@ -127,7 +140,7 @@ int main()
         blocked_before_move.wait_for(50ms) == std::future_status::timeout,
         "event_port: producer should be blocked before registration move");
 
-    event_port::Registration replacement = event_port::port(
+    event_port::Registration replacement = checked_port(
         event_port::Register{
             "provider",
             request_reference("replacement-request")
@@ -145,7 +158,7 @@ int main()
         pending_before_move != nullptr,
         "event_port: pending event was unexpectedly invalidated");
 
-    event_port::Registration close_registration = event_port::port(
+    event_port::Registration close_registration = checked_port(
         event_port::Register{
             "provider",
             request_reference("close-request")
@@ -155,23 +168,15 @@ int main()
         std::launch::async,
         [&]
         {
-            try
-            {
-                (void)event_port::port(
-                    event_port::Read{close_registration});
-            }
-            catch (const std::logic_error&)
-            {
-                return true;
-            }
-            return false;
+            const auto read = event_port::port(event_port::Read{close_registration});
+            return !read.value && read.error && read.error->type == "registration_closed";
         });
 
     require(
         blocked_reader.wait_for(50ms) == std::future_status::timeout,
         "event_port: reader should block before close");
 
-    event_port::port(event_port::Close{close_registration});
+    checked_port(event_port::Close{close_registration});
 
     require(
         blocked_reader.wait_for(1s) == std::future_status::ready,
@@ -180,51 +185,43 @@ int main()
         blocked_reader.get(),
         "event_port: closed reader did not report closure");
 
-    event_port::Registration drain_registration = event_port::port(
+    event_port::Registration drain_registration = checked_port(
         event_port::Register{
             "provider",
             request_reference("drain-request")
         });
 
-    event_port::EventPtr pending_before_close = event_port::port(
+    event_port::EventPtr pending_before_close = checked_port(
         provider_event("data", "drain-request", 7));
 
-    event_port::port(event_port::Close{drain_registration});
+    checked_port(event_port::Close{drain_registration});
 
-    event_port::EventPtr drained = event_port::port(
+    event_port::EventPtr drained = checked_port(
         event_port::Read{drain_registration});
     require(
         drained.get() == pending_before_close.get(),
         "event_port: close discarded pending event");
 
-    bool closed_after_drain = false;
-    try
-    {
-        (void)event_port::port(
-            event_port::Read{drain_registration});
-    }
-    catch (const std::logic_error&)
-    {
-        closed_after_drain = true;
-    }
+    const auto closed_after_drain = event_port::port(event_port::Read{drain_registration});
     require(
-        closed_after_drain,
+        !closed_after_drain.value && closed_after_drain.error &&
+        closed_after_drain.error->type == "registration_closed",
         "event_port: read after draining closed registration must fail");
 
-    event_port::Registration writer_registration = event_port::port(
+    event_port::Registration writer_registration = checked_port(
         event_port::Register{
             "provider",
             request_reference("close-writer")
         });
 
-    event_port::EventPtr occupied = event_port::port(
+    event_port::EventPtr occupied = checked_port(
         provider_event("data", "close-writer", 8));
 
     std::future<event_port::EventPtr> blocked_writer_on_close = std::async(
         std::launch::async,
         []
         {
-            return event_port::port(
+            return checked_port(
                 provider_event("data", "close-writer", 9));
         });
 
@@ -232,7 +229,7 @@ int main()
         blocked_writer_on_close.wait_for(50ms) == std::future_status::timeout,
         "event_port: writer should block before close");
 
-    event_port::port(event_port::Close{writer_registration});
+    checked_port(event_port::Close{writer_registration});
 
     require(
         blocked_writer_on_close.wait_for(1s) == std::future_status::ready,
@@ -241,7 +238,7 @@ int main()
         blocked_writer_on_close.get() != nullptr,
         "event_port: released writer returned null event");
 
-    event_port::EventPtr occupied_after_close = event_port::port(
+    event_port::EventPtr occupied_after_close = checked_port(
         event_port::Read{writer_registration});
     require(
         occupied_after_close.get() == occupied.get(),

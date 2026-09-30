@@ -1,17 +1,12 @@
 #include "runtime.h"
 
+#include "response.h"
+#include "../error/error.h"
+#include "../platform/platform.h"
 #include "../process/process.h"
 
 #include <chrono>
-#include <cerrno>
 #include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <optional>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <string_view>
 #include <utility>
 
 #if defined(_WIN32)
@@ -30,188 +25,142 @@ namespace tool_runtime::detail
         {
             nlohmann::json canonical;
             const nlohmann::json* definition = nullptr;
-            std::optional<nlohmann::json> error;
+            std::optional<Error> error;
         };
 
         std::string synthesized_call_id()
         {
-            const auto stamp =
-                std::chrono::steady_clock::now()
-                    .time_since_epoch()
-                    .count();
+            const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
 #if defined(_WIN32)
-            return "hh_tool_call_" +
-                std::to_string(static_cast<unsigned long>(GetCurrentProcessId())) +
-                "_" + std::to_string(stamp);
-#elif defined(__linux__)
-            return "hh_tool_call_" +
-                std::to_string(static_cast<long long>(getpid())) +
-                "_" + std::to_string(stamp);
+            const auto process_id = GetCurrentProcessId();
+#else
+            const auto process_id = ::getpid();
 #endif
+            return "hh_tool_call_" + std::to_string(process_id) + "_" + std::to_string(stamp);
         }
 
-        std::filesystem::path current_executable()
+        Result<std::filesystem::path> tool_definitions_path()
         {
-#if defined(_WIN32)
-            std::wstring buffer(32768, L'\0');
-            const DWORD written = GetModuleFileNameW(
-                nullptr,
-                buffer.data(),
-                static_cast<DWORD>(buffer.size()));
-            if (written == 0 || written >= buffer.size())
-            {
-                throw std::system_error(
-                    static_cast<int>(GetLastError()),
-                    std::system_category(),
-                    "GetModuleFileNameW(tool_runtime definitions)");
-            }
-            buffer.resize(written);
-            return std::filesystem::path(std::move(buffer));
-#elif defined(__linux__)
-            std::string buffer(4096, '\0');
-            const ssize_t written = readlink(
-                "/proc/self/exe",
-                buffer.data(),
-                buffer.size());
-            if (written < 0)
-            {
-                throw std::system_error(
-                    errno,
-                    std::generic_category(),
-                    "readlink(/proc/self/exe)");
-            }
-            buffer.resize(static_cast<std::size_t>(written));
-            return std::filesystem::path(std::move(buffer));
-#endif
+            auto path = environment_text("HOMEGROWPH_TOOL_DEFINITIONS");
+            if (path.error)
+                return Result<std::filesystem::path>::failure(std::move(*path.error));
+            if (!path.value->empty())
+                return Result<std::filesystem::path>::success(std::filesystem::path(std::move(*path.value)));
+            auto executable = current_executable();
+            if (executable.error)
+                return Result<std::filesystem::path>::failure(std::move(*executable.error));
+            return Result<std::filesystem::path>::success(
+                executable.value->parent_path() / "tool_runtime_tools" / "tool_definitions.json");
         }
 
-        std::filesystem::path tool_definitions_path()
+        const Result<nlohmann::json>& tool_definitions()
         {
-            if (const char* override_path =
-                    std::getenv("HOMEGROWPH_TOOL_DEFINITIONS");
-                override_path != nullptr && *override_path != '\0')
+            static const Result<nlohmann::json> definitions = []
             {
-                return std::filesystem::path(override_path);
-            }
-
-            return current_executable().parent_path()
-                / "tool_runtime_tools"
-                / "tool_definitions.json";
-        }
-
-        const nlohmann::json& tool_definitions()
-        {
-            static const nlohmann::json definitions = []
-            {
-                const std::filesystem::path path = tool_definitions_path();
-                std::ifstream input(path, std::ios::binary);
-                if (!input)
+                try
                 {
-                    throw std::runtime_error(
-                        "tool_runtime: cannot open tool definitions: " +
-                        path.string());
+                    auto path = tool_definitions_path();
+                    if (path.error)
+                        return Result<nlohmann::json>::failure(std::move(*path.error));
+                    auto parsed = read_json_file(*path.value, "load_tool_definitions");
+                    if (parsed.error)
+                        return parsed;
+                    if (!parsed.value->is_array())
+                        return Result<nlohmann::json>::failure(make_error(
+                            "load_tool_definitions", "protocol_error", "Tool definitions must be an array",
+                            {{"path", path_text(*path.value)}, {"value", *parsed.value}}));
+                    for (std::size_t index = 0; index < parsed.value->size(); ++index)
+                    {
+                        const auto& item = parsed.value->at(index);
+                        const auto invalid = [&]
+                        {
+                            return Result<nlohmann::json>::failure(make_error(
+                                "load_tool_definitions", "protocol_error", "Tool definition must contain a function name and parameters schema",
+                                {{"path", path_text(*path.value)}, {"index", index}, {"value", item}}));
+                        };
+                        if (!item.is_object())
+                            return invalid();
+                        const auto function = item.find("function");
+                        if (function == item.end() || !function->is_object())
+                            return invalid();
+                        const auto name = function->find("name");
+                        const auto parameters = function->find("parameters");
+                        if (name == function->end() || !name->is_string()
+                            || name->get_ref<const std::string&>().empty()
+                            || parameters == function->end() || !parameters->is_object())
+                            return invalid();
+                    }
+                    return parsed;
                 }
-
-                nlohmann::json parsed;
-                input >> parsed;
-                if (!parsed.is_array())
+                catch (...)
                 {
-                    throw std::runtime_error(
-                        "tool_runtime: tool definitions must be an array");
+                    return Result<nlohmann::json>::failure(current_exception_error("load_tool_definitions"));
                 }
-                return parsed;
             }();
             return definitions;
         }
 
-        const nlohmann::json* find_definition(std::string_view name)
+        Result<const nlohmann::json*> find_definition(std::string_view name)
         {
-            for (const nlohmann::json& item : tool_definitions())
+            const auto& definitions = tool_definitions();
+            if (definitions.error)
+                return Result<const nlohmann::json*>::failure(Error(*definitions.error));
+            for (const auto& item : *definitions.value)
             {
-                if (!item.is_object())
-                    continue;
-
-                const auto function = item.find("function");
-                if (function == item.end() || !function->is_object())
-                    continue;
-
-                const auto schema_name = function->find("name");
-                if (schema_name != function->end()
-                    && schema_name->is_string()
-                    && schema_name->get_ref<const std::string&>() == name)
-                {
-                    return &item;
-                }
+                const auto& function = item.at("function");
+                if (function.at("name").get_ref<const std::string&>() == name)
+                    return Result<const nlohmann::json*>::success(&item);
             }
-            return nullptr;
+            return Result<const nlohmann::json*>::failure(make_error(
+                "find_tool_definition", "configuration_error", "Tool is not present in tool definitions", {{"tool", name}}));
         }
 
-        nlohmann::json error_item(
-            std::string code,
-            std::string message,
-            nlohmann::json details = nlohmann::json::object())
+        nlohmann::json error_item(Error&& error)
         {
-            nlohmann::json error = {
-                {"code", std::move(code)},
-                {"message", std::move(message)}
-            };
-            for (auto& [key, value] : details.items())
-                error[key] = std::move(value);
-
-            return {
-                {"ok", false},
-                {"error", std::move(error)}
-            };
+            return {{"ok", false}, {"value", nullptr}, {"error", std::move(error)}};
         }
 
-        bool matches_type(
-            std::string_view expected,
-            const nlohmann::json& value)
+        nlohmann::json value_item(nlohmann::json&& value)
         {
-            if (expected == "object")
-                return value.is_object();
-            if (expected == "array")
-                return value.is_array();
-            if (expected == "string")
-                return value.is_string();
-            if (expected == "number")
-                return value.is_number();
-            if (expected == "integer")
-                return value.is_number_integer() || value.is_number_unsigned();
-            if (expected == "boolean")
-                return value.is_boolean();
-            if (expected == "null")
-                return value.is_null();
+            return {{"ok", true}, {"value", std::move(value)}, {"error", nullptr}};
+        }
+
+        bool matches_type(std::string_view expected, const nlohmann::json& value)
+        {
+            if (expected == "object") return value.is_object();
+            if (expected == "array") return value.is_array();
+            if (expected == "string") return value.is_string();
+            if (expected == "number") return value.is_number();
+            if (expected == "integer") return value.is_number_integer() || value.is_number_unsigned();
+            if (expected == "boolean") return value.is_boolean();
+            if (expected == "null") return value.is_null();
             return true;
         }
 
-        bool validate_schema(
+        void validate_schema(
             const nlohmann::json& schema,
             const nlohmann::json& value,
-            std::string_view path,
-            std::string& error)
+            const std::string& path,
+            std::vector<Error>& errors)
         {
             if (!schema.is_object())
-                return true;
-
-            const auto type = schema.find("type");
-            if (type != schema.end() && type->is_string())
+                return;
+            const auto violation = [&](std::string_view keyword, std::string_view message, const nlohmann::json& expected)
             {
-                const std::string& expected =
-                    type->get_ref<const std::string&>();
-                if (!matches_type(expected, value))
-                {
-                    error = std::string(path) +
-                        " must be of type " + expected;
-                    return false;
-                }
+                errors.push_back(make_error("validate_arguments", "validation_error", message,
+                    {{"path", path}, {"keyword", keyword}, {"expected", expected}, {"value", value}}));
+            };
+            const auto type = schema.find("type");
+            if (type != schema.end() && type->is_string() && !matches_type(type->get_ref<const std::string&>(), value))
+            {
+                violation("type", "Argument has an unexpected type", *type);
+                return;
             }
-
             const auto enumeration = schema.find("enum");
             if (enumeration != schema.end() && enumeration->is_array())
             {
                 bool found = false;
-                for (const nlohmann::json& candidate : *enumeration)
+                for (const auto& candidate : *enumeration)
                 {
                     if (candidate == value)
                     {
@@ -220,87 +169,48 @@ namespace tool_runtime::detail
                     }
                 }
                 if (!found)
-                {
-                    error = std::string(path) +
-                        " is not one of the allowed values";
-                    return false;
-                }
+                    violation("enum", "Argument is not one of the allowed values", *enumeration);
             }
-
             if (value.is_object())
             {
                 const auto required = schema.find("required");
                 if (required != schema.end() && required->is_array())
                 {
-                    for (const nlohmann::json& name : *required)
+                    for (const auto& name : *required)
                     {
                         if (!name.is_string())
                             continue;
-                        const std::string& key =
-                            name.get_ref<const std::string&>();
+                        const auto& key = name.get_ref<const std::string&>();
                         if (!value.contains(key))
-                        {
-                            error = std::string(path) +
-                                "." + key + " is required";
-                            return false;
-                        }
+                            errors.push_back(make_error("validate_arguments", "validation_error", "Required argument is missing",
+                                {{"path", path + "." + key}, {"keyword", "required"}, {"value", value}}));
                     }
                 }
-
                 const auto properties = schema.find("properties");
-                const bool reject_extra =
-                    schema.value("additionalProperties", true) == false;
-
-                for (auto iterator = value.begin();
-                     iterator != value.end();
-                     ++iterator)
+                const auto additional = schema.find("additionalProperties");
+                const bool reject_extra = additional != schema.end()
+                    && additional->is_boolean() && !additional->get<bool>();
+                for (auto item = value.begin(); item != value.end(); ++item)
                 {
-                    if (properties == schema.end()
-                        || !properties->is_object()
-                        || !properties->contains(iterator.key()))
+                    if (properties == schema.end() || !properties->is_object() || !properties->contains(item.key()))
                     {
                         if (reject_extra)
-                        {
-                            error = std::string(path) +
-                                "." + iterator.key() +
-                                " is not allowed";
-                            return false;
-                        }
+                            errors.push_back(make_error("validate_arguments", "validation_error", "Additional argument is not allowed",
+                                {{"path", path + "." + item.key()}, {"keyword", "additionalProperties"}, {"value", item.value()}}));
                         continue;
                     }
-
-                    if (!validate_schema(
-                            properties->at(iterator.key()),
-                            iterator.value(),
-                            std::string(path) + "." + iterator.key(),
-                            error))
-                    {
-                        return false;
-                    }
+                    validate_schema(properties->at(item.key()), item.value(), path + "." + item.key(), errors);
                 }
             }
-
             if (value.is_array())
             {
                 const auto items = schema.find("items");
                 if (items != schema.end())
                 {
                     for (std::size_t index = 0; index < value.size(); ++index)
-                    {
-                        if (!validate_schema(
-                                *items,
-                                value.at(index),
-                                std::string(path) +
-                                    "[" + std::to_string(index) + "]",
-                                error))
-                        {
-                            return false;
-                        }
-                    }
+                        validate_schema(*items, value[index], path + "[" + std::to_string(index) + "]", errors);
                 }
             }
-
-            return true;
         }
 
         nlohmann::json canonical_fallback(const nlohmann::json& source)
@@ -308,58 +218,34 @@ namespace tool_runtime::detail
             std::string id = synthesized_call_id();
             std::string name = "__invalid_tool_call__";
             std::string arguments = "{}";
-
             if (source.is_object())
             {
                 const auto source_id = source.find("id");
-                if (source_id != source.end()
-                    && source_id->is_string()
-                    && !source_id->get_ref<const std::string&>().empty())
-                {
+                if (source_id != source.end() && source_id->is_string() && !source_id->get_ref<const std::string&>().empty())
                     id = source_id->get<std::string>();
-                }
-
                 const auto function = source.find("function");
                 if (function != source.end() && function->is_object())
                 {
                     const auto source_name = function->find("name");
-                    if (source_name != function->end()
-                        && source_name->is_string()
-                        && !source_name->get_ref<const std::string&>().empty())
-                    {
+                    if (source_name != function->end() && source_name->is_string() && !source_name->get_ref<const std::string&>().empty())
                         name = source_name->get<std::string>();
-                    }
-
                     const auto source_arguments = function->find("arguments");
                     if (source_arguments != function->end())
                     {
                         if (source_arguments->is_string())
                         {
-                            const nlohmann::json parsed =
-                                nlohmann::json::parse(
-                                    source_arguments
-                                        ->get_ref<const std::string&>(),
-                                    nullptr,
-                                    false);
-                            arguments = parsed.is_discarded()
-                                ? std::string("{}")
-                                : parsed.dump();
+                            auto parsed = parse_json(source_arguments->get_ref<const std::string&>(), "parse_arguments");
+                            if (parsed.value)
+                                arguments = parsed.value->dump();
                         }
                         else
-                        {
                             arguments = source_arguments->dump();
-                        }
                     }
                 }
             }
-
             return {
-                {"id", std::move(id)},
-                {"type", "function"},
-                {"function", {
-                    {"name", std::move(name)},
-                    {"arguments", std::move(arguments)}
-                }}
+                {"id", std::move(id)}, {"type", "function"},
+                {"function", {{"name", std::move(name)}, {"arguments", std::move(arguments)}}}
             };
         }
 
@@ -367,221 +253,110 @@ namespace tool_runtime::detail
         {
             prepared_call prepared;
             prepared.canonical = canonical_fallback(source);
-
+            const auto invalid = [&prepared, &source](std::string_view path, std::string_view message)
+            {
+                prepared.error = make_error("prepare_tool_call", "validation_error", message,
+                    {{"path", path}, {"tool_call", source}});
+            };
             if (!source.is_object())
             {
-                prepared.error = error_item(
-                    "invalid_tool_call",
-                    "Tool call must be an object");
+                invalid("tool_call", "Tool call must be an object");
                 return prepared;
             }
-
             const auto function = source.find("function");
             if (function == source.end() || !function->is_object())
             {
-                prepared.error = error_item(
-                    "invalid_tool_call",
-                    "Tool call function must be an object");
+                invalid("function", "Tool call function must be an object");
                 return prepared;
             }
-
             const auto name = function->find("name");
-            if (name == function->end()
-                || !name->is_string()
-                || name->get_ref<const std::string&>().empty())
+            if (name == function->end() || !name->is_string() || name->get_ref<const std::string&>().empty())
             {
-                prepared.error = error_item(
-                    "tool_schema_not_found",
-                    "Tool call has no function name");
+                invalid("function.name", "Tool call must contain a function name");
                 return prepared;
             }
-
-            const std::string& tool_name =
-                name->get_ref<const std::string&>();
-            prepared.definition = find_definition(tool_name);
-            if (prepared.definition == nullptr)
+            auto definition = find_definition(name->get_ref<const std::string&>());
+            if (definition.error)
             {
-                prepared.error = error_item(
-                    "tool_schema_not_found",
-                    "Tool is not present in tool_definitions: " + tool_name);
+                prepared.error = std::move(definition.error);
                 return prepared;
             }
-
-            prepared.canonical["function"]["name"] =
-                prepared.definition->at("function").at("name");
-
+            prepared.definition = *definition.value;
             const auto type = source.find("type");
-            if (type == source.end()
-                || !type->is_string()
-                || type->get_ref<const std::string&>() != "function")
+            if (type == source.end() || !type->is_string() || *type != "function")
             {
-                prepared.error = error_item(
-                    "invalid_tool_call_schema",
-                    "Tool call type must be function");
+                invalid("type", "Tool call type must be function");
                 return prepared;
             }
-
-            const auto source_arguments = function->find("arguments");
-            if (source_arguments == function->end())
+            const auto arguments = function->find("arguments");
+            if (arguments == function->end())
             {
-                prepared.canonical["function"]["arguments"] = "{}";
-                prepared.error = error_item(
-                    "invalid_arguments",
-                    "Tool call function.arguments is required");
+                invalid("function.arguments", "Tool call arguments are required");
                 return prepared;
             }
-
             nlohmann::json parsed_arguments;
-            if (source_arguments->is_string())
+            if (arguments->is_string())
             {
-                parsed_arguments = nlohmann::json::parse(
-                    source_arguments->get_ref<const std::string&>(),
-                    nullptr,
-                    false);
-                if (parsed_arguments.is_discarded())
+                auto parsed = parse_json(arguments->get_ref<const std::string&>(), "parse_arguments",
+                    {{"path", "function.arguments"}});
+                if (parsed.error)
                 {
-                    prepared.error = error_item(
-                        "invalid_arguments",
-                        "Tool call function.arguments contains invalid JSON");
+                    prepared.error = std::move(parsed.error);
                     return prepared;
                 }
+                parsed_arguments = std::move(*parsed.value);
             }
             else
+                parsed_arguments = *arguments;
+            prepared.canonical["function"]["arguments"] = parsed_arguments.dump();
+            std::vector<Error> errors;
+            validate_schema(prepared.definition->at("function").at("parameters"), parsed_arguments, "function.arguments", errors);
+            if (errors.size() == 1)
+                prepared.error = std::move(errors.front());
+            else if (!errors.empty())
             {
-                parsed_arguments = *source_arguments;
+                prepared.error = make_error("validate_arguments", "validation_error", "Tool arguments do not match the schema",
+                    {{"tool", name->get_ref<const std::string&>()}});
+                prepared.error->causes = std::move(errors);
             }
-
-            prepared.canonical["function"]["arguments"] =
-                parsed_arguments.dump();
-
-            const nlohmann::json& schema =
-                prepared.definition->at("function").at("parameters");
-            std::string validation_error;
-            if (!validate_schema(
-                    schema,
-                    parsed_arguments,
-                    "function.arguments",
-                    validation_error))
-            {
-                prepared.error = error_item(
-                    "invalid_arguments",
-                    std::move(validation_error));
-                return prepared;
-            }
-
             return prepared;
         }
 
-        nlohmann::json result_item_from_message(
-            const nlohmann::json& runtime_message)
+        nlohmann::json result_item_from_message(const nlohmann::json& message)
         {
-            if (!runtime_message.is_object())
-            {
-                return error_item(
-                    "invalid_tool_result",
-                    "Tool runtime result message must be an object");
-            }
-
-            const auto content = runtime_message.find("content");
-            if (content == runtime_message.end() || !content->is_string())
-            {
-                return error_item(
-                    "invalid_tool_result",
-                    "Tool runtime result message must contain string content");
-            }
-
-            nlohmann::json payload = nlohmann::json::parse(
-                content->get_ref<const std::string&>(),
-                nullptr,
-                false);
-            if (payload.is_discarded())
-            {
-                return {
-                    {"ok", true},
-                    {"result", content->get<std::string>()}
-                };
-            }
-
-            if (payload.is_object())
-            {
-                const auto ok = payload.find("ok");
-                if (ok != payload.end()
-                    && ok->is_boolean()
-                    && !ok->get<bool>())
-                {
-                    nlohmann::json item = {
-                        {"ok", false},
-                        {"result", payload}
-                    };
-                    const auto error = payload.find("error");
-                    if (error != payload.end())
-                        item["error"] = *error;
-                    return item;
-                }
-            }
-
-            return {
-                {"ok", true},
-                {"result", std::move(payload)}
-            };
+            auto normalized = normalize_result_message(message, "tool_worker", "invoke");
+            return normalized.error ? error_item(std::move(*normalized.error)) : value_item(std::move(*normalized.value));
         }
 
-        nlohmann::json final_result_message(
-            const nlohmann::json& canonical_call,
-            const nlohmann::json* definition,
-            nlohmann::json item)
+        execution_result make_execution_result(prepared_call&& prepared, nlohmann::json&& item)
         {
-            const std::string& call_id =
-                canonical_call.at("id").get_ref<const std::string&>();
-
+            const std::string& call_id = prepared.canonical.at("id").get_ref<const std::string&>();
             nlohmann::json results = nlohmann::json::array();
             results.push_back(std::move(item));
-
             const nlohmann::json envelope = {
-                {"version", 1},
-                {"tool", definition == nullptr
-                    ? nlohmann::json(nullptr)
-                    : *definition},
-                {"call_id", call_id},
-                {"results", std::move(results)}
+                {"version", 1}, {"tool", prepared.definition == nullptr ? nlohmann::json(nullptr) : *prepared.definition},
+                {"call_id", call_id}, {"results", std::move(results)}
             };
-
-            return {
-                {"role", "tool"},
-                {"tool_call_id", call_id},
-                {"content", envelope.dump()}
+            nlohmann::json result = {
+                {"role", "tool"}, {"tool_call_id", call_id}, {"content", envelope.dump()}
             };
+            return {std::move(prepared.canonical), std::move(result)};
         }
+    }
 
-        execution_result make_execution_result(
-            prepared_call prepared,
-            nlohmann::json item)
-        {
-            nlohmann::json result = final_result_message(
-                prepared.canonical,
-                prepared.definition,
-                std::move(item));
-            return {
-                std::move(prepared.canonical),
-                std::move(result)
-            };
-        }
+    execution_result execute_error(const nlohmann::json& input, Error&& error)
+    {
+        prepared_call prepared;
+        prepared.canonical = canonical_fallback(input);
+        return make_execution_result(std::move(prepared), error_item(std::move(error)));
     }
 
     execution_result execute_invalid_json(std::string_view raw)
     {
-        nlohmann::json source = {
-            {"function", {
-                {"arguments", std::string(raw)}
-            }}
-        };
-        prepared_call prepared;
-        prepared.canonical = canonical_fallback(source);
-        return make_execution_result(
-            std::move(prepared),
-            error_item(
-                "invalid_tool_call",
-                "Tool call argument is not valid JSON"));
+        auto parsed = parse_json(raw, "parse_input", {{"api", "nlohmann::json::parse"}});
+        if (parsed.error)
+            return execute_error(nlohmann::json::object(), std::move(*parsed.error));
+        return execute_tool(*parsed.value);
     }
 
     execution_result execute_tool(const nlohmann::json& input)
@@ -590,64 +365,30 @@ namespace tool_runtime::detail
         try
         {
             prepared = prepare_call(input);
-            if (prepared.error.has_value())
-            {
-                nlohmann::json item = std::move(*prepared.error);
-                prepared.error.reset();
-                return make_execution_result(
-                    std::move(prepared),
-                    std::move(item));
-            }
-
-            process_plan plan = dispatch_tool(prepared.canonical);
-            if (!plan.process_required)
-            {
-                return make_execution_result(
-                    std::move(prepared),
-                    result_item_from_message(plan.immediate_result));
-            }
-
-            const process::result child = process::run(
-                plan.executable,
-                plan.arguments,
-                plan.working_directory,
-                plan.stdin_data);
-
+            if (prepared.error)
+                return make_execution_result(std::move(prepared), error_item(std::move(*prepared.error)));
+            auto plan = dispatch_tool(prepared.canonical);
+            if (plan.error)
+                return make_execution_result(std::move(prepared), error_item(std::move(*plan.error)));
+            process::result child = process::run(
+                plan.value->executable, plan.value->arguments, plan.value->working_directory, plan.value->stdin_data);
             process_result_view view;
             view.started = child.started;
             view.exit_code = child.exit_code;
-            view.final_error = child.error;
-            view.stdout_text = child.stdout_text;
-            view.stderr_text = child.stderr_text;
-
-            normalized_result normalized =
-                normalize_tool(prepared.canonical, view);
-
-            return make_execution_result(
-                std::move(prepared),
-                result_item_from_message(normalized.json));
-        }
-        catch (const std::exception& exception)
-        {
-            if (prepared.canonical.is_null())
-                prepared.canonical = canonical_fallback(input);
-
-            return make_execution_result(
-                std::move(prepared),
-                error_item(
-                    "tool_execution_error",
-                    exception.what()));
+            view.error = std::move(child.error);
+            view.stdout_text = std::move(child.stdout_text);
+            view.stderr_text = std::move(child.stderr_text);
+            auto normalized = normalize_tool(prepared.canonical, view);
+            if (normalized.error)
+                return make_execution_result(std::move(prepared), error_item(std::move(*normalized.error)));
+            return make_execution_result(std::move(prepared), result_item_from_message(normalized.value->json));
         }
         catch (...)
         {
             if (prepared.canonical.is_null())
                 prepared.canonical = canonical_fallback(input);
-
-            return make_execution_result(
-                std::move(prepared),
-                error_item(
-                    "tool_execution_error",
-                    "Unknown tool runtime exception"));
+            return make_execution_result(std::move(prepared), error_item(current_exception_error("execute_tool")));
         }
     }
 }
+

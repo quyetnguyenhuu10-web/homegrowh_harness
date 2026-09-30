@@ -1,5 +1,6 @@
 #include "command.h"
 #include "event_forwarder.h"
+#include "ipc_failure.h"
 #include "runtime.h"
 
 #include <ipc>
@@ -8,7 +9,6 @@
 #include <iostream>
 #include <stdexcept>
 #include <string>
-#include <system_error>
 #include <utility>
 
 namespace
@@ -31,6 +31,10 @@ namespace
         try
         {
             std::rethrow_exception(error);
+        }
+        catch (const sessions_runtime::IpcFailure& failure)
+        {
+            std::cerr << nlohmann::json(failure.error()).dump() << '\n';
         }
         catch (const std::exception& exception)
         {
@@ -69,9 +73,7 @@ int main(int argc, char** argv)
         if (connected.error)
         {
             const std::exception_ptr error = std::make_exception_ptr(
-                std::system_error(
-                    connected.error,
-                    "connect session runtime IPC"));
+                sessions_runtime::IpcFailure(std::move(*connected.error)));
             runtime.emit_runtime_failure(
                 "ipc_connect",
                 error,
@@ -108,9 +110,7 @@ int main(int argc, char** argv)
             if (read.error)
             {
                 const std::exception_ptr error = std::make_exception_ptr(
-                    std::system_error(
-                        read.error,
-                        "read session runtime command"));
+                    sessions_runtime::IpcFailure(std::move(*read.error)));
                 runtime.emit_runtime_failure(
                     "ipc_read",
                     error,

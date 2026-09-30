@@ -1,46 +1,21 @@
 #include "runtime.h"
 
-#include <algorithm>
-#include <cerrno>
+#include "response.h"
+#include "../error/error.h"
+#include "../platform/platform.h"
+
 #include <cstdlib>
-#include <filesystem>
-#include <fstream>
 #include <map>
 #include <mutex>
-#include <optional>
 #include <set>
-#include <stdexcept>
-#include <string>
-#include <string_view>
-#include <system_error>
 #include <utility>
-#include <vector>
-
-#include <nlohmann/json.hpp>
-
-#if defined(_WIN32)
-#define NOMINMAX
-#define WIN32_LEAN_AND_MEAN
-#include <Windows.h>
-#elif defined(__linux__)
-#include <unistd.h>
-#endif
 
 namespace tool_runtime::detail
 {
     namespace
     {
-        enum class Runtime
-        {
-            typescript,
-            native
-        };
-
-        struct ToolSpec
-        {
-            Runtime runtime;
-        };
-
+        enum class Runtime { typescript, native };
+        struct ToolSpec { Runtime runtime; };
         struct ToolCall
         {
             std::string id;
@@ -66,310 +41,188 @@ namespace tool_runtime::detail
             return specs;
         }
 
-        std::string path_text(const std::filesystem::path& path)
-        {
-            const std::u8string value = path.u8string();
-            return std::string(
-                reinterpret_cast<const char*>(value.data()),
-                value.size());
-        }
-
-        std::filesystem::path canonical_existing_directory(
-            const std::filesystem::path& path)
-        {
-            if (path.empty())
-                throw std::invalid_argument("tool_runtime: workspace_path is empty");
-
-            std::error_code error;
-            if (!std::filesystem::is_directory(path, error))
-            {
-                if (error)
-                    throw std::filesystem::filesystem_error(
-                        "tool_runtime: cannot inspect workspace",
-                        path,
-                        error);
-
-                throw std::filesystem::filesystem_error(
-                    "tool_runtime: workspace is not a directory",
-                    path,
-                    std::make_error_code(std::errc::not_a_directory));
-            }
-
-            return path.lexically_normal();
-        }
-
-        nlohmann::json tool_result(
-            const std::string& call_id,
-            nlohmann::json payload)
+        nlohmann::json tool_result(const std::string& call_id, nlohmann::json&& payload)
         {
             return {
                 {"role", "tool"},
                 {"tool_call_id", call_id},
-                {"content", std::move(payload).dump()}
+                {"content", payload.dump()}
             };
         }
 
-        nlohmann::json error_result(
-            const std::string& call_id,
-            const std::string& tool,
-            const std::string& code,
-            const std::string& message,
-            nlohmann::json details = nlohmann::json::object())
+        Result<ToolCall> parse_tool_call(const nlohmann::json& source)
         {
-            nlohmann::json error = {
-                {"code", code},
-                {"message", message}
+            const auto invalid = [&source](std::string_view path, std::string_view message)
+            {
+                return Result<ToolCall>::failure(make_error(
+                    "parse_tool_call", "validation_error", message,
+                    {{"path", path}, {"tool_call", source}}));
             };
-            for (auto& [key, value] : details.items())
-                error[key] = std::move(value);
-
-            return tool_result(
-                call_id,
-                {
-                    {"version", 1},
-                    {"tool", tool},
-                    {"call_id", call_id},
-                    {"ok", false},
-                    {"results", nlohmann::json::array()},
-                    {"error", std::move(error)}
-                });
-        }
-
-        ToolCall parse_tool_call(const nlohmann::json& source)
-        {
             if (!source.is_object())
-                throw std::invalid_argument("tool_runtime: tool_call must be an object");
-
+                return invalid("tool_call", "Tool call must be an object");
             const auto id = source.find("id");
             if (id == source.end() || !id->is_string() || id->get_ref<const std::string&>().empty())
-                throw std::invalid_argument("tool_runtime: tool_call.id must be a non-empty string");
-
+                return invalid("tool_call.id", "Tool call id must be a non-empty string");
             const auto type = source.find("type");
             if (type == source.end() || !type->is_string() || *type != "function")
-                throw std::invalid_argument("tool_runtime: tool_call.type must be function");
-
+                return invalid("tool_call.type", "Tool call type must be function");
             const auto function = source.find("function");
             if (function == source.end() || !function->is_object())
-                throw std::invalid_argument("tool_runtime: tool_call.function must be an object");
-
+                return invalid("tool_call.function", "Tool call function must be an object");
             const auto name = function->find("name");
             if (name == function->end() || !name->is_string() || name->get_ref<const std::string&>().empty())
-                throw std::invalid_argument("tool_runtime: tool_call.function.name must be a non-empty string");
-
+                return invalid("tool_call.function.name", "Tool call function name must be a non-empty string");
             const auto arguments = function->find("arguments");
             if (arguments == function->end())
-                throw std::invalid_argument("tool_runtime: tool_call.function.arguments is required");
+                return invalid("tool_call.function.arguments", "Tool call arguments are required");
 
             nlohmann::json parsed_arguments;
             if (arguments->is_string())
             {
-                parsed_arguments = nlohmann::json::parse(
-                    arguments->get_ref<const std::string&>(),
-                    nullptr,
-                    false);
-                if (parsed_arguments.is_discarded())
-                    throw std::invalid_argument(
-                        "tool_runtime: tool_call.function.arguments contains invalid JSON");
+                auto parsed = parse_json(arguments->get_ref<const std::string&>(), "parse_tool_call",
+                    {{"path", "tool_call.function.arguments"}});
+                if (parsed.error)
+                    return Result<ToolCall>::failure(std::move(*parsed.error));
+                parsed_arguments = std::move(*parsed.value);
             }
             else
-            {
                 parsed_arguments = *arguments;
-            }
-
             if (!parsed_arguments.is_object() && !parsed_arguments.is_array())
-            {
-                throw std::invalid_argument(
-                    "tool_runtime: tool_call.function.arguments must be an object or array");
-            }
+                return invalid("tool_call.function.arguments", "Tool arguments must be an object or array");
 
             nlohmann::json normalized = source;
             normalized["function"]["arguments"] = parsed_arguments;
-
-            return ToolCall{
-                id->get<std::string>(),
-                name->get<std::string>(),
-                std::move(parsed_arguments),
-                std::move(normalized)};
+            return Result<ToolCall>::success(ToolCall{
+                id->get<std::string>(), name->get<std::string>(),
+                std::move(parsed_arguments), std::move(normalized)});
         }
 
-        std::filesystem::path environment_path(const char* name)
+        Result<std::filesystem::path> environment_path(const char* name)
         {
-            const char* value = std::getenv(name);
-            if (value == nullptr || *value == '\0')
-                return {};
-            return std::filesystem::path(value);
+            auto text = environment_text(name);
+            if (text.error)
+                return Result<std::filesystem::path>::failure(std::move(*text.error));
+            return Result<std::filesystem::path>::success(std::filesystem::path(std::move(*text.value)));
         }
 
-        std::filesystem::path find_on_path(std::string_view executable)
+        Result<std::filesystem::path> regular_file(
+            const std::filesystem::path& path,
+            std::string_view operation)
         {
-            const char* raw_path = std::getenv("PATH");
-            if (raw_path == nullptr)
-                return {};
+            std::error_code code;
+            const bool regular = std::filesystem::is_regular_file(path, code);
+            if (code)
+                return Result<std::filesystem::path>::failure(make_system_error(
+                    operation, "std::filesystem::is_regular_file", code, {{"path", path_text(path)}}));
+            if (!regular)
+                return Result<std::filesystem::path>::failure(make_error(
+                    operation, "validation_error", "Path is not a regular file", {{"path", path_text(path)}}));
+            auto canonical = std::filesystem::canonical(path, code);
+            if (code)
+                return Result<std::filesystem::path>::failure(make_system_error(
+                    operation, "std::filesystem::canonical", code, {{"path", path_text(path)}}));
+            return Result<std::filesystem::path>::success(std::move(canonical));
+        }
 
+        Result<std::filesystem::path> find_on_path(std::string_view executable)
+        {
+            auto raw_path = environment_text("PATH");
+            if (raw_path.error)
+                return Result<std::filesystem::path>::failure(std::move(*raw_path.error));
+            if (raw_path.value->empty())
+                return Result<std::filesystem::path>::failure(make_error(
+                    "find_executable", "configuration_error", "PATH is empty or not set",
+                    {{"environment_variable", "PATH"}, {"executable", executable}}));
 #if defined(_WIN32)
             constexpr char separator = ';';
 #else
             constexpr char separator = ':';
 #endif
-
-            const std::string search_path(raw_path);
+            const auto& search_path = *raw_path.value;
+            std::vector<Error> causes;
             std::size_t begin = 0;
             while (begin <= search_path.size())
             {
                 const std::size_t end = search_path.find(separator, begin);
-                const std::string directory = search_path.substr(
-                    begin,
-                    end == std::string::npos
-                        ? std::string::npos
-                        : end - begin);
-
+                const auto directory = search_path.substr(
+                    begin, end == std::string::npos ? std::string::npos : end - begin);
                 if (!directory.empty())
                 {
-                    std::filesystem::path candidate =
-                        std::filesystem::path(directory) / executable;
-                    std::error_code error;
-                    if (std::filesystem::is_regular_file(candidate, error))
-                    {
-                        const std::filesystem::path canonical =
-                            std::filesystem::canonical(candidate, error);
-                        return error ? candidate : canonical;
-                    }
+                    auto candidate = regular_file(std::filesystem::path(directory) / executable, "find_executable");
+                    if (candidate.value)
+                        return candidate;
+                    causes.push_back(std::move(*candidate.error));
                 }
-
                 if (end == std::string::npos)
                     break;
                 begin = end + 1;
             }
-            return {};
+            return Result<std::filesystem::path>::failure(dependency_error(
+                "find_executable", "Executable was not found on PATH", std::move(causes),
+                {{"executable", executable}}));
         }
 
-        std::filesystem::path current_executable()
+        Result<std::filesystem::path> node_executable()
         {
+            auto executable = current_executable();
+            if (executable.error)
+                return Result<std::filesystem::path>::failure(std::move(*executable.error));
+            auto bundled = regular_file(executable.value->parent_path()
 #if defined(_WIN32)
-            std::wstring buffer(32768, L'\0');
-            const DWORD written = GetModuleFileNameW(
-                nullptr,
-                buffer.data(),
-                static_cast<DWORD>(buffer.size()));
-            if (written == 0 || written >= buffer.size())
-            {
-                throw std::system_error(
-                    static_cast<int>(GetLastError()),
-                    std::system_category(),
-                    "GetModuleFileNameW(tool_runtime)");
-            }
-            buffer.resize(written);
-            return std::filesystem::path(std::move(buffer));
-#elif defined(__linux__)
-            std::string buffer(4096, '\0');
-            const ssize_t written = readlink(
-                "/proc/self/exe",
-                buffer.data(),
-                buffer.size());
-            if (written < 0)
-            {
-                throw std::system_error(
-                    errno,
-                    std::generic_category(),
-                    "readlink(/proc/self/exe)");
-            }
-            buffer.resize(static_cast<std::size_t>(written));
-            return std::filesystem::path(std::move(buffer));
-#endif
-        }
-
-        std::filesystem::path node_executable()
-        {
-            std::filesystem::path node =
-                current_executable().parent_path()
-#if defined(_WIN32)
-                / "node.exe";
+                / "node.exe",
 #else
-                / "node";
+                / "node",
 #endif
-
-            std::error_code bundled_error;
-            if (std::filesystem::is_regular_file(node, bundled_error))
+                "resolve_node");
+            if (bundled.value)
+                return bundled;
+            auto override_path = environment_path("HOMEGROWPH_NODE");
+            if (override_path.error)
+                return Result<std::filesystem::path>::failure(std::move(*override_path.error));
+            if (!override_path.value->empty())
             {
-                const std::filesystem::path canonical =
-                    std::filesystem::canonical(node, bundled_error);
-                return bundled_error ? node : canonical;
+                auto override_result = regular_file(*override_path.value, "resolve_node");
+                if (override_result.error)
+                    override_result.error->data.push_back({{"environment_variable", "HOMEGROWPH_NODE"}});
+                return override_result;
             }
-
-            node = environment_path("HOMEGROWPH_NODE");
-            if (!node.empty())
-            {
-                std::error_code error;
-                if (!std::filesystem::is_regular_file(node, error))
-                    throw std::runtime_error(
-                        "tool_runtime: HOMEGROWPH_NODE does not point to a file");
-                const std::filesystem::path canonical =
-                    std::filesystem::canonical(node, error);
-                return error ? node : canonical;
-            }
-
+            auto path_result = find_on_path(
 #if defined(_WIN32)
-            node = find_on_path("node.exe");
+                "node.exe"
 #else
-            node = find_on_path("node");
+                "node"
 #endif
-            if (node.empty())
-                throw std::runtime_error("tool_runtime: node executable not found");
-            return node;
+            );
+            if (path_result.value)
+                return path_result;
+            std::vector<Error> causes;
+            causes.push_back(std::move(*bundled.error));
+            causes.push_back(std::move(*path_result.error));
+            return Result<std::filesystem::path>::failure(dependency_error(
+                "resolve_node", "Node executable resolution failed", std::move(causes)));
         }
 
-        std::filesystem::path tool_host_path()
+        Result<std::filesystem::path> runtime_file(
+            const char* override_variable,
+            const std::filesystem::path& relative_path,
+            std::string_view operation)
         {
-            std::filesystem::path path =
-                environment_path("HOMEGROWPH_TOOL_HOST");
-            if (path.empty())
+            auto configured_path = environment_path(override_variable);
+            if (configured_path.error)
+                return Result<std::filesystem::path>::failure(std::move(*configured_path.error));
+            auto path = std::move(*configured_path.value);
+            const bool configured = !path.empty();
+            if (!configured)
             {
-                path =
-                    current_executable().parent_path()
-                    / "tool_runtime_tools"
-                    / "src"
-                    / "_runtime"
-                    / "tool_host.js";
+                auto executable = current_executable();
+                if (executable.error)
+                    return Result<std::filesystem::path>::failure(std::move(*executable.error));
+                path = executable.value->parent_path() / relative_path;
             }
-
-            std::error_code error;
-            if (!std::filesystem::is_regular_file(path, error))
-            {
-                throw std::runtime_error(
-                    "tool_runtime: TypeScript tool host not found: " +
-                    path_text(path));
-            }
-
-            const std::filesystem::path canonical =
-                std::filesystem::canonical(path, error);
-            return error ? path : canonical;
-        }
-
-        std::filesystem::path edit_file_path()
-        {
-            std::filesystem::path path =
-                environment_path("HOMEGROWPH_EDIT_FILE");
-            if (path.empty())
-            {
-                path = current_executable().parent_path()
-#if defined(_WIN32)
-                    / "edit_file.exe";
-#else
-                    / "edit_file";
-#endif
-            }
-
-            std::error_code error;
-            if (!std::filesystem::is_regular_file(path, error))
-            {
-                throw std::runtime_error(
-                    "tool_runtime: edit_file executable not found: " +
-                    path_text(path));
-            }
-
-            const std::filesystem::path canonical =
-                std::filesystem::canonical(path, error);
-            return error ? path : canonical;
+            auto result = regular_file(path, operation);
+            if (result.error && configured)
+                result.error->data.push_back({{"environment_variable", override_variable}});
+            return result;
         }
 
         nlohmann::json process_details(const process_result_view& result)
@@ -377,28 +230,9 @@ namespace tool_runtime::detail
             return {
                 {"started", result.started},
                 {"exit_code", result.exit_code},
-                {"final_error", {
-                    {"code", result.final_error.value()},
-                    {"message", result.final_error.message()}
-                }}
+                {"stdout", text_payload(result.stdout_text)},
+                {"stderr", text_payload(result.stderr_text)}
             };
-        }
-
-        std::optional<nlohmann::json> process_failure(
-            const ToolCall& call,
-            const process_result_view& result)
-        {
-            if (result.final_error)
-            {
-                return error_result(
-                    call.id,
-                    call.name,
-                    "tool_process_failed",
-                    "Tool process failed",
-                    process_details(result));
-            }
-
-            return std::nullopt;
         }
 
         std::vector<std::string> read_files(const std::string& workspace_key)
@@ -410,299 +244,245 @@ namespace tool_runtime::detail
             return {found->second.begin(), found->second.end()};
         }
 
-        void merge_read_files(
-            const std::string& workspace_key,
-            const nlohmann::json& files)
+        std::optional<Error> merge_read_files(const std::string& workspace_key, const nlohmann::json& files)
         {
             if (!files.is_array())
-                throw std::runtime_error(
-                    "tool_runtime: TypeScript worker readFiles must be an array");
-
-            std::lock_guard lock(read_state_mutex);
-            std::set<std::string>& target =
-                read_files_by_workspace[workspace_key];
-            for (const nlohmann::json& file : files)
+                return make_error("merge_read_files", "protocol_error", "Worker readFiles must be an array",
+                    {{"path", "readFiles"}, {"value", files}});
+            for (std::size_t index = 0; index < files.size(); ++index)
             {
-                if (!file.is_string())
-                    throw std::runtime_error(
-                        "tool_runtime: TypeScript worker readFiles item must be a string");
-                target.insert(file.get<std::string>());
+                if (!files[index].is_string())
+                    return make_error("merge_read_files", "protocol_error", "Worker readFiles item must be a string",
+                        {{"path", "readFiles[" + std::to_string(index) + "]"}, {"value", files[index]}});
             }
+            std::lock_guard lock(read_state_mutex);
+            std::set<std::string>& target = read_files_by_workspace[workspace_key];
+            for (const auto& file : files)
+                target.insert(file.get<std::string>());
+            return std::nullopt;
         }
 
-        process_plan dispatch_typescript(
-            const ToolCall& call,
-            const std::filesystem::path& workspace)
+        Result<process_plan> dispatch_typescript(const ToolCall& call, const std::filesystem::path& workspace)
         {
-            const std::filesystem::path host = tool_host_path();
-            const std::filesystem::path node = node_executable();
+            auto host = runtime_file("HOMEGROWPH_TOOL_HOST",
+                std::filesystem::path("tool_runtime_tools") / "src" / "_runtime" / "tool_host.js", "resolve_tool_host");
+            if (host.error)
+                return Result<process_plan>::failure(std::move(*host.error));
+            auto node = node_executable();
+            if (node.error)
+                return Result<process_plan>::failure(std::move(*node.error));
             const std::string workspace_key = path_text(workspace);
-
             nlohmann::json request = {
-                {"version", 1},
-                {"tool", call.name},
-                {"toolCall", call.normalized},
-                {"context", {
-                    {"repositoryPath", workspace_key}
-                }},
+                {"version", 1}, {"tool", call.name}, {"toolCall", call.normalized},
+                {"context", {{"repositoryPath", workspace_key}}},
                 {"readFiles", read_files(workspace_key)}
             };
-
             process_plan plan;
-            plan.executable = node;
-            plan.arguments = {
-                "--preserve-symlinks",
-                "--preserve-symlinks-main",
-                path_text(host)
-            };
+            plan.executable = std::move(*node.value);
+            plan.arguments = {"--preserve-symlinks", "--preserve-symlinks-main", path_text(*host.value)};
             plan.working_directory = workspace;
             plan.stdin_data = request.dump();
-            return plan;
+            return Result<process_plan>::success(std::move(plan));
         }
 
-        nlohmann::json normalize_typescript(
-            const ToolCall& call,
-            const std::filesystem::path& workspace,
-            const process_result_view& result)
+        Result<nlohmann::json> normalize_typescript(
+            const ToolCall& call, const std::filesystem::path& workspace, const process_result_view& result)
         {
-            if (const auto failure = process_failure(call, result))
-                return *failure;
-
-            const nlohmann::json response = nlohmann::json::parse(
-                result.stdout_text,
-                nullptr,
-                false);
-            if (response.is_discarded() || !response.is_object())
-            {
-                return error_result(
-                    call.id,
-                    call.name,
-                    "invalid_tool_output",
-                    "TypeScript tool worker returned invalid JSON",
-                    {
-                        {"exit_code", result.exit_code},
-                        {"stderr", result.stderr_text}
-                    });
-            }
-
+            auto parsed = parse_json(result.stdout_text, "parse_worker_response", process_details(result));
+            if (parsed.error)
+                return parsed;
+            auto& response = *parsed.value;
+            if (!response.is_object())
+                return Result<nlohmann::json>::failure(make_error(
+                    "normalize_worker_response", "protocol_error", "Worker response must be an object",
+                    {{"response", response}, {"process", process_details(result)}}));
             const auto ok = response.find("ok");
             if (ok == response.end() || !ok->is_boolean())
-            {
-                return error_result(
-                    call.id,
-                    call.name,
-                    "invalid_tool_output",
-                    "TypeScript tool worker response has no boolean ok field");
-            }
-
+                return Result<nlohmann::json>::failure(make_error(
+                    "normalize_worker_response", "protocol_error", "Worker response must contain a boolean ok field",
+                    {{"response", response}, {"process", process_details(result)}}));
             if (!ok->get<bool>())
             {
-                const auto error = response.find("error");
-                if (error != response.end() && error->is_object())
-                {
-                    const std::string message = error->value(
-                        "message",
-                        std::string("Tool execution failed"));
-                    return error_result(
-                        call.id,
-                        call.name,
-                        "tool_execution_error",
-                        message,
-                        {{"source_error", *error}});
-                }
-
-                return error_result(
-                    call.id,
-                    call.name,
-                    "tool_execution_error",
-                    error != response.end() && error->is_string()
-                        ? error->get<std::string>()
-                        : std::string("Tool execution failed"));
+                auto failure = normalize_result_payload(std::move(response), call.name, "invoke");
+                if (failure.error)
+                    return failure;
+                return Result<nlohmann::json>::failure(make_error(
+                    "normalize_worker_response", "protocol_error", "Worker reported failure without an error"));
             }
-
-            const auto tool_result_message = response.find("result");
+            const auto reported = response.find("error");
+            if (reported != response.end() && !reported->is_null())
+                return normalize_result_payload(std::move(response), call.name, "invoke");
+            const auto message = response.find("result");
             const auto files = response.find("readFiles");
-            if (tool_result_message == response.end()
-                || !tool_result_message->is_object()
-                || files == response.end())
+            if (message == response.end() || !message->is_object() || files == response.end())
+                return Result<nlohmann::json>::failure(make_error(
+                    "normalize_worker_response", "protocol_error", "Worker response is incomplete",
+                    {{"response", response}, {"process", process_details(result)}}));
+            auto content = normalize_result_message(*message, call.name, "invoke");
+            auto files_error = merge_read_files(path_text(workspace), *files);
+            if (content.error && files_error)
             {
-                return error_result(
-                    call.id,
-                    call.name,
-                    "invalid_tool_output",
-                    "TypeScript tool worker response is incomplete");
+                std::vector<Error> causes;
+                causes.push_back(std::move(*content.error));
+                causes.push_back(std::move(*files_error));
+                return Result<nlohmann::json>::failure(dependency_error(
+                    "normalize_worker_response", "Worker result and read state both failed", std::move(causes)));
             }
-
-            merge_read_files(path_text(workspace), *files);
-            return *tool_result_message;
+            if (content.error)
+                return content;
+            if (files_error)
+                return Result<nlohmann::json>::failure(std::move(*files_error));
+            return Result<nlohmann::json>::success(nlohmann::json(*message));
         }
 
-        process_plan dispatch_native(
-            const ToolCall& call,
-            const std::filesystem::path& workspace)
+        Result<process_plan> dispatch_native(const ToolCall& call, const std::filesystem::path& workspace)
         {
             if (call.name != "edit_file")
-            {
-                process_plan plan;
-                plan.process_required = false;
-                plan.immediate_result = error_result(
-                    call.id,
-                    call.name,
-                    "unsupported_native_tool",
-                    "Native tool is not implemented");
-                return plan;
-            }
-
+                return Result<process_plan>::failure(make_error(
+                    "dispatch_tool", "configuration_error", "Native tool is not implemented", {{"tool", call.name}}));
             nlohmann::json requests = nlohmann::json::array();
             if (call.arguments.is_array())
             {
-                for (const nlohmann::json& item : call.arguments)
+                for (std::size_t index = 0; index < call.arguments.size(); ++index)
                 {
-                    if (!item.is_object())
-                    {
-                        process_plan plan;
-                        plan.process_required = false;
-                        plan.immediate_result = error_result(
-                            call.id,
-                            call.name,
-                            "invalid_arguments",
-                            "Tool arguments array must contain only objects");
-                        return plan;
-                    }
-                    requests.push_back(item);
+                    if (!call.arguments[index].is_object())
+                        return Result<process_plan>::failure(make_error(
+                            "dispatch_tool", "validation_error", "Tool arguments array must contain only objects",
+                            {{"path", "function.arguments[" + std::to_string(index) + "]"}, {"value", call.arguments[index]}}));
+                    requests.push_back(call.arguments[index]);
                 }
             }
             else
-            {
                 requests.push_back(call.arguments);
-            }
-
             if (requests.empty())
-            {
-                process_plan plan;
-                plan.process_required = false;
-                plan.immediate_result = error_result(
-                    call.id,
-                    call.name,
-                    "invalid_arguments",
-                    "Tool arguments must not be empty");
-                return plan;
-            }
-
-            const nlohmann::json envelope = {
-                {"version", 1},
-                {"tool", call.name},
-                {"call_id", call.id},
-                {"arguments", {
-                    {"requests", std::move(requests)}
-                }}
+                return Result<process_plan>::failure(make_error(
+                    "dispatch_tool", "validation_error", "Tool arguments must not be empty", {{"tool", call.name}}));
+            nlohmann::json envelope = {
+                {"version", 1}, {"tool", call.name}, {"call_id", call.id},
+                {"arguments", {{"requests", std::move(requests)}}}
             };
-
-            const std::filesystem::path executable = edit_file_path();
+            auto executable = runtime_file("HOMEGROWPH_EDIT_FILE",
+#if defined(_WIN32)
+                "edit_file.exe",
+#else
+                "edit_file",
+#endif
+                "resolve_native_tool");
+            if (executable.error)
+                return Result<process_plan>::failure(std::move(*executable.error));
             process_plan plan;
-            plan.executable = executable;
+            plan.executable = std::move(*executable.value);
             plan.arguments = {"--toolcall-stdin"};
             plan.working_directory = workspace;
             plan.stdin_data = envelope.dump();
-            return plan;
+            return Result<process_plan>::success(std::move(plan));
         }
 
-        nlohmann::json normalize_native(
-            const ToolCall& call,
-            const process_result_view& result)
+        Result<nlohmann::json> normalize_native(const ToolCall& call, const process_result_view& result)
         {
-            if (const auto failure = process_failure(call, result))
-                return *failure;
+            auto parsed = parse_json(result.stdout_text, "parse_native_response", process_details(result));
+            if (parsed.error)
+                return parsed;
+            auto payload = normalize_result_payload(std::move(*parsed.value), call.name, "invoke");
+            if (payload.error)
+                return payload;
+            return Result<nlohmann::json>::success(tool_result(call.id, std::move(*payload.value)));
+        }
+    }
 
-            const nlohmann::json payload = nlohmann::json::parse(
-                result.stdout_text,
-                nullptr,
-                false);
-            if (payload.is_discarded())
+    Result<process_plan> dispatch_tool(const nlohmann::json& input)
+    {
+        try
+        {
+            auto parsed = parse_tool_call(input);
+            if (parsed.error)
+                return Result<process_plan>::failure(std::move(*parsed.error));
+            auto workspace = current_workspace();
+            if (workspace.error)
+                return Result<process_plan>::failure(std::move(*workspace.error));
+            const ToolCall& call = *parsed.value;
+            const auto spec = tool_specs().find(call.name);
+            if (spec == tool_specs().end())
+                return Result<process_plan>::failure(make_error(
+                    "dispatch_tool", "configuration_error", "Tool is not registered", {{"tool", call.name}}));
+            return spec->second.runtime == Runtime::typescript
+                ? dispatch_typescript(call, *workspace.value)
+                : dispatch_native(call, *workspace.value);
+        }
+        catch (...)
+        {
+            return Result<process_plan>::failure(current_exception_error("dispatch_tool"));
+        }
+    }
+
+    Result<normalized_result> normalize_tool(const nlohmann::json& input, const process_result_view& result)
+    {
+        try
+        {
+            auto parsed = parse_tool_call(input);
+            if (parsed.error)
+                return Result<normalized_result>::failure(std::move(*parsed.error));
+            const ToolCall& call = *parsed.value;
+            if (result.error && result.stdout_text.empty())
             {
-                return error_result(
-                    call.id,
-                    call.name,
-                    "invalid_tool_output",
-                    "Native tool returned invalid JSON",
-                    {
-                        {"exit_code", result.exit_code},
-                        {"stderr", result.stderr_text}
-                    });
+                std::vector<Error> causes{*result.error};
+                return Result<normalized_result>::failure(dependency_error(
+                    "run_tool", "Tool process failed", std::move(causes),
+                    {{"tool", call.name}, {"process", process_details(result)}}));
             }
-
-            return tool_result(call.id, payload);
+            const auto spec = tool_specs().find(call.name);
+            if (spec == tool_specs().end())
+                return Result<normalized_result>::failure(make_error(
+                    "normalize_tool", "configuration_error", "Tool is not registered", {{"tool", call.name}}));
+            Result<nlohmann::json> normalized;
+            if (spec->second.runtime == Runtime::typescript)
+            {
+                auto workspace = current_workspace();
+                if (workspace.error)
+                    return Result<normalized_result>::failure(std::move(*workspace.error));
+                normalized = normalize_typescript(call, *workspace.value, result);
+            }
+            else
+                normalized = normalize_native(call, result);
+            if (result.error)
+            {
+                std::vector<Error> causes{*result.error};
+                if (normalized.error)
+                    causes.push_back(std::move(*normalized.error));
+                return Result<normalized_result>::failure(dependency_error(
+                    "run_tool", "Tool process failed", std::move(causes),
+                    {{"tool", call.name}, {"process", process_details(result)}}));
+            }
+            if (!result.started)
+            {
+                Error error = make_error("run_tool", "process_error", "Tool process was not started",
+                    {{"tool", call.name}, {"process", process_details(result)}});
+                if (normalized.error)
+                    error.causes.push_back(std::move(*normalized.error));
+                return Result<normalized_result>::failure(std::move(error));
+            }
+            if (normalized.error)
+            {
+                if (result.exit_code != 0)
+                {
+                    std::vector<Error> causes;
+                    causes.push_back(std::move(*normalized.error));
+                    return Result<normalized_result>::failure(dependency_error(
+                        "run_tool", "Tool process exited unsuccessfully", std::move(causes),
+                        {{"tool", call.name}, {"process", process_details(result)}}));
+                }
+                return Result<normalized_result>::failure(std::move(*normalized.error));
+            }
+            if (result.exit_code != 0)
+                return Result<normalized_result>::failure(make_error(
+                    "run_tool", "process_error", "Tool process exited unsuccessfully",
+                    {{"tool", call.name}, {"process", process_details(result)}, {"response", *normalized.value}}));
+            return Result<normalized_result>::success(normalized_result{std::move(*normalized.value), result.stderr_text});
         }
-    }
-
-    process_plan dispatch_tool(const nlohmann::json& input)
-    {
-        const ToolCall call = parse_tool_call(input);
-        const std::filesystem::path workspace =
-            canonical_existing_directory(std::filesystem::current_path());
-        const auto spec = tool_specs().find(call.name);
-        if (spec == tool_specs().end())
+        catch (...)
         {
-            process_plan plan;
-            plan.process_required = false;
-            plan.immediate_result = error_result(
-                call.id,
-                call.name,
-                "unsupported_tool",
-                "Tool is not registered: " + call.name);
-            return plan;
+            return Result<normalized_result>::failure(current_exception_error("normalize_tool"));
         }
-
-        if (spec->second.runtime == Runtime::typescript)
-        {
-            return dispatch_typescript(
-                call,
-                workspace);
-        }
-
-        return dispatch_native(
-            call,
-            workspace);
-    }
-
-    normalized_result normalize_tool(
-        const nlohmann::json& input,
-        const process_result_view& result)
-    {
-        const ToolCall call = parse_tool_call(input);
-        const std::filesystem::path workspace =
-            canonical_existing_directory(std::filesystem::current_path());
-        const auto spec = tool_specs().find(call.name);
-        if (spec == tool_specs().end())
-        {
-            return {
-                error_result(
-                    call.id,
-                    call.name,
-                    "unsupported_tool",
-                    "Tool is not registered: " + call.name),
-                result.stderr_text,
-            };
-        }
-
-        nlohmann::json normalized;
-        if (spec->second.runtime == Runtime::typescript)
-        {
-            normalized = normalize_typescript(
-                call,
-                workspace,
-                result);
-        }
-        else
-        {
-            normalized = normalize_native(
-                call,
-                result);
-        }
-
-        return {
-            std::move(normalized),
-            result.stderr_text,
-        };
     }
 }
+

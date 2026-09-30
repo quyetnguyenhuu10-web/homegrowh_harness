@@ -1,58 +1,60 @@
 #include "stream.h"
+#include "error/capture.h"
 
-#include <optional>
 #include <ostream>
-#include <stdexcept>
-#include <string_view>
-#include <utility>
 
 namespace provider
 {
     namespace
     {
-        void write_content(
-            std::ostream& output,
-            const std::string_view event)
+        Result<void> write_content(std::ostream& output, std::string_view event)
         {
-            const nlohmann::json payload = nlohmann::json::parse(
-                event,
-                nullptr,
-                false);
-
-            if (payload.is_discarded())
+            try
             {
-                return;
-            }
-
-            const auto choices = payload.find("choices");
-            if (choices == payload.end() || !choices->is_array())
-            {
-                return;
-            }
-
-            bool wrote = false;
-
-            for (const nlohmann::json& choice : *choices)
-            {
-                const auto delta = choice.find("delta");
-                if (delta == choice.end() || !delta->is_object())
+                if (event == "[DONE]")
                 {
-                    continue;
+                    return Result<void>::success();
                 }
-
-                const auto content = delta->find("content");
-                if (content == delta->end() || !content->is_string())
+                const nlohmann::json payload = nlohmann::json::parse(event);
+                const auto choices = payload.find("choices");
+                if (choices == payload.end() || !choices->is_array())
                 {
-                    continue;
+                    return Result<void>::success();
                 }
-
-                output << content->get_ref<const std::string&>();
-                wrote = true;
+                bool wrote = false;
+                for (const nlohmann::json& choice : *choices)
+                {
+                    const auto delta = choice.find("delta");
+                    if (delta == choice.end() || !delta->is_object())
+                    {
+                        continue;
+                    }
+                    const auto content = delta->find("content");
+                    if (content != delta->end() && content->is_string())
+                    {
+                        output << content->get_ref<const std::string&>();
+                        wrote = true;
+                    }
+                }
+                if (wrote)
+                {
+                    output.flush();
+                }
+                if (!output)
+                {
+                    return Result<void>::failure(error_detail::make_error(
+                        "write_stream", "system_error", "Output stream reports a failure",
+                        {{{"api", "std::ostream"}, {"event", event},
+                          {"stream_state", static_cast<int>(output.rdstate())}}}));
+                }
+                return Result<void>::success();
             }
-
-            if (wrote)
+            catch (...)
             {
-                output.flush();
+                return Result<void>::failure(error_detail::capture_exception(
+                    std::current_exception(), "write_stream",
+                    {{{"api", "std::ostream"}, {"event", event},
+                      {"stream_state", static_cast<int>(output.rdstate())}}}));
             }
         }
     }
@@ -60,14 +62,9 @@ namespace provider
     struct Stream::Impl
     {
         Impl(
-            Provider provider_value,
-            const std::string& url_value,
-            const std::string& api_key_value,
-            const nlohmann::json& body_value)
-            : provider(provider_value),
-              url(url_value),
-              api_key(api_key_value),
-              body(body_value)
+            Provider selected, const std::string& endpoint,
+            const std::string& key, const nlohmann::json& request_body)
+            : provider(selected), url(endpoint), api_key(key), body(request_body)
         {
             body["stream"] = true;
         }
@@ -81,73 +78,142 @@ namespace provider
     };
 
     Stream::Stream(
-        Provider provider,
-        const std::string& url,
-        const std::string& api_key,
-        const nlohmann::json& body)
-        : impl_(std::make_unique<Impl>(provider, url, api_key, body))
+        Provider selected, const std::string& url,
+        const std::string& api_key, const nlohmann::json& body)
     {
+        try
+        {
+            impl_ = std::make_unique<Impl>(selected, url, api_key, body);
+        }
+        catch (...)
+        {
+            error_ = error_detail::capture_exception(
+                std::current_exception(), "create_stream",
+                {{{"url", url}, {"body", body}}});
+        }
     }
 
     Stream::~Stream() = default;
 
-    Stream::Stream(Stream&&) noexcept = default;
-
-    Stream& Stream::operator=(Stream&&) noexcept = default;
-
-    const RequestUsage& Stream::usage() const
+    Stream::Stream(Stream&& other) noexcept
+        : impl_(std::move(other.impl_)), error_(std::move(other.error_)),
+          moved_(other.moved_)
     {
+        other.moved_ = true;
+        other.error_.reset();
+    }
+
+    Stream& Stream::operator=(Stream&& other) noexcept
+    {
+        if (this != &other)
+        {
+            impl_ = std::move(other.impl_);
+            error_ = std::move(other.error_);
+            moved_ = other.moved_;
+            other.moved_ = true;
+            other.error_.reset();
+        }
+        return *this;
+    }
+
+    const std::optional<Error>& Stream::error() const noexcept
+    {
+        return error_;
+    }
+
+    Result<std::reference_wrapper<const RequestUsage>> Stream::usage() const
+    {
+        using UsageResult = Result<std::reference_wrapper<const RequestUsage>>;
+        if (moved_)
+        {
+            return UsageResult::failure(error_detail::make_error(
+                "stream_usage", "invalid_state", "Provider stream has been moved"));
+        }
+        if (error_.has_value())
+        {
+            return UsageResult::failure(Error{*error_});
+        }
         if (impl_ == nullptr || !impl_->usage.has_value())
         {
-            throw std::logic_error("provider stream usage is not available");
+            return UsageResult::failure(error_detail::make_error(
+                "stream_usage", "invalid_state", "Provider stream usage is not available"));
         }
+        return UsageResult::success(std::cref(*impl_->usage));
+    }
 
-        return *impl_->usage;
+    Result<void> Stream::write(std::ostream& output)
+    {
+        const auto fail = [&](Error&& error)
+        {
+            error_ = std::move(error);
+            // The caller and the stream each retain an inspectable error.
+            return Result<void>::failure(Error{*error_});
+        };
+        try
+        {
+            if (moved_)
+            {
+                return fail(error_detail::make_error(
+                    "write_stream", "invalid_state", "Provider stream has been moved"));
+            }
+            if (error_.has_value())
+            {
+                return Result<void>::failure(Error{*error_});
+            }
+            if (impl_->consumed)
+            {
+                return fail(error_detail::make_error(
+                    "write_stream", "invalid_state",
+                    "Provider stream has already been consumed"));
+            }
+            impl_->consumed = true;
+
+            auto requested = request(
+                impl_->provider, impl_->url, impl_->api_key, impl_->body,
+                EventSink{
+                    &output,
+                    [](void* context, std::string&& event)
+                    {
+                        return write_content(*static_cast<std::ostream*>(context), event);
+                    },
+                    nullptr});
+            if (!requested)
+            {
+                return fail(std::move(*requested.error));
+            }
+            impl_->usage = std::move(*requested.value);
+            return Result<void>::success();
+        }
+        catch (...)
+        {
+            return fail(error_detail::capture_exception(
+                std::current_exception(), "write_stream",
+                {{{"stream_state", static_cast<int>(output.rdstate())}}}));
+        }
     }
 
     std::ostream& operator<<(std::ostream& output, Stream& stream)
     {
-        if (stream.impl_ == nullptr)
+        auto written = stream.write(output);
+        if (!written)
         {
-            throw std::logic_error("provider stream has been moved");
+            try
+            {
+                output.setstate(std::ios::failbit);
+            }
+            catch (...)
+            {
+                Error state_error = error_detail::capture_exception(
+                    std::current_exception(), "set_stream_state",
+                    {{{"api", "std::ostream::setstate"},
+                      {"stream_state", static_cast<int>(output.rdstate())}}});
+                Error combined = error_detail::dependency_error(
+                    "write_stream", "Stream failed and output rejected its failure state",
+                    std::move(*stream.error_));
+                combined.causes.push_back(std::move(state_error));
+                stream.error_ = std::move(combined);
+            }
         }
-
-        Stream::Impl& impl = *stream.impl_;
-
-        if (impl.consumed)
-        {
-            throw std::logic_error("provider stream has already been consumed");
-        }
-
-        impl.consumed = true;
-
-        struct OutputContext
-        {
-            std::ostream* output;
-        } context{&output};
-
-        impl.usage = request(
-            impl.provider,
-            impl.url,
-            impl.api_key,
-            impl.body,
-            EventSink{
-                &context,
-                [](void* raw_context, std::string&& event)
-                {
-                    auto* output_context =
-                        static_cast<OutputContext*>(raw_context);
-                    write_content(*output_context->output, event);
-                },
-                nullptr
-            });
-
-        if (!impl.usage.has_value())
-        {
-            throw std::runtime_error(
-                "provider stream completed without usage");
-        }
-
         return output;
     }
 }

@@ -6,6 +6,7 @@
 
 #include <context_usage>
 #include <event_port>
+#include <error/event_port.h>
 #include <secrets>
 
 #include <cstdint>
@@ -51,39 +52,16 @@ namespace sessions::detail
 
         void emit_secondary_cleanup_error(SessionData& data) noexcept
         {
-            const CredentialSecondaryCleanupError* secondary =
+            const Error* secondary =
                 data.credential.secondary_cleanup_error();
             if (secondary == nullptr)
                 return;
 
             try
             {
-                nlohmann::json payload = {
-                    {"source", "credential_cleanup"}
-                };
+                nlohmann::json payload = {{"error", *secondary}};
 
-                if (secondary->result.has_value())
-                {
-                    payload["code"] = secondary->result->error.code;
-                    payload["operation"] = secondary->result->error.operation;
-                }
-                else if (secondary->exception != nullptr)
-                {
-                    try
-                    {
-                        std::rethrow_exception(secondary->exception);
-                    }
-                    catch (const std::exception& error)
-                    {
-                        payload["exception"] = error.what();
-                    }
-                    catch (...)
-                    {
-                        payload["exception"] = "unknown exception";
-                    }
-                }
-
-                event_port::port(event_port::Emit{
+                sessions::detail::checked_port(event_port::Emit{
                     "sessions",
                     event_port::Level::error,
                     "secondary_error",
@@ -213,8 +191,10 @@ namespace sessions
 
         (void)detail::current_messages(config.session_current);
 
-        detail::CredentialOwner credential =
+        auto credential =
             detail::persist_session_credential(config.api_key_raw);
+        if (credential.error)
+            throw ErrorException(std::move(*credential.error));
 
         const std::uint64_t tools_estimate =
             detail::tool_definition_estimate(config.tool_definitions);
@@ -237,7 +217,7 @@ namespace sessions
             std::move(config.workspace_path),
             std::move(config.tool_runtime_executable),
             std::move(config.sandbox_config),
-            std::move(credential),
+            std::move(*credential.value),
             tools_estimate,
             usage_checkpoint,
             config.refresh_workspace));
@@ -252,21 +232,9 @@ namespace sessions
         if (data.state == SessionState::closed)
             throw std::logic_error("session is already closed");
 
-        const secrets::SecretOperationResult cleanup = data.credential.close();
-        if (cleanup.status == secrets::SecretStatus::failed)
-        {
-            const std::string operation = cleanup.error.operation.empty()
-                ? "erase session credential"
-                : cleanup.error.operation;
-            if (cleanup.error.code != 0)
-            {
-                throw std::system_error(
-                    static_cast<int>(cleanup.error.code),
-                    std::system_category(),
-                    operation);
-            }
-            throw std::runtime_error(operation + " failed");
-        }
+        auto cleanup = data.credential.close();
+        if (cleanup.error)
+            throw ErrorException(std::move(*cleanup.error));
 
         data.session_timeout.cancel();
         data.state = SessionState::closed;

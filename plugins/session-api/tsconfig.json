@@ -5,6 +5,9 @@
     "moduleResolution": "NodeNext",
     "strict": true,
     "skipLibCheck": true,
+    "types": [
+      "node"
+    ],
     "rootDir": "src",
     "outDir": "dist",
     "noEmitOnError": true

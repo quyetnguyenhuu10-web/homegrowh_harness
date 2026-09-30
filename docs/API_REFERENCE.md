@@ -13,7 +13,7 @@ Các điểm include hoặc giao tiếp được hỗ trợ:
 | Provider         | <code>&lt;provider&gt;</code>                        | provider             | provider                             |
 | Sandbox          | <code>&lt;config.h&gt;</code>, <code>&lt;process_request.h&gt;</code>, <code>&lt;process_results.h&gt;</code>, <code>&lt;sandbox_process.h&gt;</code> | sandbox | sandbox |
 | Secrets          | <code>&lt;secrets&gt;</code>                         | secrets              | secrets::secrets                     |
-| Sessions         | <code>&lt;sessions&gt;</code>                        | sessions             | sessions::sessions                   |
+| Sessions         | <code>&lt;session&gt;</code>                         | sessions             | sessions::sessions                   |
 | Tool runtime     | Không có header C++ public; giao tiếp JSON qua executable | process boundary | tool_runtime (executable) |
 | Filesystems      | <code>&lt;fsystem&gt;</code>                         | fsystem              | filesystems                          |
 | Toàn bộ C++ core | <code>&lt;homegrowh_harness&gt;</code>              | các namespace thư viện | homegrowh_harness::homegrowh_harness |
@@ -110,6 +110,26 @@ Header:
 event_port là cổng event trong tiến trình, có registration theo bộ lọc và
 single-slot backpressure.
 
+Các thao tác trả về `Result<T>` theo schema chung. Khi thành công, `value` có
+giá trị và `error` rỗng; khi thất bại, `value` rỗng và `error` chứa nguyên Error.
+
+~~~cpp
+struct Error
+{
+    std::string source;
+    std::string operation;
+    std::string type;
+    std::string message;
+    nlohmann::json::array_t data;
+    std::vector<Error> causes;
+};
+~~~
+
+`Error.data` luôn là mảng; `causes` chứa đầy đủ object lỗi con. Mã hệ thống,
+category và loại exception gốc nằm trong `data`. Nhiều lỗi đầu vào hoặc lỗi
+phát tới các registration độc lập được giữ riêng trong `causes`. Event payload
+vẫn là JSON tự do; lỗi của module khác được truyền nguyên vẹn trong `data.error`.
+
 ### Kiểu dữ liệu
 
 ~~~cpp
@@ -155,6 +175,7 @@ public:
     Registration& operator=(const Registration&) = delete;
     Registration(Registration&&) noexcept;
     Registration& operator=(Registration&&) noexcept;
+    const Error* cleanup_error() const noexcept;
 };
 
 struct Register
@@ -189,44 +210,66 @@ auto port(Operation&& operation);
 Ví dụ:
 
 ~~~cpp
-event_port::Registration registration =
-    event_port::port(event_port::Register{
-        "sessions",
-        event_port::References{
-            event_port::Reference{"session", "abc"}
-        }
-    });
+event_port::References filter;
+filter.emplace_back(std::string("session"), std::string("abc"));
+auto registered = event_port::port(
+    event_port::Register{"sessions", std::move(filter)});
+if (registered.error)
+{
+    std::cerr << nlohmann::json(*registered.error).dump() << '\n';
+    return;
+}
+event_port::Registration registration = std::move(*registered.value);
 
-event_port::EventPtr event = event_port::port(
-    event_port::Read{registration});
-
-event_port::EventPtr emitted = event_port::port(
+event_port::References references;
+references.emplace_back(std::string("session"), std::string("abc"));
+auto emitted = event_port::port(
     event_port::Emit{
         "sessions",
         event_port::Level::info,
         "content",
-        {},
+        std::move(references),
         {{"delta", "hello"}}
     });
+if (emitted.error)
+{
+    std::cerr << nlohmann::json(*emitted.error).dump() << '\n';
+    return;
+}
 
-event_port::port(event_port::Close{registration});
+auto read = event_port::port(event_port::Read{registration});
+if (read.error)
+{
+    std::cerr << nlohmann::json(*read.error).dump() << '\n';
+    return;
+}
+event_port::EventPtr event = std::move(*read.value);
+
+auto closed = event_port::port(event_port::Close{registration});
+if (closed.error)
+    std::cerr << nlohmann::json(*closed.error).dump() << '\n';
 ~~~
 
 Quy tắc:
 
-- Register trả về Registration. package rỗng là wildcard; mọi Reference trong
+- Register trả về Result<Registration>. package rỗng là wildcard; mọi Reference trong
   registration phải xuất hiện với cùng type và value trong event.
-- Read chờ blocking đến khi có event phù hợp. Khi registration bị hủy và không
-  còn event chờ, nó ném std::logic_error.
-- Emit yêu cầu package, type không rỗng và reference type không rỗng. Event
+- Read trả về Result<EventPtr>, chờ blocking đến khi có event phù hợp. Khi
+  registration đóng và không còn event chờ, nó trả lỗi `registration_closed`.
+- Emit trả về Result<EventPtr>, yêu cầu package, type không rỗng và reference type không rỗng. Event
   nhận sequence tăng dần và timestamp system_clock trước khi phát.
-- Close đóng registration theo kiểu graceful: đánh thức reader/writer đang chờ
+- Close trả về Result<void>, đóng registration theo kiểu graceful: đánh thức reader/writer đang chờ
   nhưng không xóa pending event. Reader được phép drain pending cuối cùng; Read
-  tiếp theo khi closed và không còn pending sẽ ném std::logic_error.
+  tiếp theo khi closed và không còn pending sẽ trả lỗi `registration_closed`.
+  Đóng registration đã đóng vẫn thành công.
+- Read hoặc Close với registration đã move trả lỗi `invalid_state` và giữ
+  trạng thái `moved_from` trong Error.data.
 - Mỗi registration chỉ giữ một event chờ. Nếu consumer chưa đọc event trước,
   bên emit phù hợp sẽ chờ; đây là backpressure chủ động.
 - Hủy Registration là hard cleanup: đánh thức các bên đang chờ, đóng
   registration và bỏ pending nếu còn. Dùng Close khi caller cần graceful drain.
+- Lỗi cleanup khi thay registration được giữ trong `cleanup_error()`. Dùng
+  Close để nhận Result của thao tác đóng trước khi hủy owner.
 
 Operation lvalue hoặc operation không được hỗ trợ gây lỗi compile-time.
 Registration đã move gây std::logic_error.
@@ -636,70 +679,76 @@ Header:
 #include <secrets>
 ~~~
 
-Backend chọn Windows Credential Manager hoặc Linux credential backend theo
-platform.
+Backend chọn Windows Credential Manager hoặc Linux keyutils theo platform.
+Thư viện không phụ thuộc EventPort.
 
-### Kết quả credential
+### Error và Result
 
 ~~~cpp
-enum class SecretStatus
+struct Error
 {
-    success,
-    not_found,
-    failed,
-};
-
-struct SecretError
-{
-    std::uint32_t code = 0;
+    std::string source;
     std::string operation;
+    std::string type;
+    std::string message;
+    nlohmann::json::array_t data;
+    std::vector<Error> causes;
 };
 
-struct SecretResult
+template <typename T>
+struct Result
 {
-    SecretStatus status = SecretStatus::failed;
-    std::string value;
-    SecretError error;
+    std::optional<T> value;
+    std::optional<Error> error;
+
+    static Result success(T&& value);
+    static Result failure(Error&& error);
+    explicit operator bool() const noexcept;
 };
 
-struct SecretOperationResult
-{
-    SecretStatus status = SecretStatus::failed;
-    SecretError error;
-};
+using SecretResult = Result<std::string>;
+using SecureSecretResult = Result<SecureString>;
+using SecretOperationResult = Result<std::monostate>;
 ~~~
+
+Tạo kết quả qua success/failure: thành công có value và không có error; thất bại
+có error và không có value. Các thao tác không trả dữ liệu dùng std::monostate
+làm giá trị thành công. data và causes luôn serialize thành mảng, kể cả khi rỗng.
+Mã OS, category, API và ngữ cảnh đặc thù nằm trong phần tử của data.
+
+Lỗi không tìm thấy credential có type = "not_found", vẫn giữ mã gốc. Validation
+có type = "validation_error"; các lỗi đầu vào độc lập nằm trong causes riêng.
+Lỗi dlopen/dlsym giữ nguyên thông báo dlerror; nếu nhiều thư viện hoặc symbol
+độc lập bị lỗi, toàn bộ object lỗi được giữ trong causes. Không tạo mã OS thay
+cho lỗi validation hoặc lỗi của bộ nạp thư viện.
 
 ### Credential API
 
 ~~~cpp
 SecretResult get(const std::string& signature);
-
-std::string resolve(const std::string& signature);
-
-SecureString resolve_secure(const std::string& signature);
-
-SecureString resolve_secure_session(const std::string& signature);
+SecretResult resolve(const std::string& signature);
+SecureSecretResult resolve_secure(const std::string& signature);
+SecureSecretResult resolve_secure_session(const std::string& signature);
 
 SecretOperationResult set(
     const std::string& signature,
     const std::string& value);
-
 SecretOperationResult set_session(
     const std::string& signature,
     const std::string& value);
-
 SecretOperationResult erase(const std::string& signature);
-
 SecretOperationResult erase_session(const std::string& signature);
 ~~~
 
-get trả trạng thái đầy đủ. resolve và hai hàm resolve_secure chuyển lỗi thành
-exception: std::system_error nếu có mã OS, nếu không là std::runtime_error.
-set, erase và bản _session trả SecretOperationResult, không ném lỗi nghiệp vụ
-thông thường.
+Tất cả API credential trả Result. resolve forward nguyên kết quả của get;
+resolve_secure giữ nguyên lỗi đọc credential hoặc lỗi chuyển đổi secure buffer.
+Các failure thông thường không chuyển thành std::system_error hay chuỗi lỗi.
+Signature có null byte bị từ chối để tránh chọn nhầm credential do API chuỗi C.
 
-Bản thường và bản _session dùng vùng lưu trữ khác nhau theo backend. Session
-credential được Sessions tạo tạm trong vòng đời loop.
+Bản thường và bản _session chọn cơ chế lưu trữ tương ứng của backend. Windows
+dùng CRED_PERSIST_LOCAL_MACHINE hoặc CRED_PERSIST_SESSION khi ghi; Linux chọn
+persistent/user keyring hoặc session keyring. Session credential được Sessions
+tạo tạm trong vòng đời loop.
 
 ### SecureString
 
@@ -718,19 +767,24 @@ public:
     [[nodiscard]] std::string_view view() const noexcept;
 };
 
-SecureString secure_string_from(std::string& value);
+SecureSecretResult secure_string_from(std::string& value);
 ~~~
 
 SecureString move-only; buffer được zero trước khi giải phóng. view() chỉ có
 giá trị trong lifetime của SecureString. secure_string_from yêu cầu source
-string không rỗng, copy vào secure buffer rồi wipe source string.
+không rỗng, copy vào secure buffer rồi wipe source cả khi có lỗi. Giá trị binary
+có null byte được giữ nguyên. Dữ liệu credential không được đưa vào payload lỗi.
+
+Session thêm semantic context qua causes. API Session hiện có dùng
+sessions::ErrorException chứa nguyên Error; EventPort và IPC serialize object
+đó trong data.error, giữ đầy đủ lỗi credential bên dưới.
 
 ## 7. sessions
 
 Header:
 
 ~~~cpp
-#include <sessions>
+#include <session>
 ~~~
 
 Sessions là orchestration layer cho provider request, tool cycle, caller-provided

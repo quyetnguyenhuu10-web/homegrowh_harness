@@ -1,30 +1,29 @@
 #pragma once
 
 #include <filesystem>
+#include <cstdint>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include <tool_runtime/tool_runtime.h>
 
 namespace tool_runtime
 {
     struct process_plan
     {
-        bool process_required = true;
         std::filesystem::path executable;
         std::vector<std::string> arguments;
         std::filesystem::path working_directory;
         std::string stdin_data;
-        nlohmann::json immediate_result;
     };
 
     struct process_result_view
     {
         bool started = false;
-        int exit_code = -1;
-        std::error_code final_error;
+        std::int64_t exit_code = -1;
+        std::optional<Error> error;
         std::string stdout_text;
         std::string stderr_text;
     };
@@ -44,11 +43,12 @@ namespace tool_runtime
 
 namespace tool_runtime::detail
 {
-    process_plan dispatch_tool(const nlohmann::json& input);
-    normalized_result normalize_tool(
+    Result<process_plan> dispatch_tool(const nlohmann::json& input);
+    Result<normalized_result> normalize_tool(
         const nlohmann::json& input,
         const process_result_view& result);
 
     execution_result execute_tool(const nlohmann::json& input);
+    execution_result execute_error(const nlohmann::json& input, Error&& error);
     execution_result execute_invalid_json(std::string_view raw);
 }

@@ -5,6 +5,8 @@
 #include "process.h"
 
 #include "../apply_config.h"
+#include "../error_schema.h"
+#include "../process/io_failure.h"
 #include "appcontainer.h"
 #include "job.h"
 #include "raii.h"
@@ -18,6 +20,7 @@
 #include <cstdint>
 #include <memory>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -95,8 +98,11 @@ namespace sandbox::detail::process::windows
         class suspended_process_guard final
         {
         public:
-            explicit suspended_process_guard(HANDLE process) noexcept
-                : process_(process)
+            suspended_process_guard(
+                HANDLE process,
+                DWORD* cleanup_error) noexcept
+                : process_(process),
+                  cleanup_error_(cleanup_error)
             {
             }
 
@@ -106,7 +112,13 @@ namespace sandbox::detail::process::windows
             ~suspended_process_guard()
             {
                 if (active_ && process_ != nullptr)
-                    TerminateProcess(process_, ERROR_PROCESS_ABORTED);
+                {
+                    if (!TerminateProcess(process_, ERROR_PROCESS_ABORTED)
+                        && cleanup_error_ != nullptr)
+                    {
+                        *cleanup_error_ = GetLastError();
+                    }
+                }
             }
 
             void release() noexcept
@@ -116,24 +128,101 @@ namespace sandbox::detail::process::windows
 
         private:
             HANDLE process_ = nullptr;
+            DWORD* cleanup_error_ = nullptr;
             bool active_ = true;
         };
 
+        Error attach_suspended_cleanup_error(
+            Error primary,
+            DWORD cleanup_error)
+        {
+            if (cleanup_error == ERROR_SUCCESS)
+                return primary;
+
+            Error cleanup = sandbox::detail::make_native_error(
+                "TerminateProcess",
+                cleanup_error);
+            return sandbox::detail::make_error(
+                "abort_suspended_process",
+                "operation_failed",
+                "sandbox process setup failed and suspended-process cleanup failed",
+                nullptr,
+                {std::move(primary), std::move(cleanup)});
+        }
+
         [[noreturn]] void throw_win32(const char* action, DWORD error)
         {
-            throw std::system_error(
-                static_cast<int>(error),
-                std::system_category(),
-                action);
+            sandbox::detail::throw_error(
+                sandbox::detail::make_native_error(
+                    action,
+                    error));
         }
 
         void remember_io_error(
-            std::atomic<DWORD>& destination,
+            sandbox::detail::io_failure<DWORD>& destination,
             DWORD error) noexcept
         {
             if (error == ERROR_SUCCESS || error == ERROR_BROKEN_PIPE)
                 return;
             destination.store(error, std::memory_order_relaxed);
+        }
+
+        std::optional<Error> observed_io_error(
+            const char* operation,
+            const sandbox::detail::io_failure<DWORD>& source)
+        {
+            return source.observe(operation, std::system_category());
+        }
+
+        std::optional<Error> collect_io_errors(
+            const sandbox::detail::io_failure<DWORD>& stdin_error,
+            const sandbox::detail::io_failure<DWORD>& stdout_error,
+            const sandbox::detail::io_failure<DWORD>& stderr_error,
+            const std::optional<Error>& observed = std::nullopt)
+        {
+            std::vector<Error> errors;
+            if (auto error = observed_io_error("WriteFile(stdin)", stdin_error))
+            {
+                if (!sandbox::detail::io_already_observed(*error, observed))
+                    errors.push_back(std::move(*error));
+            }
+            if (auto error = observed_io_error("ReadFile(stdout)", stdout_error))
+            {
+                if (!sandbox::detail::io_already_observed(*error, observed))
+                    errors.push_back(std::move(*error));
+            }
+            if (auto error = observed_io_error("ReadFile(stderr)", stderr_error))
+            {
+                if (!sandbox::detail::io_already_observed(*error, observed))
+                    errors.push_back(std::move(*error));
+            }
+
+            if (errors.empty())
+                return std::nullopt;
+            if (errors.size() == 1)
+                return std::move(errors.front());
+            return sandbox::detail::make_error(
+                "process_io",
+                "operation_failed",
+                "multiple sandbox process I/O operations failed",
+                nullptr,
+                std::move(errors));
+        }
+
+        void merge_failure(std::optional<Error>& destination, Error error)
+        {
+            if (!destination)
+            {
+                destination = std::move(error);
+                return;
+            }
+            Error combined = sandbox::detail::make_error(
+                "run_process",
+                "operation_failed",
+                "multiple sandbox process operations failed");
+            combined.causes.push_back(std::move(*destination));
+            combined.causes.push_back(std::move(error));
+            destination = std::move(combined);
         }
 
         pipe_pair create_pipe(bool parent_reads)
@@ -215,7 +304,12 @@ namespace sandbox::detail::process::windows
             unique_heap_memory storage(
                 HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, bytes));
             if (!storage)
-                throw_win32("HeapAlloc(process attributes)", ERROR_NOT_ENOUGH_MEMORY);
+            {
+                sandbox::detail::throw_error(sandbox::detail::make_error(
+                    "HeapAlloc(process attributes)", "resource_error",
+                    "HeapAlloc returned null",
+                    {{"api", "HeapAlloc"}, {"bytes", bytes}}));
+            }
 
             auto* list = static_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage.get());
             if (!InitializeProcThreadAttributeList(list, 2, 0, &bytes))
@@ -247,7 +341,7 @@ namespace sandbox::detail::process::windows
         void read_pipe(
             unique_handle handle,
             std::string& output,
-            std::atomic<DWORD>& io_error) noexcept
+            sandbox::detail::io_failure<DWORD>& io_error) noexcept
         {
             std::array<char, 8192> buffer{};
             for (;;)
@@ -266,14 +360,22 @@ namespace sandbox::detail::process::windows
                 }
                 if (read == 0)
                     return;
-                output.append(buffer.data(), read);
+                try
+                {
+                    output.append(buffer.data(), read);
+                }
+                catch (...)
+                {
+                    io_error.record_exception();
+                    return;
+                }
             }
         }
 
         void write_pipe(
             unique_handle handle,
             const std::string& input,
-            std::atomic<DWORD>& io_error) noexcept
+            sandbox::detail::io_failure<DWORD>& io_error) noexcept
         {
             std::size_t offset = 0;
             while (offset < input.size())
@@ -297,7 +399,7 @@ namespace sandbox::detail::process::windows
                 }
                 if (written == 0)
                 {
-                    remember_io_error(io_error, ERROR_WRITE_FAULT);
+                    io_error.record_no_progress(offset, remaining);
                     return;
                 }
                 offset += written;
@@ -317,6 +419,7 @@ namespace sandbox::detail::process::windows
     process_results run(const process_request& request)
     {
         process_results result;
+        DWORD suspended_cleanup_error = ERROR_SUCCESS;
         try
         {
             applied_config applied = apply_config(request.config, request.refresh);
@@ -382,13 +485,19 @@ namespace sandbox::detail::process::windows
                     &startup.StartupInfo,
                     &information))
             {
-                throw_win32("CreateProcessW(sandbox target)", GetLastError());
+                const DWORD code = GetLastError();
+                Error failure = sandbox::detail::make_native_error(
+                    "CreateProcessW", code, request.executable);
+                failure.data.front()["working_directory"] =
+                    sandbox::detail::error_path_text(request.working_directory);
+                sandbox::detail::throw_error(std::move(failure));
             }
 
             unique_handle process = own_handle(information.hProcess);
             unique_handle thread = own_handle(information.hThread);
             suspended_process_guard suspended_guard(
-                static_cast<HANDLE>(process.get()));
+                static_cast<HANDLE>(process.get()),
+                &suspended_cleanup_error);
             assign_process_to_job(
                 static_cast<HANDLE>(job.get()),
                 static_cast<HANDLE>(process.get()));
@@ -400,85 +509,135 @@ namespace sandbox::detail::process::windows
             if (ResumeThread(static_cast<HANDLE>(thread.get())) == static_cast<DWORD>(-1))
             {
                 const DWORD error = GetLastError();
-                TerminateJobObject(static_cast<HANDLE>(job.get()), error);
-                throw_win32("ResumeThread(sandbox target)", error);
+                Error failure = sandbox::detail::make_native_error(
+                    "ResumeThread",
+                    error);
+                if (!TerminateJobObject(static_cast<HANDLE>(job.get()), error))
+                {
+                    Error cleanup = sandbox::detail::make_native_error(
+                        "TerminateJobObject",
+                        GetLastError());
+                    sandbox::detail::throw_error(
+                        sandbox::detail::make_error(
+                            "resume_process",
+                            "operation_failed",
+                            "failed to resume sandbox process and terminate its job",
+                            nullptr,
+                            {std::move(failure), std::move(cleanup)}));
+                }
+                suspended_guard.release();
+                sandbox::detail::throw_error(std::move(failure));
             }
             suspended_guard.release();
             result.state.started = true;
 
-            std::atomic<DWORD> io_error{ERROR_SUCCESS};
+            sandbox::detail::io_failure<DWORD> stdin_error{ERROR_SUCCESS};
+            sandbox::detail::io_failure<DWORD> stdout_error{ERROR_SUCCESS};
+            sandbox::detail::io_failure<DWORD> stderr_error{ERROR_SUCCESS};
             joining_thread stdin_writer(
                 write_pipe,
                 std::move(stdin_pipe.write),
                 std::cref(request.stdin_data),
-                std::ref(io_error));
+                std::ref(stdin_error));
             joining_thread stdout_reader(
                 read_pipe,
                 std::move(stdout_pipe.read),
                 std::ref(result.stdout_text),
-                std::ref(io_error));
+                std::ref(stdout_error));
             joining_thread stderr_reader(
                 read_pipe,
                 std::move(stderr_pipe.read),
                 std::ref(result.stderr_text),
-                std::ref(io_error));
+                std::ref(stderr_error));
 
-            SetLastError(ERROR_SUCCESS);
             const DWORD wait = WaitForSingleObject(
                 static_cast<HANDLE>(process.get()),
                 timeout_value(request.timeout));
 
             if (wait == WAIT_TIMEOUT)
             {
-                DWORD captured = GetLastError();
-                if (captured == ERROR_SUCCESS)
-                    captured = io_error.load(std::memory_order_relaxed);
-
                 result.state.timed_out = true;
-                result.state.os_error_before_termination = std::error_code(
-                    static_cast<int>(captured),
-                    std::system_category());
+                result.state.os_error_before_termination = collect_io_errors(
+                    stdin_error,
+                    stdout_error,
+                    stderr_error);
 
                 if (!TerminateJobObject(
                         static_cast<HANDLE>(job.get()),
                         ERROR_TIMEOUT))
                 {
-                    result.state.final_error = std::error_code(
-                        static_cast<int>(GetLastError()),
-                        std::system_category());
+                    result.state.final_error = sandbox::detail::make_native_error(
+                        "TerminateJobObject",
+                        GetLastError());
                 }
                 result.state.terminated = true;
-                WaitForSingleObject(static_cast<HANDLE>(process.get()), INFINITE);
+                if (WaitForSingleObject(
+                        static_cast<HANDLE>(process.get()),
+                        INFINITE) == WAIT_FAILED)
+                {
+                    merge_failure(
+                        result.state.final_error,
+                        sandbox::detail::make_native_error(
+                            "WaitForSingleObject(after termination)",
+                            GetLastError()));
+                }
             }
             else if (wait == WAIT_FAILED)
             {
                 const DWORD error = GetLastError();
-                result.state.final_error = std::error_code(
-                    static_cast<int>(error),
-                    std::system_category());
-                TerminateJobObject(static_cast<HANDLE>(job.get()), error);
+                result.state.final_error = sandbox::detail::make_native_error(
+                    "WaitForSingleObject",
+                    error);
+                if (!TerminateJobObject(static_cast<HANDLE>(job.get()), error))
+                {
+                    merge_failure(
+                        result.state.final_error,
+                        sandbox::detail::make_native_error(
+                            "TerminateJobObject",
+                            GetLastError()));
+                }
                 result.state.terminated = true;
-                WaitForSingleObject(static_cast<HANDLE>(process.get()), INFINITE);
+                if (WaitForSingleObject(
+                        static_cast<HANDLE>(process.get()),
+                        INFINITE) == WAIT_FAILED)
+                {
+                    merge_failure(
+                        result.state.final_error,
+                        sandbox::detail::make_native_error(
+                            "WaitForSingleObject(after failure termination)",
+                            GetLastError()));
+                }
             }
 
             DWORD exit_code = 0;
             if (GetExitCodeProcess(static_cast<HANDLE>(process.get()), &exit_code))
                 result.state.exit_code = static_cast<int>(exit_code);
-            else if (!result.state.final_error)
+            else
             {
-                result.state.final_error = std::error_code(
-                    static_cast<int>(GetLastError()),
-                    std::system_category());
+                const DWORD code = GetLastError();
+                merge_failure(result.state.final_error,
+                    sandbox::detail::make_native_error("GetExitCodeProcess", code));
             }
 
             stdin_writer.join();
             stdout_reader.join();
             stderr_reader.join();
+            if (auto io_failure = collect_io_errors(
+                    stdin_error,
+                    stdout_error,
+                    stderr_error,
+                    result.state.os_error_before_termination))
+            {
+                merge_failure(result.state.final_error, std::move(*io_failure));
+            }
             return result;
         }
-        catch (const std::system_error& exception)
+        catch (...)
         {
-            result.state.final_error = exception.code();
+            result.state.final_error = attach_suspended_cleanup_error(
+                sandbox::detail::capture_exception(
+                    "run_process", std::current_exception()),
+                suspended_cleanup_error);
             return result;
         }
     }

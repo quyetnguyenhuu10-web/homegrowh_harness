@@ -22,6 +22,12 @@ namespace sandbox::detail
         const sandbox::config& config,
         bool refresh)
     {
+        if (config.error())
+        {
+            applied_config applied;
+            applied.results.final_error = *config.error();
+            return applied;
+        }
         const auto& filesystem = config_access::filesystem(config);
         std::vector<registry_request> requests;
         requests.reserve(filesystem.size());
@@ -38,13 +44,13 @@ namespace sandbox::detail
         applied_config applied;
         applied.filesystem_count = requests.size();
         applied.filesystem = registry(requests, refresh);
-        applied.results.final_error = applied.filesystem.final_error;
+        applied.results.final_error = std::move(applied.filesystem.final_error);
         applied.results.path_errors.reserve(applied.filesystem.path_errors.size());
         for (registry_path_error& item : applied.filesystem.path_errors)
         {
             applied.results.path_errors.push_back({
                 std::move(item.path),
-                item.error,
+                std::move(item.error),
             });
         }
         applied.network = config_access::network(config);

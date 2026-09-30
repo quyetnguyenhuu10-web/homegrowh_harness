@@ -1,11 +1,10 @@
 #include "identity.h"
+#include "../error_schema.h"
 
 #include <cstdint>
 #include <iomanip>
 #include <sstream>
-#include <stdexcept>
 #include <string>
-#include <system_error>
 
 namespace sandbox::detail::filesystem::linux
 {
@@ -38,15 +37,23 @@ namespace sandbox::detail::filesystem::linux
         const std::filesystem::path& input)
     {
         if (input.empty())
-            throw std::invalid_argument("sandbox registry path must not be empty");
+        {
+            sandbox::detail::throw_error(
+                sandbox::detail::make_error(
+                    "canonical_existing_path",
+                    "invalid_argument",
+                    "sandbox registry path must not be empty"));
+        }
 
         std::error_code error;
         auto canonical = std::filesystem::canonical(input, error);
         if (error)
         {
-            throw std::system_error(
-                error,
-                "sandbox registry path must exist: " + input.string());
+            sandbox::detail::throw_error(
+                sandbox::detail::make_system_error(
+                    "std::filesystem::canonical",
+                    error,
+                    input));
         }
         return canonical.lexically_normal();
     }
@@ -60,7 +67,11 @@ namespace sandbox::detail::filesystem::linux
         case permission::read_write:
             return "read_write";
         }
-        throw std::invalid_argument("unknown sandbox permission");
+        sandbox::detail::throw_error(
+            sandbox::detail::make_error(
+                "permission_name",
+                "invalid_argument",
+                "unknown sandbox permission"));
     }
 
     std::wstring policy_identity(

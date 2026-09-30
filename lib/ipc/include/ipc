@@ -2,13 +2,27 @@
 
 #include <memory>
 #include <cstdint>
+#include <optional>
 #include <span>
 #include <string>
-#include <system_error>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 namespace ipc
 {
+    struct Error
+    {
+        std::string source;
+        std::string operation;
+        std::string type;
+        std::string message;
+        nlohmann::json::array_t data;
+        std::vector<Error> causes;
+    };
+
+    void to_json(nlohmann::json& json, const Error& error);
+
     class server;
     class connection;
 
@@ -34,7 +48,7 @@ namespace ipc
 
         std::unique_ptr<impl> impl_;
 
-        friend server_result listen(std::string name);
+        friend server_result listen(const std::string& name);
         friend connection_result accept(server& listener);
     };
 
@@ -56,7 +70,7 @@ namespace ipc
         std::unique_ptr<impl> impl_;
 
         friend connection_result accept(server& listener);
-        friend connection_result connect(std::string name);
+        friend connection_result connect(const std::string& name);
         friend write_result write(
             connection& target,
             std::span<const std::uint8_t> data);
@@ -66,30 +80,31 @@ namespace ipc
     struct server_result
     {
         server value;
-        std::error_code error;
+        std::optional<Error> error;
     };
 
     struct connection_result
     {
         connection value;
-        std::error_code error;
+        std::optional<Error> error;
     };
 
     struct write_result
     {
-        std::error_code error;
+        std::optional<Error> error;
     };
 
     struct read_result
     {
         std::vector<std::uint8_t> data;
         bool closed = false;
-        std::error_code error;
+        std::optional<Error> error;
     };
 
-    [[nodiscard]] server_result listen(std::string name);
+    // A result's value/data is authoritative only when error is nullopt.
+    [[nodiscard]] server_result listen(const std::string& name);
     [[nodiscard]] connection_result accept(server& listener);
-    [[nodiscard]] connection_result connect(std::string name);
+    [[nodiscard]] connection_result connect(const std::string& name);
 
     [[nodiscard]] write_result write(
         connection& target,

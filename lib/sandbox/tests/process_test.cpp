@@ -1,5 +1,6 @@
 #include <sandbox>
 #include <registry.h>
+#include "error_schema.h"
 
 #include <chrono>
 #include <cerrno>
@@ -62,7 +63,7 @@ namespace
     }
 }
 
-int main(int argc, char* argv[])
+int run_test(int argc, char* argv[])
 {
     const char* child = std::getenv("HOMEGROWPH_SANDBOX_PROCESS_TEST_CHILD");
     if (child != nullptr && *child != '\0')
@@ -148,7 +149,10 @@ int main(int argc, char* argv[])
     };
     normal.timeout = std::chrono::seconds(5);
 
-    sandbox::process(normal);
+    const auto normal_status = sandbox::process(normal);
+    if (normal_status.error)
+        std::cerr << nlohmann::json(*normal_status.error).dump(2) << '\n';
+    require(normal_status.value.has_value() && !normal_status.error, "normal process Result");
     const auto& normal_result = normal.results;
     require(!normal_result.state.final_error, "normal sandbox process final error");
     require(!normal_result.state.config.final_error, "normal sandbox config error");
@@ -159,17 +163,69 @@ int main(int argc, char* argv[])
         normal_result.stdout_text == "sandbox-process-ok",
         "normal sandbox process stdout mismatch");
 
+#ifdef _WIN32
+    sandbox::process_request start_failure = normal;
+    start_failure.working_directory = root / "missing-working-directory";
+    const auto start_failure_status = sandbox::process(start_failure);
+    require(start_failure_status.error.has_value() && !start_failure_status.value,
+            "start failure process Result");
+    const auto& start_failure_result = start_failure.results;
+    require(
+        !start_failure_result.state.started,
+        "failed sandbox process unexpectedly started");
+    require(
+        start_failure_result.state.final_error.has_value(),
+        "failed sandbox process did not return schema error");
+    require(
+        start_failure_result.state.final_error->source == "sandbox",
+        "sandbox process error source mismatch");
+    require(
+        start_failure_result.state.final_error->operation == "CreateProcessW",
+        "sandbox process error operation mismatch");
+    require(
+        start_failure_result.state.final_error->type == "system_error",
+        "sandbox process error type mismatch");
+    require(
+        !start_failure_result.state.final_error->data.empty(),
+        "sandbox process error data is empty");
+    require(
+        start_failure_result.state.final_error->causes.empty(),
+        "sandbox process start error unexpectedly has causes");
+    require(
+        nlohmann::json(*start_failure_status.error)
+            == nlohmann::json(*start_failure_result.state.final_error),
+        "process Result changed native error identity");
+    require(
+        start_failure_status.error->data.at(0).at("working_directory")
+            == sandbox::detail::error_path_text(start_failure.working_directory),
+        "process working directory was lost");
+#endif
+
     sandbox::process_request timeout = normal;
     timeout.stdin_data = nlohmann::json{{"mode", "sleep"}}.dump();
     timeout.timeout = std::chrono::milliseconds(100);
-    sandbox::process(timeout);
+    const auto timeout_status = sandbox::process(timeout);
+    require(timeout_status.error.has_value() && !timeout_status.value, "timeout process Result");
+    require(timeout_status.error->type == "timeout", "timeout semantic error");
+    require(timeout_status.error->data.at(0).at("timeout_ms") == 100, "timeout duration lost");
     const auto& timeout_result = timeout.results;
     require(timeout_result.state.started, "timeout sandbox process did not start");
     require(timeout_result.state.timed_out, "sandbox timeout was not reported");
     require(timeout_result.state.terminated, "sandbox timeout did not terminate process");
-    require(
-        !timeout_result.state.os_error_before_termination.message().empty(),
-        "sandbox timeout did not capture OS error state before termination");
+    if (timeout_result.state.os_error_before_termination)
+    {
+        require(
+            timeout_result.state.os_error_before_termination->source == "sandbox",
+            "sandbox timeout pre-termination error source mismatch");
+        require(
+            !timeout_result.state.os_error_before_termination->operation.empty(),
+            "sandbox timeout pre-termination error operation is empty");
+        require(
+            timeout_result.state.os_error_before_termination->type == "system_error"
+                || timeout_result.state.os_error_before_termination->type
+                    == "operation_failed",
+            "sandbox timeout pre-termination error type mismatch");
+    }
 
     std::filesystem::remove_all(root, cleanup_error);
     std::filesystem::remove(state_path, cleanup_error);
@@ -182,4 +238,22 @@ int main(int argc, char* argv[])
 #endif
     std::cout << "sandbox process tests passed\n";
     return 0;
+}
+
+int main(int argc, char* argv[])
+{
+    try
+    {
+        return run_test(argc, argv);
+    }
+    catch (const sandbox::detail::error_exception& exception)
+    {
+        std::cerr << nlohmann::json(exception.error()).dump(2) << '\n';
+        return 1;
+    }
+    catch (const std::exception& exception)
+    {
+        std::cerr << exception.what() << '\n';
+        return 1;
+    }
 }

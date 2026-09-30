@@ -1,4 +1,5 @@
 #include "registry.h"
+#include "error.h"
 
 #include <algorithm>
 
@@ -41,47 +42,63 @@ namespace event_port::detail
                 });
         }
 
-        void publish_one(
+        Result<void> publish_one(
             const std::shared_ptr<RegistrationState>& registration,
             const EventPtr& event)
         {
-            if (!matches(*registration, *event))
+            auto result = guard<void>("deliver_event", [&]() -> Result<void>
             {
-                return;
-            }
+                if (!matches(*registration, *event))
+                    return Result<void>::success();
 
-            std::unique_lock lock(registration->mutex);
-            registration->writable.wait(
-                lock,
-                [&]
+                std::unique_lock lock(registration->mutex);
+                registration->writable.wait(
+                    lock,
+                    [&]
+                    {
+                        return registration->closed || registration->pending == nullptr;
+                    });
+                if (registration->closed)
+                    return Result<void>::success();
+
+                registration->pending = event;
+                lock.unlock();
+                registration->readable.notify_one();
+                return Result<void>::success();
+            });
+            if (result.error)
+            {
+                nlohmann::json references = nlohmann::json::array();
+                for (const auto& reference : registration->references)
                 {
-                    return
-                        registration->closed ||
-                        registration->pending == nullptr;
+                    references.push_back({{"type", reference.type}, {"value", reference.value}});
+                }
+                result.error->data.emplace_back(nlohmann::json{
+                    {"registration_package", registration->package},
+                    {"registration_references", std::move(references)},
+                    {"event_sequence", event->sequence}
                 });
-
-            if (registration->closed)
-            {
-                return;
             }
-
-            registration->pending = event;
-            lock.unlock();
-            registration->readable.notify_one();
+            return result;
         }
     }
 
-    void Registry::add(const std::shared_ptr<RegistrationState>& state)
+    Result<void> Registry::add(const std::shared_ptr<RegistrationState>& state)
     {
-        std::lock_guard lock(mutex_);
-        registrations_.emplace_back(state);
+        return guard<void>("add_registration", [&]() -> Result<void>
+        {
+            std::lock_guard lock(mutex_);
+            registrations_.emplace_back(state);
+            return Result<void>::success();
+        });
     }
 
-    void Registry::publish(const EventPtr& event)
+    Result<void> Registry::publish(const EventPtr& event)
     {
-        std::deque<std::shared_ptr<RegistrationState>> registrations;
-
+        auto snapshot = guard<std::deque<std::shared_ptr<RegistrationState>>>(
+            "snapshot_registrations", [&]() -> Result<std::deque<std::shared_ptr<RegistrationState>>>
         {
+            std::deque<std::shared_ptr<RegistrationState>> registrations;
             std::lock_guard lock(mutex_);
 
             auto current = registrations_.begin();
@@ -96,17 +113,38 @@ namespace event_port::detail
 
                 current = registrations_.erase(current);
             }
-        }
+            return Result<std::deque<std::shared_ptr<RegistrationState>>>::success(std::move(registrations));
+        });
+        if (snapshot.error)
+            return Result<void>::failure(std::move(*snapshot.error));
 
-        for (const std::shared_ptr<RegistrationState>& registration : registrations)
+        return guard<void>("publish", [&]() -> Result<void>
         {
-            publish_one(registration, event);
-        }
+            std::vector<Error> errors;
+            for (const auto& registration : *snapshot.value)
+            {
+                auto delivered = publish_one(registration, event);
+                if (delivered.error)
+                    errors.emplace_back(std::move(*delivered.error));
+            }
+            if (errors.empty())
+                return Result<void>::success();
+            if (errors.size() == 1)
+                return Result<void>::failure(std::move(errors.front()));
+            return Result<void>::failure(Error{
+                "event_port", "publish", "dependency_error",
+                "Event delivery failed for multiple registrations",
+                {{{"event_sequence", event->sequence}, {"failed_registrations", errors.size()}}},
+                std::move(errors)});
+        });
     }
 
-    Registry& registry()
+    Result<std::reference_wrapper<Registry>> registry()
     {
-        static Registry instance;
-        return instance;
+        return guard<std::reference_wrapper<Registry>>("registry", []() -> Result<std::reference_wrapper<Registry>>
+        {
+            static Registry instance;
+            return Result<std::reference_wrapper<Registry>>::success(std::ref(instance));
+        });
     }
 }

@@ -1,24 +1,18 @@
+import { PluginErrorQueue } from "./error_queue.js";
 import type { Plugin, PluginRequest } from "./plugin.js";
-import { failure, get_error } from "./result.js";
-import type { PluginErrorInput, PluginLoaderError, PluginResult } from "./result.js";
+import { makeError } from "./error.js";
 
 const Api = { getError: 1 } as const;
+const errors = new PluginErrorQueue();
 
-function invoke(request: PluginRequest): PluginLoaderError | null | PluginResult<never> {
-    try {
-        switch (request.api) {
-            case Api.getError:
-                return get_error(request.input as PluginErrorInput);
-            default:
-                return failure({
-                    operation: "invoke",
-                    cause: { code: "unsupported_api", value: request.api },
-                });
-        }
-    } catch (cause) {
-        return failure({ operation: "invoke", cause });
+async function invoke(request: PluginRequest): Promise<unknown> {
+    if (request.api === Api.getError) {
+        return errors.drain();
     }
+
+    const error = errors.push(makeError("invoke", "protocol_error",
+        "Unsupported plugin API", [{ code: "api_not_found", apiId: request.api }]));
+    throw error;
 }
 
 export const plugin: Plugin = { invoke };
-

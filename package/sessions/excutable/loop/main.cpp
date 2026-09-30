@@ -1,4 +1,5 @@
-#include <sessions>
+#include <session>
+#include <error/error.h>
 #include "util/terminal_event_ui.h"
 
 #include <cstdint>
@@ -250,8 +251,14 @@ int main(int argc, char** argv)
             throw std::invalid_argument("session config root must be an object");
 
         std::string api_key = required_string(input, "api_key");
-        const provider::Provider selected_provider =
+        auto provider_result =
             provider::provider_from_name(required_string(input, "provider"));
+        if (provider_result.error)
+        {
+            throw sessions::ErrorException(sessions::detail::convert_error<sessions::Error>(
+                std::move(*provider_result.error)));
+        }
+        const provider::Provider selected_provider = *provider_result.value;
         std::string endpoint = required_string(input, "endpoint");
         std::string model_id = required_string(input, "model_id");
         const std::uint64_t context_limit =
@@ -309,6 +316,11 @@ int main(int argc, char** argv)
 
         terminal.stop();
         return 0;
+    }
+    catch (const sessions::ErrorException& error)
+    {
+        std::cerr << nlohmann::json(error.error()).dump(2) << '\n';
+        return 1;
     }
     catch (const std::exception& error)
     {

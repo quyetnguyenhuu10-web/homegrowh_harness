@@ -1,6 +1,7 @@
 import { Ajv2020 } from "ajv/dist/2020.js";
 import type { AnySchema } from "ajv";
 import type { PluginManifest } from "../plugin.js";
+import { captureError } from "../error.js";
 import { failure, success } from "../result.js";
 import type { PluginResult } from "../result.js";
 import type { LoadedApi } from "./types.js";
@@ -31,7 +32,9 @@ export function createValidator(): Ajv2020 {
     return ajv;
 }
 
-export function compileApis(manifest: PluginManifest): PluginResult<Map<number, LoadedApi>> {
+export function compileApis(
+    manifest: PluginManifest, context: Record<string, unknown> = {},
+): PluginResult<Map<number, LoadedApi>> {
     let apiId: number | undefined;
     let direction: "input" | "output" | undefined;
     try {
@@ -47,10 +50,11 @@ export function compileApis(manifest: PluginManifest): PluginResult<Map<number, 
         }
         return success(apis);
     } catch (cause) {
-        return failure({
-            operation: "schema_compile", cause,
-            pluginId: manifest.id, apiId, direction,
-        });
+        return failure(captureError("schema_compile", cause, {
+            ...context, pluginId: manifest.id,
+            ...(apiId === undefined ? {} : { apiId }),
+            ...(direction === undefined ? {} : { direction }),
+        }));
     }
 }
 

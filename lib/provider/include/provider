@@ -1,10 +1,11 @@
 #pragma once
 
+#include "../src/error/error.h"
 #include <provider_types.generated.h>
 
 #include <iosfwd>
 #include <memory>
-#include <stdexcept>
+#include <functional>
 #include <string>
 #include <string_view>
 
@@ -12,24 +13,14 @@
 
 namespace provider
 {
-    struct HttpError final : std::runtime_error
-    {
-        HttpError();
+    Result<Provider> provider_from_name(const std::string& provider_name);
+    Result<std::optional<nlohmann::json>> usage_from_event(
+        Provider provider, const nlohmann::json& event);
+    Result<RequestUsage> parse_usage(
+        Provider provider, const nlohmann::json& usage);
 
-        HttpError(
-            long status_code,
-            std::string&& status_line,
-            std::string&& reason,
-            std::string&& body);
-
-        long status_code = 0;
-        std::string status_line;
-        std::string reason;
-        std::string body;
-    };
-
-    using EventHandler = void (*)(void*, std::string&&);
-    using FinishedHandler = void (*)(void*);
+    using EventHandler = Result<void> (*)(void*, std::string&&);
+    using FinishedHandler = Result<void> (*)(void*);
 
     struct EventSink
     {
@@ -38,7 +29,7 @@ namespace provider
         FinishedHandler on_finished = nullptr;
     };
 
-    RequestUsage request(
+    Result<RequestUsage> request(
         Provider provider,
         const std::string& url,
         std::string_view api_key,
@@ -56,7 +47,7 @@ namespace provider
         RequestUsage usage = UsageState::unavailable;
     };
 
-    CompactionResult compaction(
+    Result<CompactionResult> compaction(
         Provider selected_provider,
         const std::string& endpoint,
         const std::string& model_id,
@@ -87,11 +78,15 @@ namespace provider
         Stream(Stream&&) noexcept;
         Stream& operator=(Stream&&) noexcept;
 
-        const RequestUsage& usage() const;
+        Result<std::reference_wrapper<const RequestUsage>> usage() const;
+        Result<void> write(std::ostream& output);
+        const std::optional<Error>& error() const noexcept;
 
     private:
         struct Impl;
         std::unique_ptr<Impl> impl_;
+        std::optional<Error> error_;
+        bool moved_ = false;
 
         friend std::ostream& operator<<(std::ostream& output, Stream& stream);
     };

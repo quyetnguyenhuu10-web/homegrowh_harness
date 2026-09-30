@@ -9,11 +9,15 @@
 
 #include <Windows.h>
 
+#include <array>
+#include <cerrno>
 #include <fstream>
 #include <iomanip>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace sandbox::detail::filesystem::windows
 {
@@ -104,8 +108,21 @@ namespace sandbox::detail::filesystem::windows
                 variable.c_str(),
                 value.data(),
                 required);
-            if (written == 0 || written >= required)
+            if (written == 0)
                 throw_win32("GetEnvironmentVariableW", GetLastError());
+            if (written >= required)
+            {
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "GetEnvironmentVariableW",
+                        "concurrent_change",
+                        "environment variable changed while it was being read",
+                        {
+                            {"variable", utf8(variable)},
+                            {"buffer_size", required},
+                            {"required_size", written},
+                        }));
+            }
             value.resize(written);
             return value;
         }
@@ -126,8 +143,23 @@ namespace sandbox::detail::filesystem::windows
             const DWORD error = wait == WAIT_FAILED
                 ? GetLastError()
                 : ERROR_GEN_FAILURE;
-            CloseHandle(handle);
-            throw_win32("WaitForSingleObject(sandbox registry)", error);
+            Error primary = sandbox::detail::make_native_error(
+                "WaitForSingleObject(sandbox registry)",
+                error);
+            if (!CloseHandle(handle))
+            {
+                Error cleanup = sandbox::detail::make_native_error(
+                    "CloseHandle(sandbox registry mutex)",
+                    GetLastError());
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "acquire_registry_lock",
+                        "operation_failed",
+                        "registry lock acquisition failed and mutex cleanup also failed",
+                        nullptr,
+                        {std::move(primary), std::move(cleanup)}));
+            }
+            sandbox::detail::throw_error(std::move(primary));
         }
 
         handle_ = handle;
@@ -144,6 +176,41 @@ namespace sandbox::detail::filesystem::windows
         CloseHandle(handle);
     }
 
+    std::optional<Error> registry_state_lock::close()
+    {
+        if (handle_ == nullptr)
+            return std::nullopt;
+
+        HANDLE handle = static_cast<HANDLE>(handle_);
+        std::vector<Error> errors;
+        if (locked_ && !ReleaseMutex(handle))
+        {
+            errors.push_back(sandbox::detail::make_native_error(
+                "ReleaseMutex(sandbox registry)",
+                GetLastError()));
+        }
+        locked_ = false;
+
+        if (!CloseHandle(handle))
+        {
+            errors.push_back(sandbox::detail::make_native_error(
+                "CloseHandle(sandbox registry mutex)",
+                GetLastError()));
+        }
+        handle_ = nullptr;
+
+        if (errors.empty())
+            return std::nullopt;
+        if (errors.size() == 1)
+            return std::move(errors.front());
+        return sandbox::detail::make_error(
+            "close_registry_lock",
+            "operation_failed",
+            "multiple registry lock cleanup operations failed",
+            nullptr,
+            std::move(errors));
+    }
+
     std::filesystem::path registry_state_path()
     {
         if (const auto override_path = environment_value(registry_state_override))
@@ -152,8 +219,12 @@ namespace sandbox::detail::filesystem::windows
         const auto local_app_data = environment_value(L"LOCALAPPDATA");
         if (!local_app_data || local_app_data->empty())
         {
-            throw std::runtime_error(
-                "LOCALAPPDATA is required for durable sandbox registry state");
+            sandbox::detail::throw_error(
+                sandbox::detail::make_error(
+                    "registry_state_path",
+                    "environment_error",
+                    "LOCALAPPDATA is required for durable sandbox registry state",
+                    {{"variable", "LOCALAPPDATA"}}));
         }
         return std::filesystem::path(*local_app_data)
             / std::wstring(capability_signature)
@@ -167,16 +238,67 @@ namespace sandbox::detail::filesystem::windows
         {
             if (exists_error)
             {
-                throw std::system_error(
-                    exists_error,
-                    "could not inspect sandbox registry state path");
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_system_error(
+                        "std::filesystem::exists",
+                        exists_error,
+                        path));
             }
             return {};
         }
 
-        std::ifstream input(path, std::ios::binary);
-        if (!input)
-            throw std::runtime_error("could not open sandbox registry state");
+        errno = 0;
+        std::ifstream file(path, std::ios::binary);
+        if (!file)
+        {
+            const int native_error = errno;
+            if (native_error != 0)
+            {
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_system_error(
+                        "open_registry_state",
+                        std::error_code(native_error, std::generic_category()),
+                        path));
+            }
+            sandbox::detail::throw_error(
+                sandbox::detail::make_error(
+                    "open_registry_state",
+                    "io_error",
+                    "could not open sandbox registry state",
+                    {{"path", sandbox::detail::error_path_text(path)}}));
+        }
+
+        std::string content;
+        std::array<char, 8192> buffer{};
+        for (;;)
+        {
+            errno = 0;
+            file.read(buffer.data(), static_cast<std::streamsize>(buffer.size()));
+            const int native_error = errno;
+            const auto count = file.gcount();
+            if (count > 0)
+                content.append(buffer.data(), static_cast<std::size_t>(count));
+            if (file.bad() || (file.fail() && !file.eof()))
+            {
+                Error failure = native_error != 0
+                    ? sandbox::detail::make_system_error(
+                        "read_registry_state",
+                        std::error_code(native_error, std::generic_category()), path)
+                    : sandbox::detail::make_error(
+                        "read_registry_state", "io_error",
+                        "Registry state stream could not be read");
+                failure.data.push_back({
+                    {"api", "std::ifstream::read"},
+                    {"path", sandbox::detail::error_path_text(path)},
+                    {"rdstate", static_cast<int>(file.rdstate())},
+                    {"body_bytes", std::vector<unsigned char>(content.begin(), content.end())},
+                });
+                sandbox::detail::throw_error(std::move(failure));
+            }
+            if (file.eof())
+                break;
+        }
+        std::istringstream input(content);
 
         std::string signature;
         int schema = 0;
@@ -184,7 +306,12 @@ namespace sandbox::detail::filesystem::windows
             || signature != utf8(capability_signature)
             || schema != registry_schema_version)
         {
-            throw std::runtime_error("sandbox registry state header is invalid");
+            sandbox::detail::throw_error(
+                sandbox::detail::make_error(
+                    "load_registry_state",
+                    "invalid_state",
+                    "sandbox registry state header is invalid",
+                    {{"path", sandbox::detail::error_path_text(path)}, {"body_bytes", std::vector<unsigned char>(content.begin(), content.end())}}));
         }
 
         registry_state state;
@@ -204,7 +331,12 @@ namespace sandbox::detail::filesystem::windows
                     >> acl_ready
                     >> stored_tree_version))
             {
-                throw std::runtime_error("sandbox registry state entry is invalid");
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "load_registry_state",
+                        "invalid_state",
+                        "sandbox registry state entry is invalid",
+                        {{"path", sandbox::detail::error_path_text(path)}, {"body_bytes", std::vector<unsigned char>(content.begin(), content.end())}}));
             }
             if (access == "read_modify")
                 access = "read_write";
@@ -216,7 +348,12 @@ namespace sandbox::detail::filesystem::windows
                 || (acl_ready != 0 && acl_ready != 1)
                 || stored_tree_version < 0)
             {
-                throw std::runtime_error("sandbox registry state entry is incomplete");
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "load_registry_state",
+                        "invalid_state",
+                        "sandbox registry state entry is incomplete",
+                        {{"path", sandbox::detail::error_path_text(path)}, {"body_bytes", std::vector<unsigned char>(content.begin(), content.end())}}));
             }
 
             state.entries.push_back({
@@ -240,8 +377,12 @@ namespace sandbox::detail::filesystem::windows
                         state.entries[right].canonical_path.c_str()) == 0
                     && state.entries[left].access == state.entries[right].access)
                 {
-                    throw std::runtime_error(
-                        "sandbox registry state contains duplicate entries");
+                    sandbox::detail::throw_error(
+                        sandbox::detail::make_error(
+                            "load_registry_state",
+                            "invalid_state",
+                            "sandbox registry state contains duplicate entries",
+                            {{"path", sandbox::detail::error_path_text(path)}, {"body_bytes", std::vector<unsigned char>(content.begin(), content.end())}}));
                 }
             }
         }
@@ -259,18 +400,37 @@ namespace sandbox::detail::filesystem::windows
             std::filesystem::create_directories(parent, create_error);
             if (create_error)
             {
-                throw std::system_error(
-                    create_error,
-                    "could not create sandbox registry state directory");
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_system_error(
+                        "std::filesystem::create_directories",
+                        create_error,
+                        parent));
             }
         }
 
         std::filesystem::path temporary = path;
         temporary += L"." + std::to_wstring(GetCurrentProcessId()) + L".tmp";
         {
+            errno = 0;
             std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
             if (!output)
-                throw std::runtime_error("could not create sandbox registry state temp file");
+            {
+                const int native_error = errno;
+                if (native_error != 0)
+                {
+                    sandbox::detail::throw_error(
+                        sandbox::detail::make_system_error(
+                            "create_registry_state_temp",
+                            std::error_code(native_error, std::generic_category()),
+                            temporary));
+                }
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "create_registry_state_temp",
+                        "io_error",
+                        "could not create sandbox registry state temp file",
+                        {{"path", sandbox::detail::error_path_text(temporary)}}));
+            }
 
             output
                 << std::quoted(utf8(capability_signature))
@@ -290,7 +450,23 @@ namespace sandbox::detail::filesystem::windows
             }
             output.flush();
             if (!output)
-                throw std::runtime_error("could not write sandbox registry state");
+            {
+                const int native_error = errno;
+                if (native_error != 0)
+                {
+                    sandbox::detail::throw_error(
+                        sandbox::detail::make_system_error(
+                            "write_registry_state",
+                            std::error_code(native_error, std::generic_category()),
+                            temporary));
+                }
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "write_registry_state",
+                        "io_error",
+                        "could not write sandbox registry state",
+                        {{"path", sandbox::detail::error_path_text(temporary)}}));
+            }
         }
 
         if (!MoveFileExW(
@@ -299,8 +475,32 @@ namespace sandbox::detail::filesystem::windows
                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
         {
             const DWORD error = GetLastError();
-            DeleteFileW(temporary.c_str());
-            throw_win32("MoveFileExW(sandbox registry state)", error);
+            sandbox::Error failure = sandbox::detail::make_error(
+                "save_registry_state",
+                "commit_failed",
+                "could not commit sandbox registry state",
+                {
+                    {"path", sandbox::detail::error_path_text(path)},
+                    {"temporary_path", sandbox::detail::error_path_text(temporary)},
+                },
+                {sandbox::detail::make_native_error(
+                    "MoveFileExW",
+                    error,
+                    path)});
+
+            if (!DeleteFileW(temporary.c_str()))
+            {
+                const DWORD cleanup_error = GetLastError();
+                if (cleanup_error != ERROR_FILE_NOT_FOUND)
+                {
+                    failure.causes.push_back(
+                        sandbox::detail::make_native_error(
+                            "DeleteFileW",
+                            cleanup_error,
+                            temporary));
+                }
+            }
+            sandbox::detail::throw_error(std::move(failure));
         }
     }
 

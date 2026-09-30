@@ -3,11 +3,13 @@
 #endif
 
 #include "appcontainer.h"
+#include "../error_schema.h"
 
 #include <Sddl.h>
 #include <UserEnv.h>
 
 #include <array>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -21,18 +23,29 @@ namespace sandbox::detail::process::windows
 
         [[noreturn]] void throw_win32(const char* action, DWORD error)
         {
-            throw std::system_error(
-                static_cast<int>(error),
-                std::system_category(),
-                action);
+            sandbox::detail::throw_error(
+                sandbox::detail::make_native_error(
+                    action,
+                    error));
         }
 
         [[noreturn]] void throw_hresult(const char* action, HRESULT result)
         {
-            const DWORD error = HRESULT_FACILITY(result) == FACILITY_WIN32
-                ? HRESULT_CODE(result)
-                : static_cast<DWORD>(result);
-            throw_win32(action, error);
+            Error error = sandbox::detail::make_error(
+                action,
+                "system_error",
+                "HRESULT failure",
+                {{"code", static_cast<std::int64_t>(result)},
+                 {"category", "hresult"},
+                 {"api", action}});
+            if (HRESULT_FACILITY(result) == FACILITY_WIN32)
+            {
+                const DWORD code = HRESULT_CODE(result);
+                error.message = std::error_code(
+                    static_cast<int>(code), std::system_category()).message();
+                error.data.front()["win32_code"] = code;
+            }
+            sandbox::detail::throw_error(std::move(error));
         }
 
         unique_sid create_or_derive_appcontainer_sid()
@@ -45,15 +58,17 @@ namespace sandbox::detail::process::windows
                 nullptr,
                 0,
                 &raw_sid);
+            const char* api = "CreateAppContainerProfile";
 
             if (result == HRESULT_FROM_WIN32(ERROR_ALREADY_EXISTS))
             {
+                api = "DeriveAppContainerSidFromAppContainerName";
                 result = DeriveAppContainerSidFromAppContainerName(
                     appcontainer_name,
                     &raw_sid);
             }
             if (FAILED(result))
-                throw_hresult("Create/Derive AppContainer SID", result);
+                throw_hresult(api, result);
             return unique_sid(raw_sid);
         }
     }

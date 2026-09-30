@@ -1,222 +1,119 @@
-import type {
-    Plugin,
-    PluginRequest,
-} from "@hh/plugin-loader";
+import type { Plugin, PluginRequest } from "@hh/plugin-loader";
+import {
+    closeSession, declareRequest, declareResponse, declareTool, registerSession,
+    runRequest, runResponse, runTool, type CommandId, type SessionCommand,
+    type SessionConfig, type UInt64,
+} from "./commands.js";
+import { failure, makeError, normalizeError, success, type HHError, type Result } from "./error.js";
+import { parseEvent } from "./events.js";
+import {
+    closeRuntime, executeRuntimeCommand, openRuntime, receiveRuntime, sendRuntime,
+    streamRuntimeError, streamRuntimeEvent,
+} from "./runtime.js";
 
-type UInt64 = number | bigint;
-type CommandId = UInt64;
+export type { HHError, Result } from "./error.js";
 
 const Api = {
-    register: 1,
-    declareRequest: 2,
-    runRequest: 3,
-    declareResponse: 4,
-    runResponse: 5,
-    declareTool: 6,
-    runTool: 7,
-    close: 8,
+    register: 1, declareRequest: 2, runRequest: 3, declareResponse: 4,
+    runResponse: 5, declareTool: 6, runTool: 7, close: 8, openRuntime: 9,
+    send: 10, receive: 11, closeRuntime: 12, parseEvent: 13,
+    streamEvent: 14, getError: 15, streamError: 16,
 } as const;
 
-type SandboxConfig = {
-    read_only: string[];
-    read_write: string[];
-    network: "none" | "internet_client";
-};
+const errors: HHError[] = [];
 
-type SessionConfig = {
-    api_key_raw: string;
-    history: unknown[];
-    session_current: unknown;
-    tool_definitions: unknown[];
-    provider: string;
-    endpoint: string;
-    model_id: string;
-    context_limit: UInt64;
-    compact_threshold: UInt64;
-    tool_result_timeout_ms: number;
-    session_timeout_ms: number;
-    compaction_prompt: string;
-    workspace_path: string;
-    tool_runtime_executable: string;
-    sandbox_config: SandboxConfig;
-    refresh_workspace: boolean;
-};
+type CommandInput = { runtime_id: UInt64; command_id: CommandId };
+type RegisterInput = CommandInput & { config: SessionConfig };
+type RuntimeInput = { runtime_id: UInt64 };
+type SendInput = RuntimeInput & { message: unknown };
+type ParseEventInput = { raw: unknown };
+type OpenRuntimeInput = { executable: string };
 
-type RegisterSessionCommand = readonly [
-    commandId: bigint,
-    opcode: 1,
-    config: SessionConfigWire,
-];
-
-type DeclareRequestCommand = readonly [
-    commandId: bigint,
-    opcode: 2,
-];
-
-type RunRequestCommand = readonly [
-    commandId: bigint,
-    opcode: 3,
-];
-
-type DeclareResponseCommand = readonly [
-    commandId: bigint,
-    opcode: 4,
-];
-
-type RunResponseCommand = readonly [
-    commandId: bigint,
-    opcode: 5,
-];
-
-type DeclareToolCommand = readonly [
-    commandId: bigint,
-    opcode: 6,
-];
-
-type RunToolCommand = readonly [
-    commandId: bigint,
-    opcode: 7,
-];
-
-type CloseCommand = readonly [
-    commandId: bigint,
-    opcode: 8,
-];
-
-type SessionCommand =
-    | RegisterSessionCommand
-    | DeclareRequestCommand
-    | RunRequestCommand
-    | DeclareResponseCommand
-    | RunResponseCommand
-    | DeclareToolCommand
-    | RunToolCommand
-    | CloseCommand;
-
-type SessionConfigWire = Omit<
-    SessionConfig,
-    "context_limit" | "compact_threshold"
-> & {
-    context_limit: bigint;
-    compact_threshold: bigint;
-};
-
-function uint64(value: UInt64): bigint {
-    return typeof value === "bigint"
-        ? value
-        : BigInt(value);
+function inputObject(request: PluginRequest): Result<Record<string, unknown>> {
+    if (typeof request.input !== "object" || request.input === null || Array.isArray(request.input)) {
+        return failure(makeError("invoke", "validation_error", "API input must be an object",
+            [{ api_id: request.api, input: request.input }]));
+    }
+    return success(request.input as Record<string, unknown>);
 }
 
-function sessionConfigWire(config: SessionConfig): SessionConfigWire {
-    return {
-        ...config,
-        context_limit: uint64(config.context_limit),
-        compact_threshold: uint64(config.compact_threshold),
-    };
+async function execute(input: CommandInput, prepared: Result<SessionCommand>): Promise<Result<unknown>> {
+    return prepared.error === null
+        ? executeRuntimeCommand(input.runtime_id, input.command_id, prepared.value)
+        : failure(prepared.error);
 }
 
-function register(
-    commandId: CommandId,
-    config: SessionConfig,
-): RegisterSessionCommand {
-    return [
-        uint64(commandId),
-        1,
-        sessionConfigWire(config),
-    ];
-}
-
-function declareRequest(
-    commandId: CommandId,
-): DeclareRequestCommand {
-    return [uint64(commandId), 2];
-}
-
-function runRequest(
-    commandId: CommandId,
-): RunRequestCommand {
-    return [uint64(commandId), 3];
-}
-
-function declareResponse(
-    commandId: CommandId,
-): DeclareResponseCommand {
-    return [uint64(commandId), 4];
-}
-
-function runResponse(
-    commandId: CommandId,
-): RunResponseCommand {
-    return [uint64(commandId), 5];
-}
-
-function declareTool(
-    commandId: CommandId,
-): DeclareToolCommand {
-    return [uint64(commandId), 6];
-}
-
-function runTool(
-    commandId: CommandId,
-): RunToolCommand {
-    return [uint64(commandId), 7];
-}
-
-function close(
-    commandId: CommandId,
-): CloseCommand {
-    return [uint64(commandId), 8];
-}
-
-type CommandInput = {
-    command_id: CommandId;
-};
-
-type RegisterInput = CommandInput & {
-    config: SessionConfig;
-};
-
-function invoke(request: PluginRequest): SessionCommand {
+async function invokeApi(request: PluginRequest): Promise<Result<unknown>> {
+    if (!Object.values(Api).includes(request.api as typeof Api[keyof typeof Api])) {
+        return failure(makeError("invoke", "validation_error", "Session API is unsupported", [{ api_id: request.api }]));
+    }
+    const parsedInput = inputObject(request);
+    if (parsedInput.error !== null) return failure(parsedInput.error);
+    const input = parsedInput.value;
     switch (request.api) {
         case Api.register: {
-            const input = request.input as RegisterInput;
-            return register(input.command_id, input.config);
+            const command = input as RegisterInput;
+            return execute(command, registerSession(command.command_id, command.config));
         }
         case Api.declareRequest: {
-            const input = request.input as CommandInput;
-            return declareRequest(input.command_id);
+            const command = input as CommandInput;
+            return execute(command, declareRequest(command.command_id));
         }
         case Api.runRequest: {
-            const input = request.input as CommandInput;
-            return runRequest(input.command_id);
+            const command = input as CommandInput;
+            return execute(command, runRequest(command.command_id));
         }
         case Api.declareResponse: {
-            const input = request.input as CommandInput;
-            return declareResponse(input.command_id);
+            const command = input as CommandInput;
+            return execute(command, declareResponse(command.command_id));
         }
         case Api.runResponse: {
-            const input = request.input as CommandInput;
-            return runResponse(input.command_id);
+            const command = input as CommandInput;
+            return execute(command, runResponse(command.command_id));
         }
         case Api.declareTool: {
-            const input = request.input as CommandInput;
-            return declareTool(input.command_id);
+            const command = input as CommandInput;
+            return execute(command, declareTool(command.command_id));
         }
         case Api.runTool: {
-            const input = request.input as CommandInput;
-            return runTool(input.command_id);
+            const command = input as CommandInput;
+            return execute(command, runTool(command.command_id));
         }
         case Api.close: {
-            const input = request.input as CommandInput;
-            return close(input.command_id);
+            const command = input as CommandInput;
+            return execute(command, closeSession(command.command_id));
         }
+        case Api.openRuntime:
+            return openRuntime((input as OpenRuntimeInput).executable);
+        case Api.send: {
+            const send = input as SendInput;
+            return sendRuntime(send.runtime_id, send.message);
+        }
+        case Api.receive:
+            return receiveRuntime((input as RuntimeInput).runtime_id);
+        case Api.closeRuntime:
+            return closeRuntime((input as RuntimeInput).runtime_id);
+        case Api.parseEvent:
+            return parseEvent((input as ParseEventInput).raw);
+        case Api.streamEvent:
+            return streamRuntimeEvent((input as RuntimeInput).runtime_id);
+        case Api.streamError:
+            return streamRuntimeError((input as RuntimeInput).runtime_id);
         default:
-            throw new Error(
-                "session-api does not support api: " + request.api,
-            );
+            return failure(makeError("invoke", "validation_error", "Session API is unsupported", [{ api_id: request.api }]));
     }
 }
 
-export const plugin: Plugin = {
-    invoke,
-};
+async function invoke(request: PluginRequest): Promise<Result<unknown> | HHError[]> {
+    let result: Result<unknown>;
+    try {
+        if (request.api === Api.getError) return errors.splice(0);
+        result = await invokeApi(request);
+    } catch (error) {
+        result = failure(normalizeError(error, "invoke", "validation_error"));
+    }
+    if (result.error !== null) errors.push(result.error);
+    return result;
+}
+
+export const plugin = { invoke } satisfies Plugin;

@@ -1,0 +1,221 @@
+#pragma once
+
+#include <sandbox>
+#include <secrets>
+
+#include <cstddef>
+#include <cstdint>
+#include <exception>
+#include <filesystem>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
+
+#include <nlohmann/json.hpp>
+#include <provider>
+
+namespace sessions
+{
+    using Error = secrets::Error;
+
+    // Preserve structured failures across the existing exception-based Session API.
+    class ErrorException final : public std::exception
+    {
+    public:
+        explicit ErrorException(Error&& error) : error_(std::move(error)) {}
+        const char* what() const noexcept override { return error_.message.c_str(); }
+        const Error& error() const noexcept { return error_; }
+
+    private:
+        Error error_;
+    };
+
+    namespace detail
+    {
+        struct SessionData;
+    }
+
+    class RequestStage;
+    class ResponseStage;
+    class ToolStage;
+
+    enum class SessionState
+    {
+        request,
+        response,
+        tool,
+        finished,
+        closed,
+    };
+
+    struct SessionConfig
+    {
+        std::string api_key_raw;
+        nlohmann::json history = nlohmann::json::array();
+        nlohmann::json session_current;
+        nlohmann::json tool_definitions = nlohmann::json::array();
+        provider::Provider provider = provider::Provider::openai;
+        std::string endpoint;
+        std::string model_id;
+        std::uint64_t context_limit = 0;
+        std::uint64_t compact_threshold = 0;
+        int tool_result_timeout_ms = -1;
+        int session_timeout_ms = -1;
+        std::string compaction_prompt;
+        std::filesystem::path workspace_path;
+        std::filesystem::path tool_runtime_executable;
+        sandbox::config sandbox_config;
+        bool refresh_workspace = false;
+    };
+
+    struct SessionResult
+    {
+        nlohmann::json history;
+        provider::RequestUsage usage = provider::UsageState::unavailable;
+    };
+
+    class Session final
+    {
+    public:
+        Session(const Session&) = delete;
+        Session& operator=(const Session&) = delete;
+
+        Session(Session&&) noexcept;
+        Session& operator=(Session&&) noexcept;
+        ~Session();
+
+        [[nodiscard]] SessionState state() const noexcept;
+        [[nodiscard]] bool finished() const noexcept;
+
+    private:
+        explicit Session(std::unique_ptr<detail::SessionData>&& data) noexcept;
+
+        std::unique_ptr<detail::SessionData> data_;
+
+        friend Session register_session(SessionConfig&& config);
+        friend SessionResult close_session(Session&& session);
+        friend RequestStage declare_request(Session& session);
+        friend void run_request(Session& session, RequestStage&& stage);
+        friend ResponseStage declare_response(Session& session);
+        friend void run_response(Session& session, ResponseStage&& stage);
+        friend ToolStage declare_tool(Session& session);
+        friend void run_tool(Session& session, ToolStage&& stage);
+    };
+
+    class RequestStage final
+    {
+    public:
+        RequestStage(const RequestStage&) = delete;
+        RequestStage& operator=(const RequestStage&) = delete;
+        RequestStage(RequestStage&&) noexcept = default;
+        RequestStage& operator=(RequestStage&&) noexcept = default;
+
+        [[nodiscard]] bool compact() const noexcept;
+        [[nodiscard]] std::uint64_t context_usage() const noexcept;
+        [[nodiscard]] std::uint64_t context_limit() const noexcept;
+        [[nodiscard]] const std::string& model() const noexcept;
+        [[nodiscard]] provider::Provider selected_provider() const noexcept;
+
+    private:
+        RequestStage(
+            std::uint64_t generation,
+            std::uint64_t token,
+            bool compact,
+            std::uint64_t context_usage,
+            std::uint64_t context_limit,
+            std::string model,
+            provider::Provider selected_provider) noexcept;
+
+        std::uint64_t generation_ = 0;
+        std::uint64_t token_ = 0;
+        bool compact_ = false;
+        std::uint64_t context_usage_ = 0;
+        std::uint64_t context_limit_ = 0;
+        std::string model_;
+        provider::Provider selected_provider_ = provider::Provider::openai;
+
+        friend RequestStage declare_request(Session& session);
+        friend void run_request(Session& session, RequestStage&& stage);
+    };
+
+    class ResponseStage final
+    {
+    public:
+        ResponseStage(const ResponseStage&) = delete;
+        ResponseStage& operator=(const ResponseStage&) = delete;
+        ResponseStage(ResponseStage&&) noexcept = default;
+        ResponseStage& operator=(ResponseStage&&) noexcept = default;
+
+        [[nodiscard]] bool has_tool_calls() const noexcept;
+        [[nodiscard]] std::size_t tool_count() const noexcept;
+        [[nodiscard]] const provider::RequestUsage& usage() const noexcept;
+
+    private:
+        ResponseStage(
+            std::uint64_t generation,
+            std::uint64_t token,
+            bool has_tool_calls,
+            std::size_t tool_count,
+            provider::RequestUsage usage);
+
+        std::uint64_t generation_ = 0;
+        std::uint64_t token_ = 0;
+        bool has_tool_calls_ = false;
+        std::size_t tool_count_ = 0;
+        provider::RequestUsage usage_ = provider::UsageState::unavailable;
+
+        friend ResponseStage declare_response(Session& session);
+        friend void run_response(Session& session, ResponseStage&& stage);
+    };
+
+    class ToolStage final
+    {
+    public:
+        ToolStage(const ToolStage&) = delete;
+        ToolStage& operator=(const ToolStage&) = delete;
+        ToolStage(ToolStage&&) noexcept;
+        ToolStage& operator=(ToolStage&&) noexcept;
+        ~ToolStage();
+
+        [[nodiscard]] std::string_view call_id() const;
+        [[nodiscard]] std::string_view name() const;
+        [[nodiscard]] std::string_view arguments() const;
+        [[nodiscard]] const nlohmann::json& raw_call() const noexcept;
+
+    private:
+        ToolStage(
+            std::uint64_t generation,
+            std::uint64_t token,
+            std::size_t index,
+            nlohmann::json raw_tool_call) noexcept;
+
+        std::uint64_t generation_ = 0;
+        std::uint64_t token_ = 0;
+        std::size_t index_ = 0;
+        nlohmann::json raw_tool_call_;
+
+        friend ToolStage declare_tool(Session& session);
+        friend void run_tool(Session& session, ToolStage&& stage);
+    };
+
+    struct LoopResult
+    {
+        nlohmann::json history;
+        provider::RequestUsage usage = provider::UsageState::unavailable;
+    };
+
+    Session register_session(SessionConfig&& config);
+    SessionResult close_session(Session&& session);
+
+    RequestStage declare_request(Session& session);
+    void run_request(Session& session, RequestStage&& stage);
+
+    ResponseStage declare_response(Session& session);
+    void run_response(Session& session, ResponseStage&& stage);
+
+    ToolStage declare_tool(Session& session);
+    void run_tool(Session& session, ToolStage&& stage);
+
+    LoopResult loop(SessionConfig&& config);
+}

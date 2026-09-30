@@ -1,9 +1,10 @@
 #include "event_forwarder.h"
+#include "ipc_failure.h"
+#include <error/event_port.h>
 
 #include <chrono>
 #include <cstdint>
 #include <stdexcept>
-#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -13,6 +14,26 @@ namespace sessions_runtime
 {
     namespace
     {
+        sessions::Error forwarding_error(std::exception_ptr error)
+        {
+            try
+            {
+                std::rethrow_exception(error);
+            }
+            catch (const IpcFailure& failure)
+            {
+                return sessions::detail::convert_error<sessions::Error>(ipc::Error(failure.error()));
+            }
+            catch (const std::exception& exception)
+            {
+                return sessions::detail::exception_error("forward_events", exception);
+            }
+            catch (...)
+            {
+                return {"session_runtime", "forward_events", "unknown_exception", "", {}, {}};
+            }
+        }
+
         std::vector<std::uint8_t> encode_event(
             const event_port::Event& event)
         {
@@ -58,7 +79,7 @@ namespace sessions_runtime
         if (started_)
             throw std::logic_error("event forwarder is already started");
 
-        registration_.emplace(event_port::port(event_port::Register{
+        registration_.emplace(sessions::detail::checked_port(event_port::Register{
             "",
             {}
         }));
@@ -78,10 +99,11 @@ namespace sessions_runtime
         {
             try
             {
-                event_port::port(event_port::Close{*registration_});
+                sessions::detail::checked_port(event_port::Close{*registration_});
             }
             catch (...)
             {
+                set_error(std::current_exception());
             }
         }
 
@@ -110,27 +132,27 @@ namespace sessions_runtime
         {
             for (;;)
             {
-                const event_port::EventPtr event = event_port::port(
+                auto read = event_port::port(
                     event_port::Read{*registration_});
-                if (event == nullptr)
-                    throw std::logic_error("event_port returned a null event");
+                if (read.error)
+                {
+                    if (read.error->type == "registration_closed")
+                        return;
+                    throw sessions::ErrorException(sessions::detail::convert_error<sessions::Error>(
+                        std::move(*read.error)));
+                }
+                const event_port::EventPtr event = std::move(*read.value);
 
                 const std::vector<std::uint8_t> bytes =
                     encode_event(*event);
-                const ipc::write_result written = ipc::write(
+                ipc::write_result written = ipc::write(
                     connection_,
                     std::span<const std::uint8_t>(bytes));
                 if (written.error)
                 {
-                    throw std::system_error(
-                        written.error,
-                        "write EventPort event to IPC");
+                    throw IpcFailure(std::move(*written.error));
                 }
             }
-        }
-        catch (const std::logic_error&)
-        {
-            // Closing the registration is the normal shutdown path.
         }
         catch (...)
         {
@@ -138,10 +160,11 @@ namespace sessions_runtime
             try
             {
                 if (registration_.has_value())
-                    event_port::port(event_port::Close{*registration_});
+                    sessions::detail::checked_port(event_port::Close{*registration_});
             }
             catch (...)
             {
+                set_error(std::current_exception());
             }
         }
     }
@@ -151,5 +174,14 @@ namespace sessions_runtime
         std::lock_guard lock(error_mutex_);
         if (error_ == nullptr)
             error_ = std::move(error);
+        else if (error != nullptr)
+        {
+            std::vector<sessions::Error> causes;
+            causes.emplace_back(forwarding_error(error_));
+            causes.emplace_back(forwarding_error(std::move(error)));
+            error_ = std::make_exception_ptr(sessions::ErrorException(sessions::Error{
+                "session_runtime", "forward_events", "dependency_error",
+                "Event forwarding encountered multiple failures", {}, std::move(causes)}));
+        }
     }
 }

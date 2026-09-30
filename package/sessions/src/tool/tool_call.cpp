@@ -2,6 +2,7 @@
 
 #include <sandbox>
 #include <event_port>
+#include <error/event_port.h>
 
 #include <chrono>
 #include <filesystem>
@@ -28,33 +29,49 @@ namespace sessions::detail
                     message
                         << "\n  "
                         << item.path.string()
-                        << " [" << item.error.value() << "] "
-                        << item.error.message();
+                        << " [" << item.error.operation << "] "
+                        << item.error.message;
+                    if (!item.error.data.empty())
+                    {
+                        message
+                            << " data="
+                            << nlohmann::json(item.error.data).dump();
+                    }
                 }
                 throw std::runtime_error(message.str());
             }
 
             if (result.state.config.final_error)
             {
-                throw std::system_error(
-                    result.state.config.final_error,
-                    "tool runtime sandbox config failed");
+                const sandbox::Error& error = *result.state.config.final_error;
+                throw std::runtime_error(
+                    "tool runtime sandbox config failed: "
+                    + error.operation
+                    + ": "
+                    + error.message);
             }
 
             if (result.state.final_error)
             {
-                throw std::system_error(
-                    result.state.final_error,
-                    "tool runtime sandbox process failed");
+                const sandbox::Error& error = *result.state.final_error;
+                throw std::runtime_error(
+                    "tool runtime sandbox process failed: "
+                    + error.operation
+                    + ": "
+                    + error.message);
             }
 
             if (result.state.timed_out)
             {
                 if (result.state.os_error_before_termination)
                 {
-                    throw std::system_error(
-                        result.state.os_error_before_termination,
-                        "tool runtime timed out");
+                    const sandbox::Error& error =
+                        *result.state.os_error_before_termination;
+                    throw std::runtime_error(
+                        "tool runtime timed out: "
+                        + error.operation
+                        + ": "
+                        + error.message);
                 }
                 throw std::runtime_error("tool runtime timed out");
             }
@@ -141,7 +158,7 @@ namespace sessions::detail
     {
         const std::string_view call_id =
             call_id_of(handled.tool_call);
-        event_port::port(event_port::Emit{
+        sessions::detail::checked_port(event_port::Emit{
             "sessions",
             event_port::Level::info,
             "tool_call",
@@ -151,7 +168,7 @@ namespace sessions::detail
                 {"tool_call", handled.tool_call}
             }
         });
-        event_port::port(event_port::Emit{
+        sessions::detail::checked_port(event_port::Emit{
             "sessions",
             event_port::Level::info,
             "tool_result",

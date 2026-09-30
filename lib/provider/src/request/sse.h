@@ -1,18 +1,15 @@
 #pragma once
 
-#include <string>
-#include <string_view>
-
-#include <nlohmann/json.hpp>
+#include <provider>
 
 namespace provider
 {
     class SSE
     {
     public:
-        using EventHandler = void (*)(void*, std::string&&);
+        using EventHandler = Result<void> (*)(void*, std::string&&);
 
-        void post(
+        Result<void> post(
             const std::string& url,
             std::string_view api_key,
             const nlohmann::json& body,

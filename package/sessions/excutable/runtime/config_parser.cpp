@@ -1,4 +1,5 @@
 #include "config_parser.h"
+#include <error/error.h>
 
 #include <sandbox>
 
@@ -192,8 +193,14 @@ namespace sessions_runtime
         config.history = required_array(input, "history");
         config.session_current = required_field(input, "session_current");
         config.tool_definitions = required_array(input, "tool_definitions");
-        config.provider = provider::provider_from_name(
+        auto selected_provider = provider::provider_from_name(
             required_string(input, "provider"));
+        if (selected_provider.error)
+        {
+            throw sessions::ErrorException(sessions::detail::convert_error<sessions::Error>(
+                std::move(*selected_provider.error)));
+        }
+        config.provider = *selected_provider.value;
         config.endpoint = required_string(input, "endpoint");
         config.model_id = required_string(input, "model_id");
         config.context_limit = required_uint64(input, "context_limit");

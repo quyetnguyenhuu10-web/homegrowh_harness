@@ -1,4 +1,5 @@
 #include "job.h"
+#include "../error_schema.h"
 
 #include <stdexcept>
 #include <system_error>
@@ -9,10 +10,10 @@ namespace sandbox::detail::process::windows
     {
         [[noreturn]] void throw_last_error(const char* action)
         {
-            throw std::system_error(
-                static_cast<int>(GetLastError()),
-                std::system_category(),
-                action);
+            sandbox::detail::throw_error(
+                sandbox::detail::make_native_error(
+                    action,
+                    GetLastError()));
         }
     }
 

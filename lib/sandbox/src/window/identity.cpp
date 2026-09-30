@@ -68,7 +68,17 @@ namespace sandbox::detail::filesystem::windows
             [[nodiscard]] PSID at(DWORD index) const
             {
                 if (index >= count_ || values_ == nullptr)
-                    throw std::out_of_range("capability SID index out of range");
+                {
+                    sandbox::detail::throw_error(
+                        sandbox::detail::make_error(
+                            "capability_sid_at",
+                            "out_of_range",
+                            "capability SID index out of range",
+                            {
+                                {"index", index},
+                                {"count", count_},
+                            }));
+                }
                 return values_[index];
             }
 
@@ -104,8 +114,14 @@ namespace sandbox::detail::filesystem::windows
             [[nodiscard]] PSID value() const
             {
                 if (capabilities.size() != 1)
-                    throw std::runtime_error(
-                        "Windows did not derive exactly one capability SID");
+                {
+                    sandbox::detail::throw_error(
+                        sandbox::detail::make_error(
+                            "DeriveCapabilitySidsFromName",
+                            "identity_error",
+                            "Windows did not derive exactly one capability SID",
+                            {{"capability_count", capabilities.size()}}));
+                }
                 return capabilities.at(0);
             }
         };
@@ -168,7 +184,12 @@ namespace sandbox::detail::filesystem::windows
                     0);
                 status < 0)
             {
-                throw std::runtime_error("BCryptOpenAlgorithmProvider(SHA256) failed");
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "BCryptOpenAlgorithmProvider",
+                        "ntstatus_error",
+                        "BCryptOpenAlgorithmProvider(SHA256) failed",
+                        {{"status", static_cast<std::int64_t>(status)}}));
             }
 
             struct algorithm_guard
@@ -193,7 +214,12 @@ namespace sandbox::detail::filesystem::windows
                     static_cast<ULONG>(digest.size()));
                 status < 0)
             {
-                throw std::runtime_error("BCryptHash(SHA256) failed");
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "BCryptHash",
+                        "ntstatus_error",
+                        "BCryptHash(SHA256) failed",
+                        {{"status", static_cast<std::int64_t>(status)}}));
             }
             return digest;
         }
@@ -300,15 +326,23 @@ namespace sandbox::detail::filesystem::windows
         const std::filesystem::path& input)
     {
         if (input.empty())
-            throw std::invalid_argument("sandbox registry path must not be empty");
+        {
+            sandbox::detail::throw_error(
+                sandbox::detail::make_error(
+                    "canonical_existing_path",
+                    "invalid_argument",
+                    "sandbox registry path must not be empty"));
+        }
 
         std::error_code error;
         auto canonical = std::filesystem::canonical(input, error);
         if (error)
         {
-            throw std::system_error(
-                error,
-                "sandbox registry path must exist: " + input.string());
+            sandbox::detail::throw_error(
+                sandbox::detail::make_system_error(
+                    "std::filesystem::canonical",
+                    error,
+                    input));
         }
         return canonical.lexically_normal();
     }
@@ -322,7 +356,11 @@ namespace sandbox::detail::filesystem::windows
         case permission::read_write:
             return "read_write";
         }
-        throw std::invalid_argument("unknown sandbox permission");
+        sandbox::detail::throw_error(
+            sandbox::detail::make_error(
+                "permission_name",
+                "invalid_argument",
+                "unknown sandbox permission"));
     }
 
     capability_identity derive_capability_identity(

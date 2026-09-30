@@ -1,7 +1,8 @@
 #pragma once
 
-#include <nlohmann/json.hpp>
+#include <provider>
 
-using json = nlohmann::json;
-
-json build_transcript(json message);
+namespace provider
+{
+    Result<nlohmann::json> build_transcript(const nlohmann::json& message);
+}

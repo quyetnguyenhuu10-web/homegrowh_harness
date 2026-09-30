@@ -11,7 +11,7 @@ namespace event_port::detail
     {
         RegistrationState(
             std::string&& package_value,
-            References&& references_value) noexcept;
+            References&& references_value);
 
         std::string package;
         References references;
@@ -23,7 +23,7 @@ namespace event_port::detail
         bool closed = false;
     };
 
-    void close_registration_state(
+    Result<void> close_registration_state(
         RegistrationState& state,
-        bool discard_pending) noexcept;
+        bool discard_pending);
 }

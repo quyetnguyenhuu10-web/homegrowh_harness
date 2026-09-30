@@ -77,10 +77,6 @@ int main()
             700),
         "session estimate must contribute to compaction decision");
 
-    provider::HttpError http_error;
-    require(http_error.status_code == 0, "HTTP error status must default to zero");
-    require(http_error.body.empty(), "HTTP error body must default to empty");
-
     provider::CompactionResponse compaction_response;
     require(
         std::holds_alternative<provider::UsageState>(compaction_response.usage),
@@ -103,8 +99,7 @@ int main()
         !sessions::detail::should_compact(951, 0, 2000),
         "caller-provided threshold must fully control compaction");
 
-    require_throws<std::invalid_argument>(
-        []
+    const auto invalid_compaction = []
         {
             const json history = json::array({
                 {
@@ -113,7 +108,7 @@ int main()
                 }
             });
 
-            (void)provider::compaction(
+            return provider::compaction(
                 provider::Provider::bonsai,
                 "http://unused.invalid/v1/chat/completions",
                 "bonsai",
@@ -126,8 +121,11 @@ int main()
                 true,
                 {},
                 nullptr);
-        },
-        "compact without current messages or tools must fail before summary request");
+        }();
+    require(invalid_compaction.error && !invalid_compaction.value,
+        "compact without current messages or tools must return an error before summary request");
+    require(invalid_compaction.error->type == "invalid_argument",
+        "compaction validation must preserve the error type");
 
     std::cout << "sessions request tests passed\n";
     return 0;

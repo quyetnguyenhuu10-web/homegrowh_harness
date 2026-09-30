@@ -1,19 +1,21 @@
 #include "state.h"
 
+#include "../error_schema.h"
 #include "identity.h"
 
 #include <array>
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fcntl.h>
 #include <fstream>
 #include <iomanip>
+#include <optional>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
-#include <system_error>
+#include <utility>
 #include <sys/file.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -23,9 +25,15 @@ namespace sandbox::detail::filesystem::linux
 {
     namespace
     {
-        [[noreturn]] void throw_errno(const char* action)
+        [[noreturn]] void throw_errno(
+            const char* action,
+            const std::filesystem::path& path)
         {
-            throw std::system_error(errno, std::generic_category(), action);
+            sandbox::detail::throw_error(
+                sandbox::detail::make_system_error(
+                    action,
+                    std::error_code(errno, std::generic_category()),
+                    path));
         }
 
         std::string narrow(std::wstring_view input)
@@ -35,7 +43,14 @@ namespace sandbox::detail::filesystem::linux
             for (const wchar_t value : input)
             {
                 if (value < 0 || value > 0x7f)
-                    throw std::runtime_error("Linux policy identity is not ASCII");
+                {
+                    sandbox::detail::throw_error(
+                        sandbox::detail::make_error(
+                            "encode_policy_identity",
+                            "encoding_error",
+                            "Linux policy identity is not ASCII",
+                            {{{"code_point", static_cast<std::uint32_t>(value)}}}));
+                }
                 output.push_back(static_cast<char>(value));
             }
             return output;
@@ -66,8 +81,47 @@ namespace sandbox::detail::filesystem::linux
             std::error_code error;
             std::filesystem::create_directories(parent, error);
             if (error)
-                throw std::system_error(error, "could not create sandbox registry state directory");
+            {
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_system_error(
+                        "std::filesystem::create_directories",
+                        error,
+                        parent));
+            }
         }
+
+        class scoped_descriptor final
+        {
+        public:
+            scoped_descriptor(int descriptor, int& cleanup_error) noexcept
+                : descriptor_(descriptor), cleanup_error_(cleanup_error)
+            {
+            }
+
+            scoped_descriptor(const scoped_descriptor&) = delete;
+            scoped_descriptor& operator=(const scoped_descriptor&) = delete;
+
+            ~scoped_descriptor()
+            {
+                const int error = close();
+                if (error != 0)
+                    cleanup_error_ = error;
+            }
+
+            int close() noexcept
+            {
+                if (descriptor_ < 0)
+                    return 0;
+                const int descriptor = std::exchange(descriptor_, -1);
+                if (::close(descriptor) != 0)
+                    return errno;
+                return 0;
+            }
+
+        private:
+            int descriptor_;
+            int& cleanup_error_;
+        };
 
         std::string read_all(const std::filesystem::path& path, bool missing_is_empty)
         {
@@ -76,35 +130,61 @@ namespace sandbox::detail::filesystem::linux
             {
                 if (missing_is_empty && errno == ENOENT)
                     return {};
-                throw_errno("open(sandbox registry state)");
+                throw_errno("open(sandbox registry state)", path);
             }
 
-            std::string content;
-            std::array<char, 8192> buffer{};
-            for (;;)
+            int cleanup_error = 0;
+            try
             {
-                const ssize_t bytes = ::read(fd, buffer.data(), buffer.size());
-                if (bytes > 0)
+                scoped_descriptor descriptor(fd, cleanup_error);
+                std::string content;
+                std::array<char, 8192> buffer{};
+                for (;;)
                 {
-                    content.append(buffer.data(), static_cast<std::size_t>(bytes));
-                    continue;
+                    const ssize_t bytes = ::read(fd, buffer.data(), buffer.size());
+                    if (bytes > 0)
+                    {
+                        content.append(buffer.data(), static_cast<std::size_t>(bytes));
+                        continue;
+                    }
+                    if (bytes == 0)
+                        break;
+                    if (errno == EINTR)
+                        continue;
+                    throw_errno("read(sandbox registry state)", path);
                 }
-                if (bytes == 0)
-                    break;
-                if (errno == EINTR)
-                    continue;
-                const int error = errno;
-                ::close(fd);
-                errno = error;
-                throw_errno("read(sandbox registry state)");
+                const int error = descriptor.close();
+                if (error != 0)
+                {
+                    sandbox::detail::throw_error(sandbox::detail::make_system_error(
+                        "close(sandbox registry state)",
+                        std::error_code(error, std::generic_category()), path));
+                }
+                return content;
             }
-
-            if (::close(fd) != 0)
-                throw_errno("close(sandbox registry state)");
-            return content;
+            catch (...)
+            {
+                Error primary = sandbox::detail::capture_exception(
+                    "read_registry_state", std::current_exception(),
+                    {{"path", sandbox::detail::error_path_text(path)}});
+                if (cleanup_error == 0)
+                    sandbox::detail::throw_error(std::move(primary));
+                std::vector<Error> causes;
+                causes.push_back(std::move(primary));
+                causes.push_back(sandbox::detail::make_system_error(
+                    "close(sandbox registry state)",
+                    std::error_code(cleanup_error, std::generic_category()), path));
+                sandbox::detail::throw_error(sandbox::detail::make_error(
+                    "read_registry_state", "dependency_error",
+                    "Reading registry state and closing its descriptor both failed",
+                    nullptr, std::move(causes)));
+            }
         }
 
-        void write_all(int fd, std::string_view data)
+        void write_all(
+            int fd,
+            std::string_view data,
+            const std::filesystem::path& path)
         {
             std::size_t offset = 0;
             while (offset < data.size())
@@ -121,8 +201,17 @@ namespace sandbox::detail::filesystem::linux
                 if (bytes < 0 && errno == EINTR)
                     continue;
                 if (bytes == 0)
-                    errno = EIO;
-                throw_errno("write(sandbox registry state)");
+                {
+                    sandbox::detail::throw_error(sandbox::detail::make_error(
+                        "write(sandbox registry state)", "io_error",
+                        "Write completed without making progress",
+                        {{"api", "write"},
+                         {"path", sandbox::detail::error_path_text(path)},
+                         {"offset", offset},
+                         {"requested", data.size() - offset},
+                         {"written", 0}}));
+                }
+                throw_errno("write(sandbox registry state)", path);
             }
         }
     }
@@ -139,15 +228,33 @@ namespace sandbox::detail::filesystem::linux
             | (create ? (O_RDWR | O_CREAT) : O_RDONLY);
         fd_ = ::open(path.c_str(), flags, 0600);
         if (fd_ < 0)
-            throw_errno("open(sandbox registry lock)");
+            throw_errno("open(sandbox registry lock)", path);
 
         if (::flock(fd_, create ? LOCK_EX : LOCK_SH) != 0)
         {
             const int error = errno;
-            ::close(fd_);
+            Error primary = sandbox::detail::make_system_error(
+                "flock(sandbox registry lock)",
+                std::error_code(error, std::generic_category()),
+                path);
+            const int close_result = ::close(fd_);
+            const int close_error = close_result == 0 ? 0 : errno;
             fd_ = -1;
-            errno = error;
-            throw_errno("flock(sandbox registry lock)");
+            if (close_error != 0)
+            {
+                Error cleanup = sandbox::detail::make_system_error(
+                    "close(sandbox registry lock)",
+                    std::error_code(close_error, std::generic_category()),
+                    path);
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "lock_registry_state",
+                        "operation_failed",
+                        "locking sandbox registry state and cleanup both failed",
+                        nullptr,
+                        {std::move(primary), std::move(cleanup)}));
+            }
+            sandbox::detail::throw_error(std::move(primary));
         }
     }
 
@@ -180,8 +287,12 @@ namespace sandbox::detail::filesystem::linux
         const char* home = std::getenv("HOME");
         if (home == nullptr || *home == '\0')
         {
-            throw std::runtime_error(
-                "HOME or XDG_STATE_HOME is required for durable sandbox registry state");
+            sandbox::detail::throw_error(
+                sandbox::detail::make_error(
+                    "registry_state_path",
+                    "environment_error",
+                    "HOME or XDG_STATE_HOME is required for durable sandbox registry state",
+                    {{{"variables", {"HOME", "XDG_STATE_HOME"}}}}));
         }
 
         return std::filesystem::path(home)
@@ -206,7 +317,12 @@ namespace sandbox::detail::filesystem::linux
             || signature != std::string(capability_signature)
             || schema != registry_schema_version)
         {
-            throw std::runtime_error("sandbox registry state header is invalid");
+            sandbox::detail::throw_error(
+                sandbox::detail::make_error(
+                    "load_registry_state",
+                    "invalid_state",
+                    "sandbox registry state header is invalid",
+                    {{{"path", sandbox::detail::error_path_text(path)}, {"body_bytes", std::vector<unsigned char>(content.begin(), content.end())}}}));
         }
 
         registry_state state;
@@ -220,7 +336,12 @@ namespace sandbox::detail::filesystem::linux
                     >> std::quoted(access)
                     >> std::quoted(policy_name)))
             {
-                throw std::runtime_error("sandbox registry state entry is invalid");
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "load_registry_state",
+                        "invalid_state",
+                        "sandbox registry state entry is invalid",
+                        {{{"path", sandbox::detail::error_path_text(path)}, {"body_bytes", std::vector<unsigned char>(content.begin(), content.end())}}}));
             }
 
             if (access == "read_modify")
@@ -230,7 +351,15 @@ namespace sandbox::detail::filesystem::linux
                 || policy_name.empty()
                 || (access != "read_only" && access != "read_write"))
             {
-                throw std::runtime_error("sandbox registry state entry is incomplete");
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "load_registry_state",
+                        "invalid_state",
+                        "sandbox registry state entry is incomplete",
+                        {{{"path", sandbox::detail::error_path_text(path)}, {"body_bytes", std::vector<unsigned char>(content.begin(), content.end())},
+                          {"canonical_path", canonical_path},
+                          {"access", access},
+                          {"policy_name", policy_name}}}));
             }
 
             state.entries.push_back({
@@ -248,8 +377,14 @@ namespace sandbox::detail::filesystem::linux
                         == state.entries[right].canonical_path
                     && state.entries[left].access == state.entries[right].access)
                 {
-                    throw std::runtime_error(
-                        "sandbox registry state contains duplicate entries");
+                    sandbox::detail::throw_error(
+                        sandbox::detail::make_error(
+                            "load_registry_state",
+                            "invalid_state",
+                            "sandbox registry state contains duplicate entries",
+                            {{{"path", sandbox::detail::error_path_text(path)}, {"body_bytes", std::vector<unsigned char>(content.begin(), content.end())},
+                              {"canonical_path", state.entries[left].canonical_path},
+                              {"access", state.entries[left].access}}}));
                 }
             }
         }
@@ -285,30 +420,77 @@ namespace sandbox::detail::filesystem::linux
             O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC,
             0600);
         if (fd < 0)
-            throw_errno("open(sandbox registry state temp)");
+            throw_errno("open(sandbox registry state temp)", temporary);
+
+        const auto cleanup_and_throw = [&](Error primary)
+        {
+            std::vector<Error> cleanup_errors;
+            if (fd >= 0)
+            {
+                if (::close(fd) != 0)
+                {
+                    cleanup_errors.push_back(sandbox::detail::make_system_error(
+                        "close(sandbox registry state temp cleanup)",
+                        std::error_code(errno, std::generic_category()),
+                        temporary));
+                }
+                fd = -1;
+            }
+
+            if (::unlink(temporary.c_str()) != 0 && errno != ENOENT)
+            {
+                cleanup_errors.push_back(sandbox::detail::make_system_error(
+                    "unlink(sandbox registry state temp cleanup)",
+                    std::error_code(errno, std::generic_category()),
+                    temporary));
+            }
+
+            if (cleanup_errors.empty())
+                sandbox::detail::throw_error(std::move(primary));
+
+            std::vector<Error> causes;
+            causes.reserve(1 + cleanup_errors.size());
+            causes.push_back(std::move(primary));
+            for (Error& cleanup : cleanup_errors)
+                causes.push_back(std::move(cleanup));
+            sandbox::detail::throw_error(
+                sandbox::detail::make_error(
+                    "save_registry_state",
+                    "operation_failed",
+                    "saving sandbox registry state and cleanup both failed",
+                    {{{"path", sandbox::detail::error_path_text(path)},
+                      {"temporary_path", sandbox::detail::error_path_text(temporary)}}},
+                    std::move(causes)));
+        };
 
         try
         {
             const std::string serialized = output.str();
-            write_all(fd, serialized);
+            write_all(fd, serialized, temporary);
             if (::fsync(fd) != 0)
-                throw_errno("fsync(sandbox registry state temp)");
+                throw_errno("fsync(sandbox registry state temp)", temporary);
             const int close_result = ::close(fd);
             fd = -1;
             if (close_result != 0)
-                throw_errno("close(sandbox registry state temp)");
+                throw_errno("close(sandbox registry state temp)", temporary);
 
             if (::rename(temporary.c_str(), path.c_str()) != 0)
-                throw_errno("rename(sandbox registry state)");
+            {
+                Error failure = sandbox::detail::make_system_error(
+                    "rename(sandbox registry state)",
+                    std::error_code(errno, std::generic_category()),
+                    path);
+                failure.data.push_back({
+                    {"temporary_path", sandbox::detail::error_path_text(temporary)},
+                });
+                sandbox::detail::throw_error(std::move(failure));
+            }
         }
         catch (...)
         {
-            const int saved_errno = errno;
-            if (fd >= 0)
-                ::close(fd);
-            ::unlink(temporary.c_str());
-            errno = saved_errno;
-            throw;
+            cleanup_and_throw(sandbox::detail::capture_exception(
+                "save_registry_state", std::current_exception(),
+                {{"path", sandbox::detail::error_path_text(path)}}));
         }
     }
 

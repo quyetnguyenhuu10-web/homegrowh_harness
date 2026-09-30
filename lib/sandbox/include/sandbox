@@ -10,6 +10,10 @@
 #include <variant>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
+#include "../src/error/error.h"
+
 namespace sandbox
 {
     enum class network_access : std::uint32_t
@@ -67,7 +71,8 @@ namespace sandbox
         config() = default;
         config(std::initializer_list<config_option> options);
 
-        config& add(config_option option);
+        [[nodiscard]] Result<void> add(const config_option& option);
+        [[nodiscard]] const std::optional<Error>& error() const noexcept;
 
     private:
         void add_read_only(const std::filesystem::path& path);
@@ -79,6 +84,7 @@ namespace sandbox
 
         std::vector<detail::filesystem_config> filesystem_;
         std::optional<network_access> network_;
+        std::optional<Error> error_;
 
         friend struct detail::config_access;
     };
@@ -88,12 +94,12 @@ namespace sandbox
     struct config_path_error
     {
         std::filesystem::path path;
-        std::error_code error;
+        Error error;
     };
 
     struct config_results
     {
-        std::error_code final_error;
+        std::optional<Error> final_error;
         std::vector<config_path_error> path_errors;
     };
 
@@ -103,8 +109,8 @@ namespace sandbox
         bool timed_out = false;
         bool terminated = false;
         int exit_code = -1;
-        std::error_code os_error_before_termination;
-        std::error_code final_error;
+        std::optional<Error> os_error_before_termination;
+        std::optional<Error> final_error;
         config_results config;
     };
 
@@ -126,5 +132,5 @@ namespace sandbox
         process_results results;
     };
 
-    void process(process_request& request);
+    [[nodiscard]] Result<void> process(process_request& request);
 }

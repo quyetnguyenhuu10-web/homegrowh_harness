@@ -9,6 +9,11 @@ add_library(sandbox STATIC
     src/process.cpp
     src/filesystem.cpp
     src/filesystem_access.h
+    src/error_schema.h
+    src/error/error.h
+    src/error/error.cpp
+    src/error/capture.cpp
+    src/process/io_failure.h
     src/registry.cpp
 )
 
@@ -66,6 +71,14 @@ endif()
 option(SANDBOX_BUILD_TESTS "Build sandbox tests" ON)
 
 if(SANDBOX_BUILD_TESTS)
+    enable_testing()
+
+    add_executable(sandbox_error_schema_test tests/error_schema_test.cpp)
+    target_link_libraries(sandbox_error_schema_test PRIVATE sandbox)
+    target_include_directories(sandbox_error_schema_test PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
+    add_test(NAME sandbox_error_schema COMMAND sandbox_error_schema_test)
     add_executable(sandbox_registry_test
         tests/registry_test.cpp
     )
@@ -81,4 +94,8 @@ if(SANDBOX_BUILD_TESTS)
     target_include_directories(sandbox_process_test PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
     )
+
+    add_test(NAME sandbox_registry COMMAND sandbox_registry_test)
+    add_test(NAME sandbox_process COMMAND sandbox_process_test)
+    set_tests_properties(sandbox_registry sandbox_process PROPERTIES RUN_SERIAL TRUE)
 endif()

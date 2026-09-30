@@ -1,4 +1,5 @@
 import type { JsonSchema, PluginApiHandle, PluginHandle, PluginManifest } from "../plugin.js";
+import { makeError } from "../error.js";
 import { failure } from "../result.js";
 import type { PluginResult } from "../result.js";
 import { invokeLoadedApi } from "./invoke.js";
@@ -29,23 +30,17 @@ function mapArguments(
     };
 
     if (required === null) {
-        return failure({
-            ...context,
-            operation: "argument_map",
-            cause: { code: "positional_mapping_unavailable" },
-        });
+        return failure(makeError("argument_map", "protocol_error", "Positional argument mapping is unavailable",
+            [{ ...context, code: "positional_mapping_unavailable" }]));
     }
 
     if (required.length !== args.length) {
-        return failure({
-            ...context,
-            operation: "argument_map",
-            cause: {
+        return failure(makeError("argument_map", "protocol_error", "Argument count does not match the API",
+            [{ ...context,
                 code: "argument_count_mismatch",
                 expected: required.length,
                 actual: args.length,
-            },
-        });
+            }]));
     }
 
     const input: Record<string, unknown> = {};
@@ -94,11 +89,8 @@ export class PluginHandleImpl implements PluginHandle {
             (candidate) => candidate.descriptor.name === name,
         );
         if (api === undefined) {
-            return Promise.resolve(failure({
-                operation: "api_resolve",
-                pluginId: this.#loaded.manifest.id,
-                cause: { code: "api_not_found", value: name },
-            }));
+            return Promise.resolve(failure(makeError("api_resolve", "protocol_error", "Plugin API was not found",
+                [{ pluginId: this.#loaded.manifest.id, code: "api_not_found", value: name }])));
         }
 
         const mapped = mapArguments(this.#loaded, api, args);

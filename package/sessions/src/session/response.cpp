@@ -5,6 +5,7 @@
 #include <session/session_state.h>
 
 #include <event_port>
+#include <error/event_port.h>
 
 #include <exception>
 #include <stdexcept>
@@ -89,7 +90,7 @@ namespace sessions
             data.last_usage = std::move(turn.request.usage);
             data.usage_checkpoint = detail::exact_context_usage(data.last_usage);
 
-            event_port::port(event_port::Emit{
+            sessions::detail::checked_port(event_port::Emit{
                 "sessions",
                 event_port::Level::info,
                 "context_usage",

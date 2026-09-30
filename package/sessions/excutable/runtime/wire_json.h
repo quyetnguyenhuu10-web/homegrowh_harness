@@ -1,10 +1,11 @@
 #pragma once
 
 #include <exception>
+#include <string_view>
 
 #include <nlohmann/json.hpp>
 #include <provider>
-#include <sessions>
+#include <session>
 
 namespace sessions_runtime
 {
@@ -13,5 +14,7 @@ namespace sessions_runtime
 
     nlohmann::json usage_json(
         const provider::RequestUsage& usage);
-    nlohmann::json error_json(std::exception_ptr error);
+    nlohmann::json error_json(
+        std::exception_ptr error,
+        std::string_view operation = "error_json");
 }

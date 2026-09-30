@@ -126,53 +126,85 @@ void emit_usage_parser(std::ostream& output, const Json& schema)
             "parse_struct_" + std::to_string(index));
     }
 
-    output << "    }\n\n"
-           << "    inline std::optional<nlohmann::json> usage_from_event(\n"
-           << "        Provider provider,\n"
-           << "        const nlohmann::json& event)\n"
-           << "    {\n"
-           << "        const char* key = nullptr;\n"
-           << "        switch (provider)\n"
-           << "        {\n";
 
-    for (const Json& provider : providers)
-    {
-        output << "            case Provider::"
-               << provider.at("id").get<std::string>() << ":\n"
-               << "                key = "
-               << literal(provider.at("usage_key").get<std::string>())
-               << ";\n"
-               << "                break;\n";
+    output << R"(
     }
 
-    output << "        }\n"
-           << "        if (key == nullptr)\n"
-           << "        {\n"
-           << "            throw std::logic_error(\"unsupported usage provider\");\n"
-           << "        }\n"
-           << "        const auto found = event.find(key);\n"
-           << "        if (found == event.end() || found->is_null())\n"
-           << "        {\n"
-           << "            return std::nullopt;\n"
-           << "        }\n"
-           << "        return *found;\n"
-           << "    }\n\n"
-           << "    inline RequestUsage parse_usage(\n"
-           << "        Provider provider,\n"
-           << "        const nlohmann::json& usage)\n"
-           << "    {\n"
-           << "        switch (provider)\n"
-           << "        {\n";
+    Result<std::optional<nlohmann::json>> usage_from_event(
+        Provider selected, const nlohmann::json& event)
+    {
+        try
+        {
+            const char* key = nullptr;
+            switch (selected)
+            {
+)";
+    for (const Json& entry : providers)
+    {
+        output << "                case Provider::"
+               << entry.at("id").get<std::string>() << ":\n"
+               << "                    key = "
+               << literal(entry.at("usage_key").get<std::string>()) << ";\n"
+               << "                    break;\n";
+    }
+    output << R"(
+            }
+            if (key == nullptr)
+            {
+                return Result<std::optional<nlohmann::json>>::failure(
+                    error_detail::make_error("usage_from_event", "invalid_argument",
+                        "Unsupported provider",
+                        {{{"provider", static_cast<int>(selected)}}}));
+            }
+            if (!event.is_object())
+            {
+                return Result<std::optional<nlohmann::json>>::failure(
+                    error_detail::make_error("usage_from_event", "protocol_error",
+                        "Provider event must be an object", {{{"event", event}}}));
+            }
+            const auto found = event.find(key);
+            if (found == event.end() || found->is_null())
+            {
+                return Result<std::optional<nlohmann::json>>::success(std::nullopt);
+            }
+            return Result<std::optional<nlohmann::json>>::success(*found);
+        }
+        catch (...)
+        {
+            return Result<std::optional<nlohmann::json>>::failure(
+                error_detail::capture_exception(std::current_exception(),
+                    "usage_from_event", {{{"event", event}}}));
+        }
+    }
 
+    Result<RequestUsage> parse_usage(
+        Provider selected, const nlohmann::json& usage)
+    {
+        try
+        {
+            switch (selected)
+            {
+)";
     for (std::size_t index = 0; index < providers.size(); ++index)
     {
-        output << "            case Provider::"
+        output << "                case Provider::"
                << providers.at(index).at("id").get<std::string>() << ":\n"
-               << "                return usage_detail::parse_struct_"
-               << index << "(usage);\n";
+               << "                    return Result<RequestUsage>::success(\n"
+               << "                        RequestUsage{usage_detail::parse_struct_"
+               << index << "(usage)});\n";
     }
-
-    output << "        }\n"
-           << "        throw std::logic_error(\"unsupported usage provider\");\n"
-           << "    }\n";
+    output << R"(
+            }
+            return Result<RequestUsage>::failure(error_detail::make_error(
+                "parse_usage", "invalid_argument", "Unsupported provider",
+                {{{"provider", static_cast<int>(selected)}}}));
+        }
+        catch (...)
+        {
+            return Result<RequestUsage>::failure(error_detail::capture_exception(
+                std::current_exception(), "parse_usage",
+                {{{"provider", static_cast<int>(selected)}, {"usage", usage}}}));
+        }
+    }
+)";
 }

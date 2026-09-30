@@ -1,24 +1,11 @@
-import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-    type IpcConnection,
-    listen,
-} from "@hh/ipc-client";
-
-const opcode = {
-    registerSession: 1,
-    declareRequest: 2,
-    runRequest: 3,
-    declareResponse: 4,
-    runResponse: 5,
-    declareTool: 6,
-    runTool: 7,
-    close: 8,
-} as const;
+    type PluginHandle,
+    PluginRegistry,
+} from "@hh/plugin-loader";
 
 type SessionState =
     | "request"
@@ -27,22 +14,19 @@ type SessionState =
     | "finished"
     | "closed";
 
-type RuntimeEvent = [
-    sequence: number | bigint,
-    timestampMs: number | bigint,
-    packageName: string,
-    level: number,
-    type: string,
-    references: unknown[],
-    data: unknown,
-];
+type RuntimeHandle = {
+    runtime_id: number | bigint;
+};
 
-type CommandFinishedData = {
+type CommandResult = {
     command_id: number | bigint;
-    opcode: number;
-    command: string;
-    state: SessionState;
+    state: SessionState | "unregistered";
     result: unknown;
+};
+
+type RuntimeCloseResult = {
+    code: number | null;
+    signal: string | null;
 };
 
 type CliConfig = {
@@ -57,6 +41,7 @@ type CliConfig = {
     tool_definitions: unknown[] | string;
     compaction_prompt_path: string;
     workspace_path: string;
+    session_runtime_executable: string;
     tool_runtime_executable: string;
     tool_result_timeout_ms?: number;
     session_timeout_ms?: number;
@@ -70,20 +55,13 @@ type CliConfig = {
 
 const testsDirectory = dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = resolve(testsDirectory, "..");
-const runtimeExecutable = resolve(
+const sessionApiManifest = resolve(
     repositoryRoot,
-    "executable",
-    "session_runtime.exe",
+    "plugins",
+    "session-api",
+    "plugin.json",
 );
 const configPath = resolve(testsDirectory, "session.json");
-const pipeName =
-    `hh-session-runtime-${process.pid}-${Date.now()}`;
-
-if (!existsSync(runtimeExecutable)) {
-    throw new Error(
-        `session_runtime.exe not found: ${runtimeExecutable}`,
-    );
-}
 
 function dumpJson(value: unknown): string {
     return JSON.stringify(
@@ -148,116 +126,121 @@ async function loadRuntimeConfig(): Promise<Record<string, unknown>> {
     };
 }
 
-function asRuntimeEvent(value: unknown): RuntimeEvent {
-    if (!Array.isArray(value) || value.length !== 7) {
-        throw new Error("invalid EventPort wire event");
+async function pluginCall<T>(
+    plugin: PluginHandle,
+    name: string,
+    ...args: unknown[]
+): Promise<T> {
+    const result = await plugin.call(name, ...args);
+    if (result.error !== null) {
+        const queued = await plugin.call("get_error");
+        if (queued.error === null && Array.isArray(queued.value)) {
+            for (const error of queued.value) {
+                console.error("[plugin_error]", error);
+            }
+        }
+        throw result.error;
     }
-
-    return value as RuntimeEvent;
+    return result.value as T;
 }
 
-function sameCommandId(
-    actual: number | bigint,
-    expected: number,
-): boolean {
-    return BigInt(actual) === BigInt(expected);
+async function streamEvents(
+    sessionApi: PluginHandle,
+    runtimeId: number | bigint,
+): Promise<void> {
+    for (;;) {
+        const raw = await pluginCall<unknown | null>(
+            sessionApi,
+            "stream_event",
+            runtimeId,
+        );
+        if (raw === null) {
+            return;
+        }
+
+        const event = await pluginCall<unknown>(
+            sessionApi,
+            "parse_event",
+            raw,
+        );
+        console.log(dumpJson(event));
+    }
+}
+
+async function streamErrors(
+    sessionApi: PluginHandle,
+    runtimeId: number | bigint,
+): Promise<void> {
+    for (;;) {
+        const raw = await pluginCall<unknown | null>(
+            sessionApi,
+            "stream_error",
+            runtimeId,
+        );
+        if (raw === null) {
+            return;
+        }
+
+        const event = await pluginCall<unknown>(
+            sessionApi,
+            "parse_event",
+            raw,
+        );
+        console.error("[runtime_error]", dumpJson(event));
+    }
 }
 
 async function runSession(
-    connection: IpcConnection,
+    sessionApi: PluginHandle,
+    runtimeId: number | bigint,
     config: Record<string, unknown>,
 ): Promise<void> {
     let nextCommandId = 1;
 
     const command = async (
-        commandOpcode: number,
-        payload?: unknown,
-    ): Promise<CommandFinishedData> => {
+        apiName: string,
+        ...args: unknown[]
+    ): Promise<CommandResult> => {
         const commandId = nextCommandId++;
-        const frame = payload === undefined
-            ? [commandId, commandOpcode]
-            : [commandId, commandOpcode, payload];
-
-        await connection.send(frame);
-
-        for (;;) {
-            const raw = await connection.receive();
-            if (raw === null) {
-                throw new Error(
-                    `session_runtime closed while waiting for command ${commandId}`,
-                );
-            }
-
-            console.log(dumpJson(raw));
-
-            const event = asRuntimeEvent(raw);
-            const packageName = event[2];
-            const type = event[4];
-            const data = event[6];
-
-            if (
-                packageName !== "session_runtime" ||
-                (type !== "command_finished" && type !== "command_failed")
-            ) {
-                continue;
-            }
-
-            if (
-                typeof data !== "object" ||
-                data === null ||
-                !("command_id" in data)
-            ) {
-                continue;
-            }
-
-            const commandData = data as {
-                command_id: number | bigint;
-                [key: string]: unknown;
-            };
-
-            if (!sameCommandId(commandData.command_id, commandId)) {
-                continue;
-            }
-
-            if (type === "command_failed") {
-                throw new Error(
-                    `session_runtime command_failed:\n${dumpJson(data)}`,
-                );
-            }
-
-            return data as CommandFinishedData;
-        }
+        const result = await pluginCall<CommandResult>(
+            sessionApi,
+            apiName,
+            runtimeId,
+            commandId,
+            ...args,
+        );
+        return result;
     };
 
     let state = (
-        await command(opcode.registerSession, config)
-    ).state;
+        await command("register_session", config)
+    ).state as SessionState;
 
     while (state !== "finished") {
         switch (state) {
             case "request":
-                await command(opcode.declareRequest);
-                state = (await command(opcode.runRequest)).state;
+                await command("declare_request");
+                state = (await command("run_request")).state as SessionState;
                 break;
 
             case "response":
-                await command(opcode.declareResponse);
-                state = (await command(opcode.runResponse)).state;
+                await command("declare_response");
+                state = (await command("run_response")).state as SessionState;
                 break;
 
             case "tool":
-                await command(opcode.declareTool);
-                state = (await command(opcode.runTool)).state;
+                await command("declare_tool");
+                state = (await command("run_tool")).state as SessionState;
                 break;
 
             case "closed":
                 throw new Error(
-                    "session_runtime entered closed state before finished",
+                    "runtime entered closed state before finished",
                 );
         }
     }
 
-    const closed = await command(opcode.close);
+    const closed = await command("close");
     if (closed.state !== "closed") {
         throw new Error(
             `close returned unexpected state: ${closed.state}`,
@@ -265,87 +248,38 @@ async function runSession(
     }
 }
 
-const server = await listen(pipeName);
-const runtime = spawn(
-    runtimeExecutable,
-    [pipeName],
-    {
-        cwd: repositoryRoot,
-        stdio: [
-            "ignore",
-            "inherit",
-            "inherit",
-        ],
-        detached: true,
-        windowsHide: true,
-    },
+const pluginRegistry = new PluginRegistry();
+const loadedSessionApi = await pluginRegistry.load(sessionApiManifest);
+if (loadedSessionApi.error !== null) {
+    throw loadedSessionApi.error;
+}
+
+const sessionApi = loadedSessionApi.value;
+const cliConfig = await loadJson(configPath) as CliConfig;
+const opened = await pluginCall<RuntimeHandle>(
+    sessionApi,
+    "open_runtime",
+    cliConfig.session_runtime_executable,
 );
+const eventStream = streamEvents(sessionApi, opened.runtime_id);
+const errorStream = streamErrors(sessionApi, opened.runtime_id);
 
-let connection: IpcConnection | undefined;
-let shuttingDown = false;
-let serverClosing: Promise<void> | undefined;
-
-function closeServer(): Promise<void> {
-    serverClosing ??= server.close();
-    return serverClosing;
-}
-
-function shutdown(): void {
-    if (shuttingDown) {
-        return;
-    }
-
-    shuttingDown = true;
-    connection?.closeTransport();
-    void closeServer().catch(() => undefined);
-}
-
-process.once("SIGINT", shutdown);
-process.once("SIGTERM", shutdown);
-
-const runtimeExitBeforeConnect = new Promise<never>((_, reject) => {
-    runtime.once("error", reject);
-    runtime.once("exit", (code, signal) => {
-        reject(
-            new Error(
-                `session_runtime exited before IPC connection: code=${code} signal=${signal}`,
-            ),
-        );
-    });
-});
-
+let exit: RuntimeCloseResult;
 try {
-    connection = await Promise.race([
-        server.accept(),
-        runtimeExitBeforeConnect,
-    ]);
-    void closeServer();
-
     const config = await loadRuntimeConfig();
-    await runSession(connection, config);
+    await runSession(sessionApi, opened.runtime_id, config);
 } finally {
-    shutdown();
+    exit = await pluginCall<RuntimeCloseResult>(
+        sessionApi,
+        "close_runtime",
+        opened.runtime_id,
+    );
 }
-
-const exit = await new Promise<{
-    code: number | null;
-    signal: NodeJS.Signals | null;
-}>((resolveExit) => {
-    if (runtime.exitCode !== null || runtime.signalCode !== null) {
-        resolveExit({
-            code: runtime.exitCode,
-            signal: runtime.signalCode,
-        });
-        return;
-    }
-
-    runtime.once("exit", (code, signal) => {
-        resolveExit({ code, signal });
-    });
-});
+await eventStream;
+await errorStream;
 
 console.error(
-    `session_runtime exited: code=${exit.code} signal=${exit.signal}`,
+    `runtime exited: code=${exit.code} signal=${exit.signal}`,
 );
 
 if (exit.code !== 0) {

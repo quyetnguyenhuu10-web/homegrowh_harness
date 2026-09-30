@@ -32,10 +32,14 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "runtime_id",
           "command_id",
           "config"
         ],
         "properties": {
+          "runtime_id": {
+            "x-hh-type": "uint64-positive"
+          },
           "command_id": {
             "x-hh-type": "uint64-positive"
           },
@@ -180,152 +184,89 @@
         }
       },
       "output": {
-        "type": "array",
-        "prefixItems": [
+        "oneOf": [
           {
-            "x-hh-type": "uint64-positive"
-          },
-          {
-            "const": 1
-          },
-          {
-            "$ref": "#/$defs/session_config"
-          }
-        ],
-        "items": false,
-        "minItems": 3,
-        "maxItems": 3,
-        "$defs": {
-          "session_config": {
             "type": "object",
+            "additionalProperties": false,
             "required": [
-              "api_key_raw",
-              "history",
-              "session_current",
-              "tool_definitions",
-              "provider",
-              "endpoint",
-              "model_id",
-              "context_limit",
-              "compact_threshold",
-              "tool_result_timeout_ms",
-              "session_timeout_ms",
-              "compaction_prompt",
-              "workspace_path",
-              "tool_runtime_executable",
-              "sandbox_config",
-              "refresh_workspace"
+              "value",
+              "error"
             ],
             "properties": {
-              "api_key_raw": {
-                "type": "string",
-                "minLength": 1
-              },
-              "history": {
-                "type": "array"
-              },
-              "session_current": {
+              "value": {
                 "type": "object",
+                "additionalProperties": false,
                 "required": [
-                  "messages"
+                  "command_id",
+                  "state",
+                  "result"
                 ],
                 "properties": {
-                  "messages": {
-                    "type": "array",
-                    "minItems": 1
+                  "command_id": {
+                    "x-hh-type": "uint64-positive"
                   },
-                  "tools": false
+                  "state": {
+                    "type": "string"
+                  },
+                  "result": {}
                 }
               },
-              "tool_definitions": {
-                "type": "array"
+              "error": {
+                "type": "null"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "null"
               },
-              "provider": {
-                "enum": [
-                  "openai",
-                  "deepseek",
-                  "bonsai"
-                ]
-              },
-              "endpoint": {
-                "type": "string",
-                "minLength": 1
-              },
-              "model_id": {
-                "type": "string",
-                "minLength": 1
-              },
-              "context_limit": {
-                "x-hh-type": "uint64-positive"
-              },
-              "compact_threshold": {
-                "x-hh-type": "uint64"
-              },
-              "tool_result_timeout_ms": {
-                "anyOf": [
-                  {
-                    "const": -1
-                  },
-                  {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 2147483647
-                  }
-                ]
-              },
-              "session_timeout_ms": {
-                "anyOf": [
-                  {
-                    "const": -1
-                  },
-                  {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 2147483647
-                  }
-                ]
-              },
-              "compaction_prompt": {
+              "error": {
+                "$ref": "#/$defs/hh_error"
+              }
+            }
+          }
+        ],
+        "$defs": {
+          "hh_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "operation",
+              "type",
+              "message",
+              "data",
+              "causes"
+            ],
+            "properties": {
+              "source": {
                 "type": "string"
               },
-              "workspace_path": {
-                "type": "string",
-                "minLength": 1
+              "operation": {
+                "type": "string"
               },
-              "tool_runtime_executable": {
-                "type": "string",
-                "minLength": 1
+              "type": {
+                "type": "string"
               },
-              "sandbox_config": {
-                "type": "object",
-                "required": [
-                  "read_only",
-                  "read_write",
-                  "network"
-                ],
-                "properties": {
-                  "read_only": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "read_write": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "network": {
-                    "enum": [
-                      "none",
-                      "internet_client"
-                    ]
-                  }
+              "message": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": true
+              },
+              "causes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/hh_error"
                 }
-              },
-              "refresh_workspace": {
-                "type": "boolean"
               }
             }
           }
@@ -339,27 +280,106 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "runtime_id",
           "command_id"
         ],
         "properties": {
+          "runtime_id": {
+            "x-hh-type": "uint64-positive"
+          },
           "command_id": {
             "x-hh-type": "uint64-positive"
           }
         }
       },
       "output": {
-        "type": "array",
-        "prefixItems": [
+        "oneOf": [
           {
-            "x-hh-type": "uint64-positive"
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "command_id",
+                  "state",
+                  "result"
+                ],
+                "properties": {
+                  "command_id": {
+                    "x-hh-type": "uint64-positive"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "result": {}
+                }
+              },
+              "error": {
+                "type": "null"
+              }
+            }
           },
           {
-            "const": 2
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "error": {
+                "$ref": "#/$defs/hh_error"
+              }
+            }
           }
         ],
-        "items": false,
-        "minItems": 2,
-        "maxItems": 2
+        "$defs": {
+          "hh_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "operation",
+              "type",
+              "message",
+              "data",
+              "causes"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": true
+              },
+              "causes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/hh_error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     {
@@ -369,27 +389,106 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "runtime_id",
           "command_id"
         ],
         "properties": {
+          "runtime_id": {
+            "x-hh-type": "uint64-positive"
+          },
           "command_id": {
             "x-hh-type": "uint64-positive"
           }
         }
       },
       "output": {
-        "type": "array",
-        "prefixItems": [
+        "oneOf": [
           {
-            "x-hh-type": "uint64-positive"
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "command_id",
+                  "state",
+                  "result"
+                ],
+                "properties": {
+                  "command_id": {
+                    "x-hh-type": "uint64-positive"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "result": {}
+                }
+              },
+              "error": {
+                "type": "null"
+              }
+            }
           },
           {
-            "const": 3
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "error": {
+                "$ref": "#/$defs/hh_error"
+              }
+            }
           }
         ],
-        "items": false,
-        "minItems": 2,
-        "maxItems": 2
+        "$defs": {
+          "hh_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "operation",
+              "type",
+              "message",
+              "data",
+              "causes"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": true
+              },
+              "causes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/hh_error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     {
@@ -399,27 +498,106 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "runtime_id",
           "command_id"
         ],
         "properties": {
+          "runtime_id": {
+            "x-hh-type": "uint64-positive"
+          },
           "command_id": {
             "x-hh-type": "uint64-positive"
           }
         }
       },
       "output": {
-        "type": "array",
-        "prefixItems": [
+        "oneOf": [
           {
-            "x-hh-type": "uint64-positive"
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "command_id",
+                  "state",
+                  "result"
+                ],
+                "properties": {
+                  "command_id": {
+                    "x-hh-type": "uint64-positive"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "result": {}
+                }
+              },
+              "error": {
+                "type": "null"
+              }
+            }
           },
           {
-            "const": 4
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "error": {
+                "$ref": "#/$defs/hh_error"
+              }
+            }
           }
         ],
-        "items": false,
-        "minItems": 2,
-        "maxItems": 2
+        "$defs": {
+          "hh_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "operation",
+              "type",
+              "message",
+              "data",
+              "causes"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": true
+              },
+              "causes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/hh_error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     {
@@ -429,27 +607,106 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "runtime_id",
           "command_id"
         ],
         "properties": {
+          "runtime_id": {
+            "x-hh-type": "uint64-positive"
+          },
           "command_id": {
             "x-hh-type": "uint64-positive"
           }
         }
       },
       "output": {
-        "type": "array",
-        "prefixItems": [
+        "oneOf": [
           {
-            "x-hh-type": "uint64-positive"
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "command_id",
+                  "state",
+                  "result"
+                ],
+                "properties": {
+                  "command_id": {
+                    "x-hh-type": "uint64-positive"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "result": {}
+                }
+              },
+              "error": {
+                "type": "null"
+              }
+            }
           },
           {
-            "const": 5
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "error": {
+                "$ref": "#/$defs/hh_error"
+              }
+            }
           }
         ],
-        "items": false,
-        "minItems": 2,
-        "maxItems": 2
+        "$defs": {
+          "hh_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "operation",
+              "type",
+              "message",
+              "data",
+              "causes"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": true
+              },
+              "causes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/hh_error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     {
@@ -459,27 +716,106 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "runtime_id",
           "command_id"
         ],
         "properties": {
+          "runtime_id": {
+            "x-hh-type": "uint64-positive"
+          },
           "command_id": {
             "x-hh-type": "uint64-positive"
           }
         }
       },
       "output": {
-        "type": "array",
-        "prefixItems": [
+        "oneOf": [
           {
-            "x-hh-type": "uint64-positive"
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "command_id",
+                  "state",
+                  "result"
+                ],
+                "properties": {
+                  "command_id": {
+                    "x-hh-type": "uint64-positive"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "result": {}
+                }
+              },
+              "error": {
+                "type": "null"
+              }
+            }
           },
           {
-            "const": 6
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "error": {
+                "$ref": "#/$defs/hh_error"
+              }
+            }
           }
         ],
-        "items": false,
-        "minItems": 2,
-        "maxItems": 2
+        "$defs": {
+          "hh_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "operation",
+              "type",
+              "message",
+              "data",
+              "causes"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": true
+              },
+              "causes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/hh_error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     {
@@ -489,27 +825,106 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "runtime_id",
           "command_id"
         ],
         "properties": {
+          "runtime_id": {
+            "x-hh-type": "uint64-positive"
+          },
           "command_id": {
             "x-hh-type": "uint64-positive"
           }
         }
       },
       "output": {
-        "type": "array",
-        "prefixItems": [
+        "oneOf": [
           {
-            "x-hh-type": "uint64-positive"
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "command_id",
+                  "state",
+                  "result"
+                ],
+                "properties": {
+                  "command_id": {
+                    "x-hh-type": "uint64-positive"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "result": {}
+                }
+              },
+              "error": {
+                "type": "null"
+              }
+            }
           },
           {
-            "const": 7
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "error": {
+                "$ref": "#/$defs/hh_error"
+              }
+            }
           }
         ],
-        "items": false,
-        "minItems": 2,
-        "maxItems": 2
+        "$defs": {
+          "hh_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "operation",
+              "type",
+              "message",
+              "data",
+              "causes"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": true
+              },
+              "causes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/hh_error"
+                }
+              }
+            }
+          }
+        }
       }
     },
     {
@@ -519,27 +934,1169 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
+          "runtime_id",
           "command_id"
         ],
         "properties": {
+          "runtime_id": {
+            "x-hh-type": "uint64-positive"
+          },
           "command_id": {
             "x-hh-type": "uint64-positive"
           }
         }
       },
       "output": {
-        "type": "array",
-        "prefixItems": [
+        "oneOf": [
           {
-            "x-hh-type": "uint64-positive"
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "command_id",
+                  "state",
+                  "result"
+                ],
+                "properties": {
+                  "command_id": {
+                    "x-hh-type": "uint64-positive"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "result": {}
+                }
+              },
+              "error": {
+                "type": "null"
+              }
+            }
           },
           {
-            "const": 8
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "error": {
+                "$ref": "#/$defs/hh_error"
+              }
+            }
           }
         ],
-        "items": false,
-        "minItems": 2,
-        "maxItems": 2
+        "$defs": {
+          "hh_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "operation",
+              "type",
+              "message",
+              "data",
+              "causes"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": true
+              },
+              "causes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/hh_error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "name": "open_runtime",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "executable"
+        ],
+        "properties": {
+          "executable": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "output": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "runtime_id"
+                ],
+                "properties": {
+                  "runtime_id": {
+                    "x-hh-type": "uint64-positive"
+                  }
+                }
+              },
+              "error": {
+                "type": "null"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "error": {
+                "$ref": "#/$defs/hh_error"
+              }
+            }
+          }
+        ],
+        "$defs": {
+          "hh_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "operation",
+              "type",
+              "message",
+              "data",
+              "causes"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": true
+              },
+              "causes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/hh_error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 10,
+      "name": "send",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runtime_id",
+          "message"
+        ],
+        "properties": {
+          "runtime_id": {
+            "x-hh-type": "uint64-positive"
+          },
+          "message": {}
+        }
+      },
+      "output": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "error": {
+                "type": "null"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "error": {
+                "$ref": "#/$defs/hh_error"
+              }
+            }
+          }
+        ],
+        "$defs": {
+          "hh_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "operation",
+              "type",
+              "message",
+              "data",
+              "causes"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": true
+              },
+              "causes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/hh_error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 11,
+      "name": "receive",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runtime_id"
+        ],
+        "properties": {
+          "runtime_id": {
+            "x-hh-type": "uint64-positive"
+          }
+        }
+      },
+      "output": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/runtime_event"
+                  }
+                ]
+              },
+              "error": {
+                "type": "null"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "error": {
+                "$ref": "#/$defs/hh_error"
+              }
+            }
+          }
+        ],
+        "$defs": {
+          "hh_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "operation",
+              "type",
+              "message",
+              "data",
+              "causes"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": true
+              },
+              "causes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/hh_error"
+                }
+              }
+            }
+          },
+          "runtime_event": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "sequence",
+              "timestamp_ms",
+              "source",
+              "level",
+              "type",
+              "references",
+              "data"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "event",
+                  "ready",
+                  "protocol_error",
+                  "runtime_failed",
+                  "command_finished",
+                  "command_failed",
+                  "provider_http_error",
+                  "provider_failed",
+                  "session_failed",
+                  "session_secondary_error"
+                ]
+              },
+              "sequence": {
+                "x-hh-type": "uint64"
+              },
+              "timestamp_ms": {
+                "x-hh-type": "uint64"
+              },
+              "source": {
+                "type": "string"
+              },
+              "level": {
+                "type": "integer"
+              },
+              "type": {
+                "type": "string"
+              },
+              "references": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "value"
+                  ],
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "data": {},
+              "command_id": {
+                "x-hh-type": "uint64-positive"
+              },
+              "state": {
+                "type": "string"
+              },
+              "result": {},
+              "protocol_version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "exit_code": {
+                "type": "integer"
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "level": {
+                          "minimum": 4,
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "kind": {
+                          "enum": [
+                            "protocol_error",
+                            "runtime_failed",
+                            "command_failed",
+                            "provider_http_error",
+                            "provider_failed",
+                            "session_failed",
+                            "session_secondary_error"
+                          ],
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "required": [
+                            "error"
+                          ],
+                          "properties": {
+                            "error": {}
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "properties": {
+                        "error": {
+                          "$ref": "#/$defs/hh_error"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 12,
+      "name": "close_runtime",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runtime_id"
+        ],
+        "properties": {
+          "runtime_id": {
+            "x-hh-type": "uint64-positive"
+          }
+        }
+      },
+      "output": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "code",
+                  "signal"
+                ],
+                "properties": {
+                  "code": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "signal": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                }
+              },
+              "error": {
+                "type": "null"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "error": {
+                "$ref": "#/$defs/hh_error"
+              }
+            }
+          }
+        ],
+        "$defs": {
+          "hh_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "operation",
+              "type",
+              "message",
+              "data",
+              "causes"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": true
+              },
+              "causes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/hh_error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 13,
+      "name": "parse_event",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "raw"
+        ],
+        "properties": {
+          "raw": {}
+        }
+      },
+      "output": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "$ref": "#/$defs/runtime_event"
+              },
+              "error": {
+                "type": "null"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "error": {
+                "$ref": "#/$defs/hh_error"
+              }
+            }
+          }
+        ],
+        "$defs": {
+          "hh_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "operation",
+              "type",
+              "message",
+              "data",
+              "causes"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": true
+              },
+              "causes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/hh_error"
+                }
+              }
+            }
+          },
+          "runtime_event": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "sequence",
+              "timestamp_ms",
+              "source",
+              "level",
+              "type",
+              "references",
+              "data"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "event",
+                  "ready",
+                  "protocol_error",
+                  "runtime_failed",
+                  "command_finished",
+                  "command_failed",
+                  "provider_http_error",
+                  "provider_failed",
+                  "session_failed",
+                  "session_secondary_error"
+                ]
+              },
+              "sequence": {
+                "x-hh-type": "uint64"
+              },
+              "timestamp_ms": {
+                "x-hh-type": "uint64"
+              },
+              "source": {
+                "type": "string"
+              },
+              "level": {
+                "type": "integer"
+              },
+              "type": {
+                "type": "string"
+              },
+              "references": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "value"
+                  ],
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    },
+                    "value": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "data": {},
+              "command_id": {
+                "x-hh-type": "uint64-positive"
+              },
+              "state": {
+                "type": "string"
+              },
+              "result": {},
+              "protocol_version": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "exit_code": {
+                "type": "integer"
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "anyOf": [
+                    {
+                      "properties": {
+                        "level": {
+                          "minimum": 4,
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "kind": {
+                          "enum": [
+                            "protocol_error",
+                            "runtime_failed",
+                            "command_failed",
+                            "provider_http_error",
+                            "provider_failed",
+                            "session_failed",
+                            "session_secondary_error"
+                          ],
+                          "type": "string"
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "data": {
+                          "type": "object",
+                          "required": [
+                            "error"
+                          ],
+                          "properties": {
+                            "error": {}
+                          }
+                        }
+                      }
+                    }
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "required": [
+                        "error"
+                      ],
+                      "properties": {
+                        "error": {
+                          "$ref": "#/$defs/hh_error"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 14,
+      "name": "stream_event",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runtime_id"
+        ],
+        "properties": {
+          "runtime_id": {
+            "x-hh-type": "uint64-positive"
+          }
+        }
+      },
+      "output": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "array",
+                    "minItems": 7,
+                    "maxItems": 7,
+                    "items": false,
+                    "prefixItems": [
+                      {
+                        "x-hh-type": "uint64"
+                      },
+                      {
+                        "x-hh-type": "uint64"
+                      },
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "array",
+                          "minItems": 2,
+                          "maxItems": 2,
+                          "items": false,
+                          "prefixItems": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "string"
+                            }
+                          ]
+                        }
+                      },
+                      {}
+                    ]
+                  }
+                ]
+              },
+              "error": {
+                "type": "null"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "error": {
+                "$ref": "#/$defs/hh_error"
+              }
+            }
+          }
+        ],
+        "$defs": {
+          "hh_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "operation",
+              "type",
+              "message",
+              "data",
+              "causes"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": true
+              },
+              "causes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/hh_error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 15,
+      "name": "get_error",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [],
+        "properties": {}
+      },
+      "output": {
+        "type": "array",
+        "items": true,
+        "allOf": [
+          {
+            "items": {
+              "$ref": "#/$defs/hh_error"
+            }
+          }
+        ],
+        "$defs": {
+          "hh_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "operation",
+              "type",
+              "message",
+              "data",
+              "causes"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": true
+              },
+              "causes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/hh_error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": 16,
+      "name": "stream_error",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "runtime_id"
+        ],
+        "properties": {
+          "runtime_id": {
+            "x-hh-type": "uint64-positive"
+          }
+        }
+      },
+      "output": {
+        "oneOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/hh_error"
+                  }
+                ]
+              },
+              "error": {
+                "type": "null"
+              }
+            }
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "value",
+              "error"
+            ],
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "error": {
+                "$ref": "#/$defs/hh_error"
+              }
+            }
+          }
+        ],
+        "$defs": {
+          "hh_error": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "source",
+              "operation",
+              "type",
+              "message",
+              "data",
+              "causes"
+            ],
+            "properties": {
+              "source": {
+                "type": "string"
+              },
+              "operation": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "data": {
+                "type": "array",
+                "items": true
+              },
+              "causes": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/$defs/hh_error"
+                }
+              }
+            }
+          }
+        }
       }
     }
   ],

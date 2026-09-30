@@ -1,5 +1,7 @@
 #include "request.h"
 #include <secrets>
+#include <session>
+#include <error/error.h>
 
 #include <nlohmann/json.hpp>
 
@@ -19,14 +21,20 @@ namespace sessions
         provider::EventSink summary_sink,
         provider::CompactionResponse* compaction_response)
     {
-        secrets::SecureString api_key =
+        secrets::SecureSecretResult api_key =
             secrets::resolve_secure_session(api_key_signature);
+        if (api_key.error)
+        {
+            throw ErrorException(detail::dependency_error(
+                "request", "Session credential could not be resolved",
+                std::move(*api_key.error)));
+        }
 
-        return provider::compaction(
+        auto response = provider::compaction(
             selected_provider,
             endpoint,
             model_id,
-            api_key.view(),
+            api_key.value->view(),
             compaction_prompt,
             session_current,
             tool_definitions,
@@ -35,5 +43,12 @@ namespace sessions
             compact,
             summary_sink,
             compaction_response);
+        if (response.error)
+        {
+            throw ErrorException(detail::dependency_error(
+                "request", "Provider request could not be completed",
+                detail::convert_error<Error>(std::move(*response.error))));
+        }
+        return std::move(*response.value);
     }
 }

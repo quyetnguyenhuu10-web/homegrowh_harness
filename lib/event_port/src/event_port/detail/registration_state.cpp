@@ -1,4 +1,5 @@
 #include "registration_state.h"
+#include "error.h"
 
 #include <utility>
 
@@ -6,16 +7,17 @@ namespace event_port::detail
 {
     RegistrationState::RegistrationState(
         std::string&& package_value,
-        References&& references_value) noexcept
+        References&& references_value)
         : package(std::move(package_value)),
           references(std::move(references_value))
     {
     }
 
-    void close_registration_state(
+    Result<void> close_registration_state(
         RegistrationState& state,
-        bool discard_pending) noexcept
+        bool discard_pending)
     {
+        auto result = guard<void>("close_registration", [&]() -> Result<void>
         {
             std::lock_guard lock(state.mutex);
             state.closed = true;
@@ -23,9 +25,11 @@ namespace event_port::detail
             {
                 state.pending.reset();
             }
-        }
+            return Result<void>::success();
+        });
 
         state.readable.notify_all();
         state.writable.notify_all();
+        return result;
     }
 }

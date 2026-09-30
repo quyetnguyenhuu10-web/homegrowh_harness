@@ -1,195 +1,123 @@
-#include <nlohmann/json.hpp>
-
 #include "emit_usage_parser.h"
+#include "schema.h"
+#include "../src/error/capture.h"
 
+#include <cerrno>
 #include <fstream>
 #include <iostream>
-#include <set>
+#include <iterator>
 #include <sstream>
-#include <stdexcept>
-#include <string>
+#include <system_error>
 
 namespace
 {
     using Json = nlohmann::ordered_json;
 
-    bool valid_identifier(const std::string& value)
+    provider::Error file_error(
+        std::string_view operation, std::string_view api,
+        const char* path, int native_error, std::ios::iostate state)
     {
-        if (value.empty())
+        nlohmann::json details = {
+            {"api", api}, {"path", path}, {"stream_state", static_cast<int>(state)}};
+        if (native_error != 0)
         {
-            return false;
+            details["code"] = native_error;
+            details["category"] = "errno";
         }
-
-        const auto letter = [](char ch)
-        {
-            return (ch >= 'a' && ch <= 'z') ||
-                (ch >= 'A' && ch <= 'Z') ||
-                ch == '_';
-        };
-
-        const auto digit = [](char ch)
-        {
-            return ch >= '0' && ch <= '9';
-        };
-
-        if (!letter(value.front()))
-        {
-            return false;
-        }
-
-        for (const char ch : value)
-        {
-            if (!letter(ch) && !digit(ch))
-            {
-                return false;
-            }
-        }
-
-        return true;
+        return provider::error_detail::make_error(
+            operation, "system_error",
+            native_error != 0
+                ? std::error_code(native_error, std::generic_category()).message()
+                : "File stream reports a failure",
+            {std::move(details)});
     }
 
-    std::string identifier(
-        const Json& object,
-        const char* key,
-        const std::string& location)
+    provider::Result<Json> read_json(const char* path)
     {
-        const std::string value = object.at(key).get<std::string>();
-
-        if (!valid_identifier(value))
+        std::string contents;
+        try
         {
-            throw std::runtime_error(
-                location + ": invalid C++ identifier in " + key + ": " + value);
+            errno = 0;
+            std::ifstream input(path);
+            const int open_error = errno;
+            if (!input)
+            {
+                return provider::Result<Json>::failure(
+                    file_error("read_schema", "std::ifstream::open",
+                        path, open_error, input.rdstate()));
+            }
+            errno = 0;
+            contents.assign(
+                (std::istreambuf_iterator<char>(input)),
+                std::istreambuf_iterator<char>{});
+            const int read_error = errno;
+            if (input.bad() || read_error != 0)
+            {
+                return provider::Result<Json>::failure(
+                    file_error("read_schema", "std::istream::read",
+                        path, read_error, input.rdstate()));
+            }
+            return provider::Result<Json>::success(Json::parse(contents));
         }
-
-        return value;
-    }
-
-    Json read_json(const char* path)
-    {
-        std::ifstream input(path);
-
-        if (!input)
+        catch (...)
         {
-            throw std::runtime_error(
-                std::string("cannot open JSON file: ") + path);
-        }
-
-        Json result;
-        input >> result;
-        return result;
-    }
-
-    void validate_fields(
-        const Json& fields,
-        const std::string& location)
-    {
-        if (!fields.is_array() || fields.empty())
-        {
-            throw std::runtime_error(
-                location + ": fields must be a nonempty array");
-        }
-
-        std::set<std::string> names;
-        std::set<std::string> nested_types;
-
-        for (const Json& field : fields)
-        {
-            if (!field.is_object())
-            {
-                throw std::runtime_error(
-                    location + ": field must be an object");
-            }
-
-            const std::string name = identifier(field, "name", location);
-            const std::string type = identifier(field, "type", location);
-            const std::string json_key = field.value("json_key", name);
-            field.value("optional", false);
-
-            if (json_key.empty())
-            {
-                throw std::runtime_error(
-                    location + ": json_key must not be empty: " + name);
-            }
-
-            if (!names.insert(name).second)
-            {
-                throw std::runtime_error(
-                    location + ": duplicate field: " + name);
-            }
-
-            if (field.contains("fields"))
-            {
-                if (type == "uint64" || type == "double")
-                {
-                    throw std::runtime_error(
-                        location + ": nested struct needs a struct type: " + name);
-                }
-
-                if (!nested_types.insert(type).second)
-                {
-                    throw std::runtime_error(
-                        location + ": duplicate nested type: " + type);
-                }
-
-                validate_fields(field.at("fields"), location + "." + name);
-            }
-            else if (type != "uint64" && type != "double")
-            {
-                throw std::runtime_error(
-                    location + ": unsupported scalar type: " + type);
-            }
+            return provider::Result<Json>::failure(
+                provider::error_detail::capture_exception(
+                    std::current_exception(), "read_schema",
+                    {{{"path", path}, {"contents", contents}}}));
         }
     }
 
-    void validate_schema(const Json& schema)
+    provider::Result<void> write_file(const char* path, const std::string& content)
     {
-        if (!schema.is_object() ||
-            !schema.contains("providers") ||
-            !schema.at("providers").is_array() ||
-            schema.at("providers").empty())
+        try
         {
-            throw std::runtime_error(
-                "provider_types.json: providers must be a nonempty array");
+            errno = 0;
+            std::ofstream output(path, std::ios::binary | std::ios::trunc);
+            const int open_error = errno;
+            if (!output)
+            {
+                return provider::Result<void>::failure(
+                    file_error("write_generated_file", "std::ofstream::open",
+                        path, open_error, output.rdstate()));
+            }
+            errno = 0;
+            output << content;
+            output.flush();
+            const int write_error = errno;
+            if (!output)
+            {
+                return provider::Result<void>::failure(
+                    file_error("write_generated_file", "std::ostream::write",
+                        path, write_error, output.rdstate()));
+            }
+            errno = 0;
+            output.close();
+            const int close_error = errno;
+            if (!output)
+            {
+                return provider::Result<void>::failure(
+                    file_error("write_generated_file", "std::ofstream::close",
+                        path, close_error, output.rdstate()));
+            }
+            return provider::Result<void>::success();
         }
-
-        std::set<std::string> ids;
-        std::set<std::string> usage_types;
-
-        for (const Json& provider : schema.at("providers"))
+        catch (...)
         {
-            if (!provider.is_object())
-            {
-                throw std::runtime_error(
-                    "provider_types.json: provider must be an object");
-            }
-
-            const std::string id =
-                identifier(provider, "id", "provider_types.json");
-            const std::string usage_type =
-                identifier(provider, "usage_type", id);
-            const std::string usage_key =
-                provider.at("usage_key").get<std::string>();
-
-            if (usage_key.empty())
-            {
-                throw std::runtime_error(
-                    "provider_types.json: usage_key must not be empty: " + id);
-            }
-
-            if (!ids.insert(id).second)
-            {
-                throw std::runtime_error(
-                    "provider_types.json: duplicate provider id: " + id);
-            }
-
-            if (!usage_types.insert(usage_type).second)
-            {
-                throw std::runtime_error(
-                    "provider_types.json: duplicate usage type: " + usage_type);
-            }
-
-            validate_fields(provider.at("fields"), usage_type);
+            return provider::Result<void>::failure(
+                provider::error_detail::capture_exception(
+                    std::current_exception(), "write_generated_file", {{{"path", path}}}));
         }
+    }
+
+    int report(const provider::Error& error, int status = 1)
+    {
+        auto encoded = provider::serialize_error(error);
+        if (encoded)
+        {
+            std::cerr << encoded.value->dump() << '\n';
+        }
+        return status;
     }
 
     void indent(std::ostream& output, int spaces)
@@ -274,7 +202,6 @@ namespace
                << "#pragma once\n\n"
                << "#include <cstdint>\n"
                << "#include <optional>\n"
-               << "#include <stdexcept>\n"
                << "#include <string>\n"
                << "#include <variant>\n"
                << "#include <nlohmann/json.hpp>\n\n"
@@ -323,61 +250,103 @@ namespace
                    << ",\n";
         }
 
-        output << "        UsageState>;\n\n"
-               << "    inline Provider provider_from_name(\n"
-               << "        const std::string& provider_name)\n"
-               << "    {\n";
-
-        for (const Json& entry : providers)
-        {
-            const std::string id = entry.at("id").get<std::string>();
-            output << "        if (provider_name == \"" << id << "\")\n"
-                   << "        {\n"
-                   << "            return Provider::" << id << ";\n"
-                   << "        }\n";
-        }
-
-        output << "\n"
-               << "        throw std::runtime_error(\n"
-               << "            \"unsupported provider: \" + provider_name);\n"
-               << "    }\n\n";
-
-        emit_usage_parser(output, schema);
-        output << "}\n";
-
+        output << "        UsageState>;\n}\n";
         return output.str();
     }
+
+    std::string generate_source(const Json& schema)
+    {
+        std::ostringstream output;
+        output << "// Generated from the provider schema. Do not edit.\n"
+               << "#include <provider>\n"
+               << "#include \"request/requests.h\"\n"
+               << "#include \"error/capture.h\"\n\n"
+               << "namespace provider\n{\n"
+               << "    Result<Provider> provider_from_name(const std::string& name)\n"
+               << "    {\n        try\n        {\n";
+        for (const Json& entry : schema.at("providers"))
+        {
+            const std::string id = entry.at("id").get<std::string>();
+            output << "            if (name == " << Json(id).dump() << ")\n"
+                   << "                return Result<Provider>::success(Provider::"
+                   << id << ");\n";
+        }
+        output << "            return Result<Provider>::failure(error_detail::make_error(\n"
+               << "                \"provider_from_name\", \"invalid_argument\",\n"
+               << "                \"Unsupported provider\", {{{\"provider\", name}}}));\n"
+               << "        }\n        catch (...)\n        {\n"
+               << "            return Result<Provider>::failure(error_detail::capture_exception(\n"
+               << "                std::current_exception(), \"provider_from_name\"));\n"
+               << "        }\n    }\n\n"
+               << "    Result<nlohmann::json> prepare_request_body(\n"
+               << "        Provider selected, const nlohmann::json& body)\n"
+               << "    {\n        try\n        {\n"
+               << "            nlohmann::json prepared = body;\n"
+               << "            switch (selected)\n            {\n";
+        for (const Json& entry : schema.at("providers"))
+        {
+            output << "                case Provider::"
+                   << entry.at("id").get<std::string>() << ":\n";
+            if (entry.contains("stream_request_options"))
+            {
+                output << "                    if (prepared.value(\"stream\", false))\n"
+                       << "                        prepared.merge_patch(nlohmann::json::parse("
+                       << Json(entry.at("stream_request_options").dump()).dump()
+                       << "));\n";
+            }
+            output << "                    return Result<nlohmann::json>::success(std::move(prepared));\n";
+        }
+        output << "            }\n"
+               << "            return Result<nlohmann::json>::failure(error_detail::make_error(\n"
+               << "                \"request\", \"invalid_argument\", \"Unsupported provider\",\n"
+               << "                {{{\"provider\", static_cast<int>(selected)}}}));\n"
+               << "        }\n        catch (...)\n        {\n"
+               << "            return Result<nlohmann::json>::failure(error_detail::capture_exception(\n"
+               << "                std::current_exception(), \"request\", {{{\"body\", body}}}));\n"
+               << "        }\n    }\n\n";
+        emit_usage_parser(output, schema);
+        output << "}\n";
+        return output.str();
+    }
+
 }
 
 int main(int argc, char** argv)
 {
-    if (argc != 3)
-    {
-        std::cerr
-            << "usage: generate_provider_types "
-               "<provider_types.json> <output.h>\n";
-        return 2;
-    }
-
     try
     {
-        const Json schema = read_json(argv[1]);
-        validate_schema(schema);
-
-        const std::string header = generate_header(schema);
-        std::ofstream output(argv[2], std::ios::binary | std::ios::trunc);
-
-        if (!output || !(output << header))
+        if (argc != 4)
         {
-            throw std::runtime_error(
-                std::string("cannot write generated header: ") + argv[2]);
+            return report(provider::error_detail::make_error(
+                "generate_types", "invalid_argument",
+                "Expected schema, output header and output source paths",
+                {{{"argc", argc}}}), 2);
         }
+        auto schema = read_json(argv[1]);
+        if (!schema)
+        {
+            return report(*schema.error);
+        }
+        auto validation = validate_schema(*schema.value);
+        if (!validation)
+        {
+            return report(*validation.error);
+        }
+        auto header = write_file(argv[2], generate_header(*schema.value));
+        if (!header)
+        {
+            return report(*header.error);
+        }
+        auto source = write_file(argv[3], generate_source(*schema.value));
+        if (!source)
+        {
+            return report(*source.error);
+        }
+        return 0;
     }
-    catch (const std::exception& error)
+    catch (...)
     {
-        std::cerr << error.what() << '\n';
-        return 1;
+        return report(provider::error_detail::capture_exception(
+            std::current_exception(), "generate_types"));
     }
-
-    return 0;
 }

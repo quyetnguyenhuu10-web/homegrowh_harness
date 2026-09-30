@@ -3,6 +3,7 @@
 #include "acl.h"
 #include "identity.h"
 #include "state.h"
+#include "../error_schema.h"
 
 #include <filesystem>
 #include <optional>
@@ -15,11 +16,64 @@ namespace sandbox::detail::filesystem::windows
 {
     namespace
     {
+        bool has_fatal_path_error(
+            const std::vector<registry_path_error>& path_errors,
+            std::size_t begin)
+        {
+            for (std::size_t index = begin; index < path_errors.size(); ++index)
+            {
+                if (path_errors[index].error.type != "unsupported_path")
+                    return true;
+            }
+            return false;
+        }
+
+        bool commit_state(
+            const std::filesystem::path& state_path,
+            const registry_state& state,
+            std::optional<Error>& final_error)
+        {
+            try
+            {
+                save_registry_state(state_path, state);
+                return true;
+            }
+            catch (...)
+            {
+                final_error = sandbox::detail::capture_exception("filesystem", std::current_exception());
+                return false;
+            }
+        }
+
+        void merge_final_error(
+            std::optional<Error>& destination,
+            Error error,
+            std::string operation,
+            std::string message)
+        {
+            if (!destination)
+            {
+                destination = std::move(error);
+                return;
+            }
+            std::vector<Error> causes;
+            causes.reserve(2);
+            causes.push_back(std::move(*destination));
+            causes.push_back(std::move(error));
+            destination = sandbox::detail::make_error(
+                std::move(operation),
+                "operation_failed",
+                std::move(message),
+                nullptr,
+                std::move(causes));
+        }
+
         std::optional<registered_permission> refresh_one(
             const registry_request& request,
+            const std::filesystem::path& state_path,
             registry_state& state,
-            bool& state_changed,
-            std::vector<registry_path_error>& path_errors)
+            std::vector<registry_path_error>& path_errors,
+            std::optional<Error>& final_error)
         {
             if (!inspect_registry_path(request.path, path_errors))
                 return std::nullopt;
@@ -39,39 +93,79 @@ namespace sandbox::detail::filesystem::windows
                 if (existing->capability_name != identity.name
                     || existing->sid != identity.sid_string)
                 {
-                    throw std::runtime_error(
-                        "sandbox registry state capability identity mismatch");
+                    sandbox::detail::throw_error(
+                        sandbox::detail::make_error(
+                            "refresh_filesystem_capability",
+                            "identity_mismatch",
+                            "sandbox registry state capability identity mismatch",
+                            {{"path", sandbox::detail::error_path_text(canonical_path)}}));
                 }
                 if (existing->tree_version > tree_acl_version)
                 {
-                    throw std::runtime_error(
-                        "sandbox registry state tree ACL version is newer than this build");
+                    sandbox::detail::throw_error(
+                        sandbox::detail::make_error(
+                            "refresh_filesystem_capability",
+                            "unsupported_state_version",
+                            "sandbox registry state tree ACL version is newer than this build",
+                            {
+                                {"path", sandbox::detail::error_path_text(canonical_path)},
+                                {"stored_tree_version", existing->tree_version},
+                                {"supported_tree_version", tree_acl_version},
+                            }));
                 }
             }
 
             /*
-             * Refresh is an explicit decision made by sandbox::registry(...).
-             * Filesystem never promotes reuse into repair on its own.
+             * Persist a non-reusable transaction marker before touching ACLs.
+             * A crash after this commit leaves enough durable information for
+             * explicit refresh/release to recover safely.
              */
+            registry_entry pending{
+                canonical_path.native(),
+                std::string(permission_name(request.access)),
+                identity.name,
+                identity.sid_string,
+                false,
+                tree_acl_version,
+            };
+
+            std::optional<registry_entry> previous;
+            if (existing != nullptr)
+            {
+                previous = *existing;
+                *existing = pending;
+            }
+            else
+            {
+                state.entries.push_back(pending);
+                existing = &state.entries.back();
+            }
+
+            if (!commit_state(state_path, state, final_error))
+            {
+                if (previous.has_value())
+                    *existing = std::move(*previous);
+                else
+                    state.entries.pop_back();
+                return std::nullopt;
+            }
+
             const std::size_t error_count_before = path_errors.size();
             reconcile_tree(
                 canonical_path,
                 identity.sid(),
                 request.access,
                 path_errors);
-            registry_entry updated{
-                canonical_path.native(),
-                std::string(permission_name(request.access)),
-                identity.name,
-                identity.sid_string,
-                path_errors.size() == error_count_before,
-                tree_acl_version,
-            };
-            if (existing != nullptr)
-                *existing = std::move(updated);
-            else
-                state.entries.push_back(std::move(updated));
-            state_changed = true;
+
+            if (has_fatal_path_error(path_errors, error_count_before))
+                return std::nullopt;
+
+            existing->acl_ready = true;
+            if (!commit_state(state_path, state, final_error))
+            {
+                existing->acl_ready = false;
+                return std::nullopt;
+            }
 
             return registered_permission{
                 canonical_path,
@@ -101,16 +195,36 @@ namespace sandbox::detail::filesystem::windows
                 request.access);
             if (existing == nullptr)
             {
-                throw std::system_error(
-                    static_cast<int>(ERROR_FILE_NOT_FOUND),
-                    std::system_category(),
-                    "sandbox filesystem capability is not registered");
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "reuse_filesystem_capability",
+                        "not_registered",
+                        "sandbox filesystem capability is not registered",
+                        {
+                            {"path", sandbox::detail::error_path_text(canonical_path)},
+                            {"code", static_cast<int>(ERROR_FILE_NOT_FOUND)},
+                            {"category", std::system_category().name()},
+                        }));
             }
             if (existing->capability_name != identity.name
                 || existing->sid != identity.sid_string)
             {
-                throw std::runtime_error(
-                    "sandbox registry state capability identity mismatch");
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "reuse_filesystem_capability",
+                        "identity_mismatch",
+                        "sandbox registry state capability identity mismatch",
+                        {{"path", sandbox::detail::error_path_text(canonical_path)}}));
+            }
+
+            if (!existing->acl_ready)
+            {
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "reuse_filesystem_capability",
+                        "incomplete_registration",
+                        "sandbox filesystem capability transaction is incomplete",
+                        {{"path", sandbox::detail::error_path_text(canonical_path)}}));
             }
 
             /*
@@ -139,11 +253,11 @@ namespace sandbox::detail::filesystem::windows
 
         template <typename Predicate>
         bool release_matching_entries(
+            const std::filesystem::path& state_path,
             registry_state& state,
             Predicate&& matches,
             release_result& result)
         {
-            bool state_changed = false;
             auto iterator = state.entries.begin();
             while (iterator != state.entries.end())
             {
@@ -154,6 +268,17 @@ namespace sandbox::detail::filesystem::windows
                 }
 
                 const std::filesystem::path root(iterator->canonical_path);
+
+                if (iterator->acl_ready)
+                {
+                    iterator->acl_ready = false;
+                    if (!commit_state(state_path, state, result.final_error))
+                    {
+                        iterator->acl_ready = true;
+                        return false;
+                    }
+                }
+
                 if (auto error = release_tree(root, iterator->sid))
                 {
                     result.path_errors.push_back(std::move(*error));
@@ -162,9 +287,10 @@ namespace sandbox::detail::filesystem::windows
                 }
 
                 iterator = state.entries.erase(iterator);
-                state_changed = true;
+                if (!commit_state(state_path, state, result.final_error))
+                    return false;
             }
-            return state_changed;
+            return true;
         }
     }
 
@@ -177,7 +303,6 @@ namespace sandbox::detail::filesystem::windows
         registry_state_lock lock;
         const std::filesystem::path state_path = registry_state_path();
         registry_state state = load_registry_state(state_path);
-        bool state_changed = false;
 
         registry_result result;
         result.permissions.reserve(requests.size());
@@ -187,28 +312,27 @@ namespace sandbox::detail::filesystem::windows
             {
                 auto permission = refresh_one(
                     request,
+                    state_path,
                     state,
-                    state_changed,
-                    result.path_errors);
+                    result.path_errors,
+                    result.final_error);
                 if (permission)
                     result.permissions.push_back(std::move(*permission));
+                if (result.final_error)
+                    break;
             }
-            catch (const std::system_error& exception)
+            catch (...)
             {
-                result.path_errors.push_back({request.path, exception.code()});
+                result.path_errors.push_back({request.path, sandbox::detail::capture_exception("filesystem", std::current_exception())});
             }
         }
-
-        if (state_changed)
+        if (auto close_error = lock.close())
         {
-            try
-            {
-                save_registry_state(state_path, state);
-            }
-            catch (const std::system_error& exception)
-            {
-                result.final_error = exception.code();
-            }
+            merge_final_error(
+                result.final_error,
+                std::move(*close_error),
+                "refresh_permissions",
+                "filesystem refresh failed and registry lock cleanup also failed");
         }
         return result;
     }
@@ -233,10 +357,18 @@ namespace sandbox::detail::filesystem::windows
                 if (permission)
                     result.permissions.push_back(std::move(*permission));
             }
-            catch (const std::system_error& exception)
+            catch (...)
             {
-                result.path_errors.push_back({request.path, exception.code()});
+                result.path_errors.push_back({request.path, sandbox::detail::capture_exception("filesystem", std::current_exception())});
             }
+        }
+        if (auto close_error = lock.close())
+        {
+            merge_final_error(
+                result.final_error,
+                std::move(*close_error),
+                "reuse_permissions",
+                "filesystem reuse failed and registry lock cleanup also failed");
         }
         return result;
     }
@@ -249,9 +381,9 @@ namespace sandbox::detail::filesystem::windows
         {
             canonical_path = canonical_existing_path(path);
         }
-        catch (const std::system_error& exception)
+        catch (...)
         {
-            result.path_errors.push_back({path, exception.code()});
+            result.path_errors.push_back({path, sandbox::detail::capture_exception("filesystem", std::current_exception())});
             return result;
         }
 
@@ -259,22 +391,20 @@ namespace sandbox::detail::filesystem::windows
         const std::filesystem::path state_path = registry_state_path();
         registry_state state = load_registry_state(state_path);
 
-        const bool state_changed = release_matching_entries(
+        release_matching_entries(
+            state_path,
             state,
             [&](const registry_entry& entry) {
                 return same_registered_path(entry, canonical_path);
             },
             result);
-        if (!state_changed)
-            return result;
-
-        try
+        if (auto close_error = lock.close())
         {
-            save_registry_state(state_path, state);
-        }
-        catch (const std::system_error& exception)
-        {
-            result.final_error = exception.code();
+            merge_final_error(
+                result.final_error,
+                std::move(*close_error),
+                "release_permissions",
+                "filesystem release failed and registry lock cleanup also failed");
         }
         return result;
     }
@@ -286,22 +416,20 @@ namespace sandbox::detail::filesystem::windows
         registry_state state = load_registry_state(state_path);
 
         release_result result;
-        const bool state_changed = release_matching_entries(
+        release_matching_entries(
+            state_path,
             state,
             [](const registry_entry&) {
                 return true;
             },
             result);
-        if (!state_changed)
-            return result;
-
-        try
+        if (auto close_error = lock.close())
         {
-            save_registry_state(state_path, state);
-        }
-        catch (const std::system_error& exception)
-        {
-            result.final_error = exception.code();
+            merge_final_error(
+                result.final_error,
+                std::move(*close_error),
+                "release_all_permissions",
+                "filesystem release-all failed and registry lock cleanup also failed");
         }
         return result;
     }

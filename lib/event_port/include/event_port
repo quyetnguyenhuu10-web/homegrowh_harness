@@ -4,14 +4,95 @@
 #include <cstdint>
 #include <deque>
 #include <memory>
+#include <optional>
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <variant>
+#include <vector>
 
 #include <nlohmann/json.hpp>
 
 namespace event_port
 {
+    struct Error
+    {
+        std::string source;
+        std::string operation;
+        std::string type;
+        std::string message;
+        nlohmann::json::array_t data;
+        std::vector<Error> causes;
+    };
+
+    inline void to_json(nlohmann::json& json, const Error& error)
+    {
+        json = nlohmann::json{
+            {"source", error.source},
+            {"operation", error.operation},
+            {"type", error.type},
+            {"message", error.message},
+            {"data", error.data},
+            {"causes", error.causes}
+        };
+    }
+
+    template <typename T>
+    struct [[nodiscard]] Result
+    {
+        std::optional<T> value;
+        std::optional<Error> error;
+
+        static Result success(T&& value)
+        {
+            return Result(std::move(value), std::nullopt);
+        }
+
+        static Result failure(Error&& error)
+        {
+            return Result(std::nullopt, std::move(error));
+        }
+
+        explicit operator bool() const noexcept
+        {
+            return value.has_value() && !error.has_value();
+        }
+
+    private:
+        Result(std::optional<T>&& value, std::optional<Error>&& error)
+            : value(std::move(value)), error(std::move(error))
+        {
+        }
+    };
+
+    template <>
+    struct [[nodiscard]] Result<void>
+    {
+        std::optional<std::monostate> value;
+        std::optional<Error> error;
+
+        static Result success()
+        {
+            return Result(std::monostate{}, std::nullopt);
+        }
+
+        static Result failure(Error&& error)
+        {
+            return Result(std::nullopt, std::move(error));
+        }
+
+        explicit operator bool() const noexcept
+        {
+            return value.has_value() && !error.has_value();
+        }
+
+    private:
+        Result(std::optional<std::monostate>&& value, std::optional<Error>&& error)
+            : value(std::move(value)), error(std::move(error))
+        {
+        }
+    };
+
     enum class Level
     {
         trace,
@@ -69,11 +150,17 @@ namespace event_port
         Registration(Registration&&) noexcept;
         Registration& operator=(Registration&&) noexcept;
 
+        const Error* cleanup_error() const noexcept;
+
     private:
         explicit Registration(
             std::shared_ptr<detail::RegistrationState>&& state) noexcept;
 
         std::shared_ptr<detail::RegistrationState> state_;
+        std::optional<Error> cleanup_error_;
+
+        void release() noexcept;
+        void record_cleanup_error(Error&& error) noexcept;
 
         friend class detail::PortDispatch;
     };
@@ -108,10 +195,10 @@ namespace event_port
         class PortDispatch
         {
         private:
-            static Registration apply(Register&& operation);
-            static EventPtr apply(Read&& operation);
-            static EventPtr apply(Emit&& operation);
-            static void apply(Close&& operation);
+            static Result<Registration> apply(Register&& operation);
+            static Result<EventPtr> apply(Read&& operation);
+            static Result<EventPtr> apply(Emit&& operation);
+            static Result<void> apply(Close&& operation);
 
             template <typename Operation>
             friend auto event_port::port(Operation&& operation);

@@ -41,7 +41,11 @@ namespace sandbox::detail::filesystem::windows
                     | DELETE
                     | (directory ? FILE_DELETE_CHILD : 0);
             }
-            throw std::invalid_argument("unknown sandbox permission");
+            sandbox::detail::throw_error(
+                sandbox::detail::make_error(
+                    "access_mask",
+                    "invalid_argument",
+                    "unknown sandbox permission"));
         }
 
         ACCESS_MASK forbidden_access_mask(permission access)
@@ -60,23 +64,51 @@ namespace sandbox::detail::filesystem::windows
             case permission::read_write:
                 return WRITE_DAC | WRITE_OWNER;
             }
-            throw std::invalid_argument("unknown sandbox permission");
+            sandbox::detail::throw_error(
+                sandbox::detail::make_error(
+                    "forbidden_access_mask",
+                    "invalid_argument",
+                    "unknown sandbox permission"));
         }
 
         void append_win32_error(
             std::vector<registry_path_error>& path_errors,
             const std::filesystem::path& path,
+            std::string_view operation,
             DWORD error)
         {
             path_errors.push_back({
                 path,
-                std::error_code(
-                    static_cast<int>(error),
-                    std::system_category()),
+                sandbox::detail::make_native_error(
+                    std::string(operation),
+                    error,
+                    path),
             });
         }
 
-        bool contains_capability_sid(PACL dacl, PSID sid)
+        void append_path_error(
+            std::vector<registry_path_error>& path_errors,
+            const std::filesystem::path& path,
+            std::string operation,
+            std::string type,
+            std::string message,
+            nlohmann::json data = nlohmann::json::object())
+        {
+            data["path"] = sandbox::detail::error_path_text(path);
+            path_errors.push_back({
+                path,
+                sandbox::detail::make_error(
+                    std::move(operation),
+                    std::move(type),
+                    std::move(message),
+                    std::move(data)),
+            });
+        }
+
+        bool contains_capability_sid(
+            const std::filesystem::path& path,
+            PACL dacl,
+            PSID sid)
         {
             if (dacl == nullptr)
                 return false;
@@ -85,7 +117,7 @@ namespace sandbox::detail::filesystem::windows
             {
                 void* raw_ace = nullptr;
                 if (!GetAce(dacl, index, &raw_ace))
-                    throw_win32("GetAce", GetLastError());
+                    throw_win32("GetAce", GetLastError(), path);
 
                 auto* header = static_cast<ACE_HEADER*>(raw_ace);
                 if (header->AceType != ACCESS_ALLOWED_ACE_TYPE
@@ -118,9 +150,9 @@ namespace sandbox::detail::filesystem::windows
                 nullptr,
                 &descriptor);
             if (result != ERROR_SUCCESS)
-                throw_win32("GetNamedSecurityInfoW", result);
+                throw_win32("GetNamedSecurityInfoW", result, path);
             local_memory descriptor_memory(descriptor);
-            return contains_capability_sid(dacl, sid);
+            return contains_capability_sid(path, dacl, sid);
         }
 
         bool revoke_acl(
@@ -139,10 +171,10 @@ namespace sandbox::detail::filesystem::windows
                 nullptr,
                 &descriptor);
             if (read_result != ERROR_SUCCESS)
-                throw_win32("GetNamedSecurityInfoW", read_result);
+                throw_win32("GetNamedSecurityInfoW", read_result, path);
             local_memory descriptor_memory(descriptor);
 
-            if (!contains_capability_sid(old_dacl, sid))
+            if (!contains_capability_sid(path, old_dacl, sid))
                 return false;
 
             EXPLICIT_ACCESSW entry{};
@@ -160,7 +192,7 @@ namespace sandbox::detail::filesystem::windows
                 old_dacl,
                 &updated_dacl);
             if (acl_result != ERROR_SUCCESS)
-                throw_win32("SetEntriesInAclW(REVOKE_ACCESS)", acl_result);
+                throw_win32("SetEntriesInAclW(REVOKE_ACCESS)", acl_result, path);
             local_memory acl_memory(updated_dacl);
 
             const DWORD write_result = SetNamedSecurityInfoW(
@@ -172,14 +204,16 @@ namespace sandbox::detail::filesystem::windows
                 updated_dacl,
                 nullptr);
             if (write_result != ERROR_SUCCESS)
-                throw_win32("SetNamedSecurityInfoW(REVOKE_ACCESS)", write_result);
+                throw_win32("SetNamedSecurityInfoW(REVOKE_ACCESS)", write_result, path);
 
             if (has_capability_sid(path, sid))
             {
-                throw std::system_error(
-                    static_cast<int>(ERROR_GEN_FAILURE),
-                    std::system_category(),
-                    "sandbox capability ACE remained after revoke");
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "verify_acl_revoke",
+                        "acl_verification_error",
+                        "sandbox capability ACE remained after revoke",
+                        {{"path", sandbox::detail::error_path_text(path)}}));
             }
             return true;
         }
@@ -202,7 +236,7 @@ namespace sandbox::detail::filesystem::windows
                 nullptr,
                 &descriptor);
             if (read_result != ERROR_SUCCESS)
-                throw_win32("GetNamedSecurityInfoW", read_result);
+                throw_win32("GetNamedSecurityInfoW", read_result, path);
             local_memory descriptor_memory(descriptor);
 
             EXPLICIT_ACCESSW entry{};
@@ -224,7 +258,7 @@ namespace sandbox::detail::filesystem::windows
                 old_dacl,
                 &updated_dacl);
             if (acl_result != ERROR_SUCCESS)
-                throw_win32("SetEntriesInAclW", acl_result);
+                throw_win32("SetEntriesInAclW", acl_result, path);
             local_memory acl_memory(updated_dacl);
 
             const DWORD write_result = SetNamedSecurityInfoW(
@@ -236,7 +270,7 @@ namespace sandbox::detail::filesystem::windows
                 updated_dacl,
                 nullptr);
             if (write_result != ERROR_SUCCESS)
-                throw_win32("SetNamedSecurityInfoW", write_result);
+                throw_win32("SetNamedSecurityInfoW", write_result, path);
         }
 
         bool reconcile_acl(
@@ -247,7 +281,13 @@ namespace sandbox::detail::filesystem::windows
             std::error_code error;
             const bool directory = std::filesystem::is_directory(path, error);
             if (error)
-                throw std::system_error(error, "could not inspect sandbox registry path");
+            {
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_system_error(
+                        "std::filesystem::is_directory",
+                        error,
+                        path));
+            }
 
             const ACCESS_MASK mask = access_mask(access, directory);
             if (compatible_acl(path, sid, access, directory))
@@ -256,8 +296,12 @@ namespace sandbox::detail::filesystem::windows
             apply_acl(path, sid, mask, directory);
             if (!compatible_acl(path, sid, access, directory))
             {
-                throw std::runtime_error(
-                    "sandbox registry ACL verification failed after update");
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "verify_acl_update",
+                        "acl_verification_error",
+                        "sandbox registry ACL verification failed after update",
+                        {{"path", sandbox::detail::error_path_text(path)}}));
             }
             return true;
         }
@@ -270,13 +314,27 @@ namespace sandbox::detail::filesystem::windows
         const DWORD attributes = GetFileAttributesW(path.c_str());
         if (attributes == INVALID_FILE_ATTRIBUTES)
         {
-            append_win32_error(path_errors, path, GetLastError());
+            append_win32_error(
+                path_errors,
+                path,
+                "GetFileAttributesW",
+                GetLastError());
             return false;
         }
 
         if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
         {
-            append_win32_error(path_errors, path, ERROR_NOT_SUPPORTED);
+            append_path_error(
+                path_errors,
+                path,
+                "inspect_registry_path",
+                "unsupported_path",
+                "reparse points are not supported",
+                {
+                    {"reason", "reparse_point"},
+                    {"code", static_cast<int>(ERROR_NOT_SUPPORTED)},
+                    {"category", std::system_category().name()},
+                });
             return false;
         }
 
@@ -293,29 +351,67 @@ namespace sandbox::detail::filesystem::windows
             nullptr);
         if (handle == INVALID_HANDLE_VALUE)
         {
-            append_win32_error(path_errors, path, GetLastError());
+            append_win32_error(
+                path_errors,
+                path,
+                "CreateFileW",
+                GetLastError());
             return false;
         }
 
         BY_HANDLE_FILE_INFORMATION information{};
         if (!GetFileInformationByHandle(handle, &information))
         {
-            const DWORD error = GetLastError();
-            CloseHandle(handle);
-            append_win32_error(path_errors, path, error);
+            const DWORD primary_code = GetLastError();
+            sandbox::Error primary = sandbox::detail::make_native_error(
+                "GetFileInformationByHandle",
+                primary_code,
+                path);
+            if (!CloseHandle(handle))
+            {
+                sandbox::Error cleanup = sandbox::detail::make_native_error(
+                    "CloseHandle",
+                    GetLastError(),
+                    path);
+                path_errors.push_back({
+                    path,
+                    sandbox::detail::make_error(
+                        "inspect_registry_path",
+                        "operation_failed",
+                        "filesystem inspection and handle cleanup failed",
+                        {{"path", sandbox::detail::error_path_text(path)}},
+                        {std::move(primary), std::move(cleanup)}),
+                });
+                return false;
+            }
+            path_errors.push_back({path, std::move(primary)});
             return false;
         }
 
         if (!CloseHandle(handle))
         {
-            append_win32_error(path_errors, path, GetLastError());
+            append_win32_error(
+                path_errors,
+                path,
+                "CloseHandle",
+                GetLastError());
             return false;
         }
 
         if ((attributes & FILE_ATTRIBUTE_DIRECTORY) == 0
             && information.nNumberOfLinks > 1)
         {
-            append_win32_error(path_errors, path, ERROR_NOT_SUPPORTED);
+            append_path_error(
+                path_errors,
+                path,
+                "inspect_registry_path",
+                "unsupported_path",
+                "hard-linked files are not supported",
+                {
+                    {"reason", "hard_link"},
+                    {"code", static_cast<int>(ERROR_NOT_SUPPORTED)},
+                    {"category", std::system_category().name()},
+                });
             return false;
         }
 
@@ -342,7 +438,7 @@ namespace sandbox::detail::filesystem::windows
             nullptr,
             &descriptor);
         if (result != ERROR_SUCCESS)
-            throw_win32("GetNamedSecurityInfoW", result);
+            throw_win32("GetNamedSecurityInfoW", result, path);
         local_memory descriptor_memory(descriptor);
 
         if (dacl == nullptr)
@@ -353,7 +449,7 @@ namespace sandbox::detail::filesystem::windows
         {
             void* raw_ace = nullptr;
             if (!GetAce(dacl, index, &raw_ace))
-                throw_win32("GetAce", GetLastError());
+                throw_win32("GetAce", GetLastError(), path);
 
             auto* header = static_cast<ACE_HEADER*>(raw_ace);
             if (header->AceType != ACCESS_ALLOWED_ACE_TYPE
@@ -410,16 +506,22 @@ namespace sandbox::detail::filesystem::windows
         {
             updated = reconcile_acl(root, sid, access);
         }
-        catch (const std::system_error& exception)
+        catch (...)
         {
-            path_errors.push_back({root, exception.code()});
+            path_errors.push_back({root, sandbox::detail::capture_exception("filesystem", std::current_exception())});
             return false;
         }
 
         std::error_code error;
         const bool directory = std::filesystem::is_directory(root, error);
         if (error)
-            throw std::system_error(error, "could not inspect sandbox registry root");
+        {
+            sandbox::detail::throw_error(
+                sandbox::detail::make_system_error(
+                    "std::filesystem::is_directory",
+                    error,
+                    root));
+        }
         if (!directory)
             return updated;
 
@@ -428,7 +530,13 @@ namespace sandbox::detail::filesystem::windows
         const std::filesystem::recursive_directory_iterator end;
         if (iterator_error)
         {
-            path_errors.push_back({root, iterator_error});
+            path_errors.push_back({
+                root,
+                sandbox::detail::make_system_error(
+                    "recursive_directory_iterator",
+                    iterator_error,
+                    root),
+            });
             return updated;
         }
 
@@ -441,7 +549,15 @@ namespace sandbox::detail::filesystem::windows
                 if (iterator->is_directory(directory_error))
                     iterator.disable_recursion_pending();
                 if (directory_error)
-                    path_errors.push_back({path, directory_error});
+                {
+                    path_errors.push_back({
+                        path,
+                        sandbox::detail::make_system_error(
+                            "directory_entry::is_directory",
+                            directory_error,
+                            path),
+                    });
+                }
             }
             else
             {
@@ -449,16 +565,22 @@ namespace sandbox::detail::filesystem::windows
                 {
                     updated = reconcile_acl(path, sid, access) || updated;
                 }
-                catch (const std::system_error& exception)
+                catch (...)
                 {
-                    path_errors.push_back({path, exception.code()});
+                    path_errors.push_back({path, sandbox::detail::capture_exception("filesystem", std::current_exception())});
                 }
             }
 
             iterator.increment(iterator_error);
             if (iterator_error)
             {
-                path_errors.push_back({path, iterator_error});
+                path_errors.push_back({
+                    path,
+                    sandbox::detail::make_system_error(
+                        "recursive_directory_iterator::increment",
+                        iterator_error,
+                        path),
+                });
                 iterator_error.clear();
             }
         }
@@ -474,9 +596,10 @@ namespace sandbox::detail::filesystem::windows
         {
             return registry_path_error{
                 root,
-                std::error_code(
-                    static_cast<int>(GetLastError()),
-                    std::system_category()),
+                sandbox::detail::make_native_error(
+                    "ConvertStringSidToSidW",
+                    GetLastError(),
+                    root),
             };
         }
         local_memory sid_memory(sid);
@@ -486,18 +609,26 @@ namespace sandbox::detail::filesystem::windows
         {
             return registry_path_error{
                 root,
-                std::error_code(
-                    static_cast<int>(GetLastError()),
-                    std::system_category()),
+                sandbox::detail::make_native_error(
+                    "GetFileAttributesW",
+                    GetLastError(),
+                    root),
             };
         }
         if ((root_attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
         {
             return registry_path_error{
                 root,
-                std::error_code(
-                    static_cast<int>(ERROR_NOT_SUPPORTED),
-                    std::system_category()),
+                sandbox::detail::make_error(
+                    "release_tree",
+                    "unsupported_path",
+                    "reparse points are not supported",
+                    {
+                        {"path", sandbox::detail::error_path_text(root)},
+                        {"reason", "reparse_point"},
+                        {"code", static_cast<int>(ERROR_NOT_SUPPORTED)},
+                        {"category", std::system_category().name()},
+                    }),
             };
         }
 
@@ -505,9 +636,9 @@ namespace sandbox::detail::filesystem::windows
         {
             revoke_acl(root, sid);
         }
-        catch (const std::system_error& exception)
+        catch (...)
         {
-            return registry_path_error{root, exception.code()};
+            return registry_path_error{root, sandbox::detail::capture_exception("filesystem", std::current_exception())};
         }
 
         if ((root_attributes & FILE_ATTRIBUTE_DIRECTORY) == 0)
@@ -517,7 +648,15 @@ namespace sandbox::detail::filesystem::windows
         std::filesystem::recursive_directory_iterator iterator(root, iterator_error);
         const std::filesystem::recursive_directory_iterator end;
         if (iterator_error)
-            return registry_path_error{root, iterator_error};
+        {
+            return registry_path_error{
+                root,
+                sandbox::detail::make_system_error(
+                    "recursive_directory_iterator",
+                    iterator_error,
+                    root),
+            };
+        }
 
         while (iterator != end)
         {
@@ -527,9 +666,10 @@ namespace sandbox::detail::filesystem::windows
             {
                 return registry_path_error{
                     path,
-                    std::error_code(
-                        static_cast<int>(GetLastError()),
-                        std::system_category()),
+                    sandbox::detail::make_native_error(
+                        "GetFileAttributesW",
+                        GetLastError(),
+                        path),
                 };
             }
             else if ((attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0)
@@ -543,15 +683,23 @@ namespace sandbox::detail::filesystem::windows
                 {
                     revoke_acl(path, sid);
                 }
-                catch (const std::system_error& exception)
+                catch (...)
                 {
-                    return registry_path_error{path, exception.code()};
+                    return registry_path_error{path, sandbox::detail::capture_exception("filesystem", std::current_exception())};
                 }
             }
 
             iterator.increment(iterator_error);
             if (iterator_error)
-                return registry_path_error{path, iterator_error};
+            {
+                return registry_path_error{
+                    path,
+                    sandbox::detail::make_system_error(
+                        "recursive_directory_iterator::increment",
+                        iterator_error,
+                        path),
+                };
+            }
         }
         return std::nullopt;
     }

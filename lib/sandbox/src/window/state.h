@@ -3,6 +3,7 @@
 #include <registry.h>
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,8 @@ namespace sandbox::detail::filesystem::windows
         registry_state_lock(const registry_state_lock&) = delete;
         registry_state_lock& operator=(const registry_state_lock&) = delete;
         ~registry_state_lock();
+
+        std::optional<Error> close();
 
     private:
         void* handle_ = nullptr;

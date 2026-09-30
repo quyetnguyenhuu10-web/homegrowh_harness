@@ -3,6 +3,7 @@
 #include "registration_state.h"
 
 #include <deque>
+#include <functional>
 #include <memory>
 #include <mutex>
 
@@ -11,13 +12,13 @@ namespace event_port::detail
     class Registry
     {
     public:
-        void add(const std::shared_ptr<RegistrationState>& state);
-        void publish(const EventPtr& event);
+        Result<void> add(const std::shared_ptr<RegistrationState>& state);
+        Result<void> publish(const EventPtr& event);
 
     private:
         std::mutex mutex_;
         std::deque<std::weak_ptr<RegistrationState>> registrations_;
     };
 
-    Registry& registry();
+    Result<std::reference_wrapper<Registry>> registry();
 }

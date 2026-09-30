@@ -1,124 +1,81 @@
 #include "credential.h"
+#include "error/error.h"
 
-#include <stdexcept>
-#include <system_error>
 #include <utility>
 
 #if defined(_WIN32)
-
 #include "platform/windows/credential/windows_credential.h"
-
-namespace secrets
-{
-    namespace platform_router = windows;
-}
-
+namespace secrets { namespace platform_router = windows; }
 #elif defined(__linux__)
-
 #include "platform/linux/credential/linux_credential.h"
-
-namespace secrets
-{
-    namespace platform_router = linux;
-}
-
+namespace secrets { namespace platform_router = linux; }
 #else
-
 #error "Unsupported operating system"
-
 #endif
 
 namespace secrets
 {
     SecretResult get(const std::string& signature)
     {
-        return platform_router::get_secret(signature);
+        return detail::guard<std::string>("get", [&]
+        {
+            return platform_router::get_secret(signature);
+        });
     }
 
-    std::string resolve(const std::string& signature)
+    SecretResult resolve(const std::string& signature)
+    {
+        return get(signature);
+    }
+
+    SecureSecretResult resolve_secure(const std::string& signature)
     {
         SecretResult result = get(signature);
-        if (result.status == SecretStatus::success)
-            return std::move(result.value);
+        if (result.error)
+            return SecureSecretResult::failure(std::move(*result.error));
+        return secure_string_from(*result.value);
+    }
 
-        const std::string operation = result.error.operation.empty()
-            ? "credential resolve"
-            : result.error.operation;
-
-        if (result.error.code != 0)
+    SecureSecretResult resolve_secure_session(const std::string& signature)
+    {
+        return detail::guard<SecureString>("resolve_secure_session", [&]
         {
-            throw std::system_error(
-                static_cast<int>(result.error.code),
-                std::system_category(),
-                operation + ": " + signature);
-        }
-
-        throw std::runtime_error(operation + " failed: " + signature);
+            SecretResult result = platform_router::get_session_secret(signature);
+            if (result.error)
+                return SecureSecretResult::failure(std::move(*result.error));
+            return secure_string_from(*result.value);
+        });
     }
 
-    SecureString resolve_secure(const std::string& signature)
+    SecretOperationResult set(const std::string& signature, const std::string& value)
     {
-        SecretResult result = get(signature);
-        if (result.status == SecretStatus::success)
-            return secure_string_from(result.value);
-
-        const std::string operation = result.error.operation.empty()
-            ? "credential resolve"
-            : result.error.operation;
-
-        if (result.error.code != 0)
+        return detail::guard<std::monostate>("set", [&]
         {
-            throw std::system_error(
-                static_cast<int>(result.error.code),
-                std::system_category(),
-                operation + ": " + signature);
-        }
-
-        throw std::runtime_error(operation + " failed: " + signature);
+            return platform_router::set_secret(signature, value);
+        });
     }
 
-    SecureString resolve_secure_session(const std::string& signature)
+    SecretOperationResult set_session(const std::string& signature, const std::string& value)
     {
-        SecretResult result = platform_router::get_session_secret(signature);
-        if (result.status == SecretStatus::success)
-            return secure_string_from(result.value);
-
-        const std::string operation = result.error.operation.empty()
-            ? "session credential resolve"
-            : result.error.operation;
-
-        if (result.error.code != 0)
+        return detail::guard<std::monostate>("set_session", [&]
         {
-            throw std::system_error(
-                static_cast<int>(result.error.code),
-                std::system_category(),
-                operation + ": " + signature);
-        }
-
-        throw std::runtime_error(operation + " failed: " + signature);
-    }
-
-    SecretOperationResult set(
-        const std::string& signature,
-        const std::string& value)
-    {
-        return platform_router::set_secret(signature, value);
-    }
-
-    SecretOperationResult set_session(
-        const std::string& signature,
-        const std::string& value)
-    {
-        return platform_router::set_session_secret(signature, value);
+            return platform_router::set_session_secret(signature, value);
+        });
     }
 
     SecretOperationResult erase(const std::string& signature)
     {
-        return platform_router::erase_secret(signature);
+        return detail::guard<std::monostate>("erase", [&]
+        {
+            return platform_router::erase_secret(signature);
+        });
     }
 
     SecretOperationResult erase_session(const std::string& signature)
     {
-        return platform_router::erase_session_secret(signature);
+        return detail::guard<std::monostate>("erase_session", [&]
+        {
+            return platform_router::erase_session_secret(signature);
+        });
     }
 }

@@ -1,5 +1,6 @@
 #include <registry.h>
 
+#include "error_schema.h"
 #include "filesystem_access.h"
 
 namespace sandbox
@@ -14,10 +15,11 @@ namespace sandbox
                 return detail::filesystem::refresh_permissions(requests);
             return detail::filesystem::reuse_permissions(requests);
         }
-        catch (const std::system_error& exception)
+        catch (...)
         {
             registry_result result;
-            result.final_error = exception.code();
+            result.final_error = detail::capture_exception(
+                "registry", std::current_exception());
             return result;
         }
     }
@@ -28,10 +30,12 @@ namespace sandbox
         {
             return detail::filesystem::release_permissions(path);
         }
-        catch (const std::system_error& exception)
+        catch (...)
         {
             release_result result;
-            result.final_error = exception.code();
+            result.final_error = detail::capture_exception(
+                "release", std::current_exception(),
+                {{"path", detail::error_path_text(path)}});
             return result;
         }
     }
@@ -42,10 +46,11 @@ namespace sandbox
         {
             return detail::filesystem::release_all_permissions();
         }
-        catch (const std::system_error& exception)
+        catch (...)
         {
             release_result result;
-            result.final_error = exception.code();
+            result.final_error = detail::capture_exception(
+                "release_all", std::current_exception());
             return result;
         }
     }

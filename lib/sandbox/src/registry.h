@@ -1,8 +1,10 @@
 #pragma once
 
+#include <sandbox>
+
 #include <filesystem>
+#include <optional>
 #include <string>
-#include <system_error>
 #include <vector>
 
 namespace sandbox
@@ -31,18 +33,18 @@ namespace sandbox
     struct registry_path_error
     {
         std::filesystem::path path;
-        std::error_code error;
+        Error error;
     };
 
     struct registry_result
     {
         std::vector<registered_permission> permissions;
 
-        // One registry-wide OS failure that is not attributable to one path,
+        // One registry-wide failure that is not attributable to one path,
         // e.g. state/lock/final platform initialization or commit failure.
-        std::error_code final_error;
+        std::optional<Error> final_error;
 
-        // Every OS/path-specific abnormality discovered while processing the
+        // Every path-specific abnormality discovered while processing the
         // requested filesystem tree. Filesystem reports these paths only; it
         // does not follow or repair unsupported link/hard-link paths.
         std::vector<registry_path_error> path_errors;
@@ -50,11 +52,11 @@ namespace sandbox
 
     struct release_result
     {
-        // One registry-wide OS failure that is not attributable to one path,
+        // One registry-wide failure that is not attributable to one path,
         // e.g. state/lock/commit failure.
-        std::error_code final_error;
+        std::optional<Error> final_error;
 
-        // Final OS/path-specific failure for each entry that could not complete.
+        // Final path-specific failure for each entry that could not complete.
         // Processing of that entry stops at the first failure; release does not
         // retry it internally. Durable state is removed only after that entry's
         // cleanup succeeds.

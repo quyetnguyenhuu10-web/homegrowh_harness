@@ -14,22 +14,25 @@ export type PluginLoaderOperation =
     | "invoke"
     | "output_validate";
 
-export type PluginLoaderError = {
-    operation: PluginLoaderOperation;
-    /** Original exception, AJV errors, or structured contract violation. */
-    cause: unknown;
-    manifestPath?: string;
-    pluginId?: string;
-    apiId?: number;
-    direction?: "input" | "output";
+export type HHError = {
+    source: string;
+    operation: string;
+    type: string;
+    message: string;
+    data: unknown[];
+    causes: HHError[];
 };
 
-export type PluginResult<T> =
+export type Result<T> =
     | { value: T; error: null }
-    | { value: null; error: PluginLoaderError };
+    | { value: null; error: HHError };
+
+// Compatibility names refer to the same universal schema.
+export type PluginLoaderError = HHError;
+export type PluginResult<T> = Result<T>;
 
 export type PluginErrorSource = {
-    readonly error: PluginLoaderError | null;
+    readonly error: HHError | null;
 };
 
 export type PluginErrorInput = {
@@ -37,7 +40,7 @@ export type PluginErrorInput = {
 };
 
 /** Read one operation's error without copying or consuming it. */
-export function get_error(input: PluginErrorInput): PluginLoaderError | null {
+export function get_error(input: PluginErrorInput): HHError | null {
     return input.result.error;
 }
 
@@ -45,6 +48,6 @@ export function success<T>(value: T): PluginResult<T> {
     return { value, error: null };
 }
 
-export function failure(error: PluginLoaderError): PluginResult<never> {
+export function failure(error: HHError): Result<never> {
     return { value: null, error };
 }

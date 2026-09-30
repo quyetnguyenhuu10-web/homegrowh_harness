@@ -1,4 +1,5 @@
 #include "terminal_event_ui.h"
+#include <error/event_port.h>
 
 #include <iostream>
 #include <stdexcept>
@@ -24,7 +25,7 @@ namespace sessions_loop::util
     TerminalEventUi::TerminalEventUi(provider::Provider selected_provider)
         : provider_(selected_provider)
     {
-        registration_.emplace(event_port::port(event_port::Register{
+        registration_.emplace(sessions::detail::checked_port(event_port::Register{
             "",
             {}
         }));
@@ -46,7 +47,16 @@ namespace sessions_loop::util
         stopped_ = true;
 
         if (registration_.has_value())
-            event_port::port(event_port::Close{*registration_});
+        {
+            try
+            {
+                sessions::detail::checked_port(event_port::Close{*registration_});
+            }
+            catch (const sessions::ErrorException& error)
+            {
+                std::cerr << nlohmann::json(error.error()).dump() << '\n';
+            }
+        }
 
         if (thread_.joinable())
             thread_.join();
@@ -65,14 +75,19 @@ namespace sessions_loop::util
                 if (!registration_.has_value())
                     return;
 
-                const event_port::EventPtr event = event_port::port(
+                auto read = event_port::port(
                     event_port::Read{*registration_});
-                if (event != nullptr)
-                    handle(*event);
-            }
-            catch (const std::logic_error&)
-            {
-                return;
+                if (read.error)
+                {
+                    if (read.error->type != "registration_closed")
+                    {
+                        finish_text();
+                        std::cerr << nlohmann::json(*read.error).dump() << '\n';
+                        std::cerr.flush();
+                    }
+                    return;
+                }
+                handle(**read.value);
             }
             catch (const std::exception& error)
             {
@@ -164,6 +179,15 @@ namespace sessions_loop::util
 
     void TerminalEventUi::handle_sessions(const event_port::Event& event)
     {
+        const auto error = event.data.find("error");
+        if (event.level == event_port::Level::error &&
+            error != event.data.end() && error->is_object())
+        {
+            finish_text();
+            std::cerr << event.type << ": " << error->dump(2) << '\n';
+            std::cerr.flush();
+            return;
+        }
         if (event.type == "tool_call")
         {
             finish_text();

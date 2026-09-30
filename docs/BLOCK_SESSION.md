@@ -7,7 +7,7 @@ Session runtime hiện tại là C++ package package/sessions.
 Public header:
 
 ~~~cpp
-#include <sessions>
+#include <session>
 ~~~
 
 Source được chia theo trách nhiệm, không gom implementation vào `src/loop`:

@@ -3,6 +3,7 @@
 #include "wire_json.h"
 
 #include <event_port>
+#include <error/event_port.h>
 
 #include <cstdint>
 #include <string>
@@ -28,7 +29,7 @@ namespace sessions_runtime
             event_port::References references,
             nlohmann::json data)
         {
-            event_port::port(event_port::Emit{
+            sessions::detail::checked_port(event_port::Emit{
                 "session_runtime",
                 level,
                 std::move(type),
@@ -56,7 +57,7 @@ namespace sessions_runtime
                 event_port::Level::error,
                 "protocol_error",
                 {},
-                nlohmann::json{{"error", error_json(error)}});
+                nlohmann::json{{"error", error_json(error, "decode_command")}});
         }
         catch (...)
         {
@@ -77,7 +78,7 @@ namespace sessions_runtime
                 nlohmann::json{
                     {"source", std::string(source)},
                     {"exit_code", exit_code},
-                    {"error", error_json(error)}
+                    {"error", error_json(error, source)}
                 });
         }
         catch (...)
@@ -122,7 +123,7 @@ namespace sessions_runtime
                         static_cast<std::uint8_t>(command.opcode)},
                     {"command", command_name(command.opcode)},
                     {"state", state_name()},
-                    {"error", error_json(error)}
+                    {"error", error_json(error, command_name(command.opcode))}
                 });
         }
         catch (...)

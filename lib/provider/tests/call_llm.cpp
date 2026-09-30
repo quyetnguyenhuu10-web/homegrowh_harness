@@ -1,4 +1,6 @@
 #include <provider>
+#include "../src/error/capture.h"
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -134,49 +136,69 @@ namespace
     }
 }
 
-int main()
+int report(const provider::Error& error)
 {
-    const std::string url = "https://trickle-crewless-smasher.ngrok-free.dev/v1/chat/completions";
-    const char* raw_api_key = std::getenv("HH_API_KEY");
-    if (raw_api_key == nullptr || *raw_api_key == '\0')
+    auto encoded = provider::serialize_error(error);
+    if (encoded)
     {
-        std::cerr << "HH_API_KEY is not set\n";
-        return 2;
+        std::cerr << encoded.value->dump() << '\n';
     }
+    return 1;
+}
 
-    const std::string api_key = raw_api_key;
-    const std::string model = "bonsai";
-
-    const nlohmann::json messages = nlohmann::json::array({
-        {
-            {"role", "user"},
-            {"content", "Bạn có tool gì"}
-        }
-    });
-
-    std::ifstream tool_file("../tools/src/tool_definitions.json");
-    if (!tool_file)
-    {
-        std::cerr << "Cannot open ../tools/src/tool_definitions.json\n";
-        return 1;
-    }
-
-    nlohmann::json tools;
-    tool_file >> tools;
-
-    const nlohmann::json body = {
-        {"model", model},
-        {"messages", messages},
-        {"tools", tools},
-        {"stream", true}
-    };
-
-    const bool benchmark = std::getenv("PROVIDER_BENCHMARK") != nullptr;
-    using clock = std::chrono::steady_clock;
-    const auto started = clock::now();
-
+int main(int argc, char** argv)
+{
     try
     {
+        if (argc < 5 || argc > 6)
+        {
+            return report(provider::error_detail::make_error(
+                "call_llm", "invalid_argument",
+                "Expected provider, URL, model, prompt and optional tools JSON path",
+                {{{"argc", argc}}}));
+        }
+        auto selected = provider::provider_from_name(argv[1]);
+        if (!selected)
+        {
+            return report(*selected.error);
+        }
+        const std::string url = argv[2];
+        const char* raw_api_key = std::getenv("HH_API_KEY");
+        if (raw_api_key == nullptr || *raw_api_key == '\0')
+        {
+            return report(provider::error_detail::make_error(
+                "call_llm", "invalid_argument", "HH_API_KEY is not set",
+                {{{"environment_variable", "HH_API_KEY"}}}));
+        }
+        const std::string api_key = raw_api_key;
+        nlohmann::json tools = nlohmann::json::array();
+        if (argc == 6)
+        {
+            errno = 0;
+            std::ifstream input(argv[5]);
+            const int native_error = errno;
+            if (!input)
+            {
+                nlohmann::json details = {{"path", argv[5]}, {"api", "std::ifstream::open"}};
+                if (native_error != 0)
+                {
+                    details["code"] = native_error;
+                    details["category"] = "errno";
+                }
+                return report(provider::error_detail::make_error(
+                    "read_tools", "system_error", "Tools file stream reports a failure",
+                    {std::move(details)}));
+            }
+            input >> tools;
+        }
+        const nlohmann::json body = {
+            {"model", argv[3]},
+            {"messages", nlohmann::json::array({{{"role", "user"}, {"content", argv[4]}}})},
+            {"tools", std::move(tools)}, {"stream", true}};
+        const bool benchmark = std::getenv("PROVIDER_BENCHMARK") != nullptr;
+        using clock = std::chrono::steady_clock;
+        const auto started = clock::now();
+
         std::size_t events = 0;
         std::size_t payload_bytes = 0;
         bool have_first_event = false;
@@ -202,8 +224,8 @@ int main()
             &first_event_at
         };
 
-        provider::RequestUsage usage = provider::request(
-            provider::Provider::bonsai,
+        auto requested = provider::request(
+            *selected.value,
             url,
             api_key,
             body,
@@ -226,11 +248,16 @@ int main()
                     {
                         stream_text(event);
                     }
+                    return provider::Result<void>::success();
                 },
                 nullptr
             });
 
-        print_usage(usage);
+        if (!requested)
+        {
+            return report(*requested.error);
+        }
+        print_usage(*requested.value);
 
         if (benchmark)
         {
@@ -261,10 +288,10 @@ int main()
 
         std::cout << '\n';
     }
-    catch (const std::exception& error)
+    catch (...)
     {
-        std::cerr << error.what() << '\n';
-        return 1;
+        return report(provider::error_detail::capture_exception(
+            std::current_exception(), "call_llm"));
     }
 
     return 0;

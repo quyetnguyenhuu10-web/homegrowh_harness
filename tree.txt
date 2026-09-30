@@ -12,6 +12,7 @@ homegrowh_harness/
 │   ├── BLOCK_PROVIDER.md
 │   ├── BLOCK_SESSION.md
 │   ├── BLOCK_TOOLS.md
+│   ├── ERROR_SCHEMA.md
 │   ├── model_architech.md
 │   └── model_architech.png
 ├── host
@@ -42,6 +43,7 @@ homegrowh_harness/
 │   │   │       ├── detail
 │   │   │       │   ├── clock.cpp
 │   │   │       │   ├── clock.h
+│   │   │       │   ├── error.h
 │   │   │       │   ├── event_access.h
 │   │   │       │   ├── registration_state.cpp
 │   │   │       │   ├── registration_state.h
@@ -56,6 +58,7 @@ homegrowh_harness/
 │   │   │       ├── port.cpp
 │   │   │       └── registration.cpp
 │   │   ├── tests
+│   │   │   ├── error_schema_test.cpp
 │   │   │   └── event_port_test.cpp
 │   │   └── CMakeLists.txt
 │   ├── filesystems
@@ -187,51 +190,55 @@ homegrowh_harness/
 │   │   │   └── ipc
 │   │   ├── src
 │   │   │   ├── linux
-│   │   │   │   └── ipc.cpp
-│   │   │   └── windows
-│   │   │       └── ipc.cpp
-│   │   ├── tests
-│   │   │   └── ipc_test.cpp
-│   │   └── CMakeLists.txt
+│   │   │   │   ├── io.cpp
+│   │   │   │   ├── io.h
+│   │   │   │   ├── ipc.cpp
+│   │   │   │   └── resource.h
+│   │   │   ├── windows
+│   │   │   │   ├── io.cpp
+│   │   │   │   ├── io.h
+│   │   │   │   ├── ipc.cpp
+│   │   │   │   └── resource.h
+│   │   │   ├── error.cpp
+│   │   │   ├── error.h
+│   │   │   ├── framing.cpp
+│   │   │   └── framing.h
+│   │   ├── test
+│   │   │   ├── error_test.cpp
+│   │   │   ├── ipc_test.cpp
+│   │   │   ├── protocol_test.cpp
+│   │   │   └── test_support.h
+│   │   ├── CMakeLists.txt
+│   │   └── README.md
 │   ├── ipc-client
 │   │   ├── src
+│   │   │   ├── transport
+│   │   │   │   ├── connection.ts
+│   │   │   │   ├── endpoint.ts
+│   │   │   │   └── server.ts
 │   │   │   ├── client.ts
 │   │   │   ├── codec.ts
+│   │   │   ├── error.ts
 │   │   │   ├── index.ts
 │   │   │   └── ipc.ts
+│   │   ├── test
+│   │   │   ├── connection.test.mjs
+│   │   │   ├── error.test.mjs
+│   │   │   ├── integration.test.mjs
+│   │   │   ├── server.test.mjs
+│   │   │   └── support.mjs
 │   │   ├── .gitignore
 │   │   ├── package-lock.json
 │   │   ├── package.json
-│   │   └── tsconfig.json
-│   ├── plugin_loader
-│   │   ├── src
-│   │   │   ├── loader
-│   │   │   │   ├── handles.ts
-│   │   │   │   ├── invoke.ts
-│   │   │   │   ├── manifest.ts
-│   │   │   │   ├── module.ts
-│   │   │   │   ├── registry.ts
-│   │   │   │   ├── schema.ts
-│   │   │   │   └── types.ts
-│   │   │   ├── api.ts
-│   │   │   ├── index.ts
-│   │   │   ├── loader.ts
-│   │   │   ├── plugin.schema.json
-│   │   │   ├── plugin.ts
-│   │   │   └── result.ts
-│   │   ├── tests
-│   │   │   ├── error-api.test.mjs
-│   │   │   └── loader.test.mjs
-│   │   ├── package-lock.json
-│   │   ├── package.json
-│   │   ├── plugin.json
 │   │   ├── README.md
 │   │   └── tsconfig.json
 │   ├── provider
 │   │   ├── codegen
 │   │   │   ├── emit_usage_parser.cpp
 │   │   │   ├── emit_usage_parser.h
-│   │   │   └── generate_provider_types.cpp
+│   │   │   ├── generate_provider_types.cpp
+│   │   │   ├── schema.cpp
+│   │   │   └── schema.h
 │   │   ├── include
 │   │   │   └── provider
 │   │   ├── src
@@ -239,10 +246,15 @@ homegrowh_harness/
 │   │   │   │   ├── build_transcript.cpp
 │   │   │   │   ├── buld_transcript.h
 │   │   │   │   ├── compaction.cpp
-│   │   │   │   ├── compaction.h
-│   │   │   │   └── COMPACTION.md
+│   │   │   │   └── compaction.h
+│   │   │   ├── error
+│   │   │   │   ├── capture.cpp
+│   │   │   │   ├── capture.h
+│   │   │   │   ├── error.cpp
+│   │   │   │   └── error.h
 │   │   │   ├── request
 │   │   │   │   ├── provider_types.json
+│   │   │   │   ├── request_state.cpp
 │   │   │   │   ├── request_state.h
 │   │   │   │   ├── requests.cpp
 │   │   │   │   ├── requests.h
@@ -252,13 +264,20 @@ homegrowh_harness/
 │   │   │       ├── stream.cpp
 │   │   │       └── stream.h
 │   │   ├── tests
-│   │   │   └── call_llm.cpp
+│   │   │   ├── call_llm.cpp
+│   │   │   ├── error_schema_test.cpp
+│   │   │   └── run_error_tests.py
 │   │   ├── .gitignore
-│   │   └── CMakeLists.txt
+│   │   ├── CMakeLists.txt
+│   │   └── README.md
 │   ├── sandbox
 │   │   ├── include
 │   │   │   └── sandbox
 │   │   ├── src
+│   │   │   ├── error
+│   │   │   │   ├── capture.cpp
+│   │   │   │   ├── error.cpp
+│   │   │   │   └── error.h
 │   │   │   ├── linux
 │   │   │   │   ├── filesystem.cpp
 │   │   │   │   ├── filesystem.h
@@ -270,6 +289,8 @@ homegrowh_harness/
 │   │   │   │   ├── process.h
 │   │   │   │   ├── state.cpp
 │   │   │   │   └── state.h
+│   │   │   ├── process
+│   │   │   │   └── io_failure.h
 │   │   │   ├── window
 │   │   │   │   ├── acl.cpp
 │   │   │   │   ├── acl.h
@@ -290,28 +311,37 @@ homegrowh_harness/
 │   │   │   ├── apply_config.cpp
 │   │   │   ├── apply_config.h
 │   │   │   ├── config.cpp
+│   │   │   ├── error_schema.h
 │   │   │   ├── filesystem.cpp
 │   │   │   ├── filesystem_access.h
 │   │   │   ├── process.cpp
 │   │   │   ├── registry.cpp
 │   │   │   └── registry.h
 │   │   ├── tests
+│   │   │   ├── error_schema_test.cpp
 │   │   │   ├── process_test.cpp
 │   │   │   └── registry_test.cpp
-│   │   └── CmakeLists.txt
+│   │   ├── CmakeLists.txt
+│   │   └── README.md
 │   ├── secrets
 │   │   ├── include
 │   │   │   └── secrets
 │   │   ├── src
 │   │   │   ├── credential
 │   │   │   │   ├── credential.cpp
-│   │   │   │   └── credential.h
+│   │   │   │   ├── credential.h
+│   │   │   │   └── validation.h
+│   │   │   ├── error
+│   │   │   │   └── error.h
 │   │   │   ├── memory
 │   │   │   │   ├── secure_string.cpp
-│   │   │   │   └── secure_string.h
+│   │   │   │   ├── secure_string.h
+│   │   │   │   └── wipe.h
 │   │   │   └── platform
 │   │   │       ├── linux
 │   │   │       │   └── credential
+│   │   │       │       ├── keyutils_api.cpp
+│   │   │       │       ├── keyutils_api.h
 │   │   │       │       ├── linux_credential.cpp
 │   │   │       │       └── linux_credential.h
 │   │   │       └── windows
@@ -319,22 +349,44 @@ homegrowh_harness/
 │   │   │               ├── windows_credential.cpp
 │   │   │               └── windows_credential.h
 │   │   ├── tests
-│   │   │   └── credential_test.cpp
+│   │   │   ├── fakes
+│   │   │   │   └── dlfcn.h
+│   │   │   ├── credential_test.cpp
+│   │   │   └── linux_api_test.cpp
 │   │   └── CMakeLists.txt
 │   ├── tool_runtime
 │   │   ├── include
+│   │   │   └── tool_runtime
+│   │   │       └── tool_runtime.h
 │   │   ├── src
 │   │   │   └── tool_runtime
+│   │   │       ├── error
+│   │   │       │   ├── error.cpp
+│   │   │       │   └── error.h
+│   │   │       ├── platform
+│   │   │       │   ├── environment.cpp
+│   │   │       │   ├── platform.cpp
+│   │   │       │   └── platform.h
 │   │   │       ├── process
+│   │   │       │   ├── linux
+│   │   │       │   │   └── process.cpp
+│   │   │       │   ├── windows
+│   │   │       │   │   └── process.cpp
 │   │   │       │   ├── process.cpp
 │   │   │       │   └── process.h
 │   │   │       ├── runtime
 │   │   │       │   ├── execution.cpp
+│   │   │       │   ├── response.cpp
+│   │   │       │   ├── response.h
 │   │   │       │   ├── runtime.cpp
 │   │   │       │   └── runtime.h
 │   │   │       └── tool_runtime.cpp
 │   │   ├── tests
-│   │   └── CMakeLists.txt
+│   │   │   ├── process_fixture.cpp
+│   │   │   ├── protocol_tests.py
+│   │   │   └── tool_runtime_tests.cpp
+│   │   ├── CMakeLists.txt
+│   │   └── README.md
 │   └── tools
 │       ├── src
 │       │   ├── _runtime
@@ -380,6 +432,36 @@ homegrowh_harness/
 │       ├── package.json
 │       └── tsconfig.json
 ├── package
+│   ├── plugin_loader
+│   │   ├── src
+│   │   │   ├── error
+│   │   │   │   └── values.ts
+│   │   │   ├── loader
+│   │   │   │   ├── handles.ts
+│   │   │   │   ├── invoke.ts
+│   │   │   │   ├── manifest.ts
+│   │   │   │   ├── module.ts
+│   │   │   │   ├── registry.ts
+│   │   │   │   ├── schema.ts
+│   │   │   │   └── types.ts
+│   │   │   ├── api.ts
+│   │   │   ├── error.ts
+│   │   │   ├── error_queue.ts
+│   │   │   ├── index.ts
+│   │   │   ├── loader.ts
+│   │   │   ├── plugin.schema.json
+│   │   │   ├── plugin.ts
+│   │   │   └── result.ts
+│   │   ├── tests
+│   │   │   ├── error-api.test.mjs
+│   │   │   ├── error.test.mjs
+│   │   │   ├── error_helpers.mjs
+│   │   │   └── loader.test.mjs
+│   │   ├── package-lock.json
+│   │   ├── package.json
+│   │   ├── plugin.json
+│   │   ├── README.md
+│   │   └── tsconfig.json
 │   └── sessions
 │       ├── excutable
 │       │   ├── loop
@@ -394,6 +476,7 @@ homegrowh_harness/
 │       │       ├── config_parser.h
 │       │       ├── event_forwarder.cpp
 │       │       ├── event_forwarder.h
+│       │       ├── ipc_failure.h
 │       │       ├── main.cpp
 │       │       ├── runtime.cpp
 │       │       ├── runtime.h
@@ -405,11 +488,14 @@ homegrowh_harness/
 │       │       ├── wire_json.cpp
 │       │       └── wire_json.h
 │       ├── include
-│       │   └── sessions
+│       │   └── session
 │       ├── src
 │       │   ├── context
 │       │   │   ├── context.cpp
 │       │   │   └── context.h
+│       │   ├── error
+│       │   │   ├── error.h
+│       │   │   └── event_port.h
 │       │   ├── loop
 │       │   │   ├── full_loop.cpp
 │       │   │   └── loop.h
@@ -443,6 +529,7 @@ homegrowh_harness/
 │       ├── tests
 │       │   ├── context_usage_test.cpp
 │       │   ├── request_test.cpp
+│       │   ├── secret_error_test.cpp
 │       │   ├── stage_api_test.cpp
 │       │   ├── tool_call_test.cpp
 │       │   └── tool_stream_parser_test.cpp
@@ -450,7 +537,25 @@ homegrowh_harness/
 ├── plugins
 │   └── session-api
 │       ├── src
-│       │   └── index.ts
+│       │   ├── runtime
+│       │   │   ├── entry.ts
+│       │   │   ├── host.ts
+│       │   │   ├── process.ts
+│       │   │   └── reader.ts
+│       │   ├── commands.ts
+│       │   ├── error.ts
+│       │   ├── events.ts
+│       │   ├── index.ts
+│       │   └── runtime.ts
+│       ├── test
+│       │   ├── fixtures
+│       │   │   └── runtime.mjs
+│       │   ├── commands.test.mjs
+│       │   ├── events.test.mjs
+│       │   ├── integration.test.mjs
+│       │   ├── plugin.test.mjs
+│       │   ├── runtime.test.mjs
+│       │   └── support.mjs
 │       ├── package-lock.json
 │       ├── package.json
 │       ├── plugin.json

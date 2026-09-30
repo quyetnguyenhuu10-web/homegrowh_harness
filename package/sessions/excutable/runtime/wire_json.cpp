@@ -1,8 +1,9 @@
 #include "wire_json.h"
+#include "ipc_failure.h"
+#include <session>
+#include <error/error.h>
 
-#include <filesystem>
 #include <optional>
-#include <system_error>
 #include <utility>
 #include <variant>
 
@@ -10,6 +11,34 @@ namespace sessions_runtime
 {
     namespace
     {
+        sessions::Error runtime_error(
+            std::exception_ptr error, std::string_view operation)
+        {
+            if (error == nullptr)
+                return sessions::detail::exception_error(operation, error, "session_runtime");
+
+            try
+            {
+                std::rethrow_exception(error);
+            }
+            catch (const IpcFailure& exception)
+            {
+                return sessions::detail::convert_error<sessions::Error>(ipc::Error(exception.error()));
+            }
+            catch (const std::exception& exception)
+            {
+                return sessions::detail::exception_error(operation, exception, "session_runtime",
+                    [operation](std::exception_ptr nested)
+                    {
+                        return runtime_error(std::move(nested), operation);
+                    });
+            }
+            catch (...)
+            {
+                return sessions::detail::exception_error(operation, error, "session_runtime");
+            }
+        }
+
         template <typename T>
         void put_optional(
             nlohmann::json& target,
@@ -181,51 +210,9 @@ namespace sessions_runtime
         return nlohmann::json{{"state", "unavailable"}};
     }
 
-    nlohmann::json error_json(std::exception_ptr error)
+    nlohmann::json error_json(
+        std::exception_ptr error, std::string_view operation)
     {
-        if (error == nullptr)
-            return nlohmann::json{{"message", nullptr}};
-
-        try
-        {
-            std::rethrow_exception(error);
-        }
-        catch (const std::filesystem::filesystem_error& exception)
-        {
-            nlohmann::json result = {
-                {"kind", "filesystem_error"},
-                {"message", exception.what()},
-                {"code", exception.code().value()},
-                {"category", exception.code().category().name()}
-            };
-            if (!exception.path1().empty())
-                result["path1"] = exception.path1().string();
-            if (!exception.path2().empty())
-                result["path2"] = exception.path2().string();
-            return result;
-        }
-        catch (const std::system_error& exception)
-        {
-            return nlohmann::json{
-                {"kind", "system_error"},
-                {"message", exception.what()},
-                {"code", exception.code().value()},
-                {"category", exception.code().category().name()}
-            };
-        }
-        catch (const std::exception& exception)
-        {
-            return nlohmann::json{
-                {"kind", "exception"},
-                {"message", exception.what()}
-            };
-        }
-        catch (...)
-        {
-            return nlohmann::json{
-                {"kind", "unknown"},
-                {"message", nullptr}
-            };
-        }
+        return runtime_error(std::move(error), operation);
     }
 }

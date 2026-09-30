@@ -1,5 +1,6 @@
 #include "filesystem.h"
 
+#include "../error_schema.h"
 #include "identity.h"
 #include "state.h"
 
@@ -23,7 +24,13 @@ namespace sandbox::detail::filesystem::linux
             const auto status = std::filesystem::symlink_status(path, error);
             if (error)
             {
-                path_errors.push_back({path, error});
+                path_errors.push_back({
+                    path,
+                    sandbox::detail::make_system_error(
+                        "std::filesystem::symlink_status",
+                        error,
+                        path),
+                });
                 return false;
             }
 
@@ -31,7 +38,10 @@ namespace sandbox::detail::filesystem::linux
             {
                 path_errors.push_back({
                     path,
-                    std::error_code(ENOTSUP, std::generic_category()),
+                    sandbox::detail::make_system_error(
+                        "inspect_registry_path",
+                        std::error_code(ENOTSUP, std::generic_category()),
+                        path),
                 });
                 return false;
             }
@@ -41,14 +51,23 @@ namespace sandbox::detail::filesystem::linux
                 const auto links = std::filesystem::hard_link_count(path, error);
                 if (error)
                 {
-                    path_errors.push_back({path, error});
+                    path_errors.push_back({
+                        path,
+                        sandbox::detail::make_system_error(
+                            "std::filesystem::hard_link_count",
+                            error,
+                            path),
+                    });
                     return false;
                 }
                 if (links > 1)
                 {
                     path_errors.push_back({
                         path,
-                        std::error_code(ENOTSUP, std::generic_category()),
+                        sandbox::detail::make_system_error(
+                            "inspect_registry_path",
+                            std::error_code(ENOTSUP, std::generic_category()),
+                            path),
                     });
                     return false;
                 }
@@ -57,7 +76,10 @@ namespace sandbox::detail::filesystem::linux
             {
                 path_errors.push_back({
                     path,
-                    std::error_code(ENOTSUP, std::generic_category()),
+                    sandbox::detail::make_system_error(
+                        "inspect_registry_path",
+                        std::error_code(ENOTSUP, std::generic_category()),
+                        path),
                 });
                 return false;
             }
@@ -75,7 +97,13 @@ namespace sandbox::detail::filesystem::linux
             const std::filesystem::recursive_directory_iterator end;
             if (iterator_error)
             {
-                path_errors.push_back({root, iterator_error});
+                path_errors.push_back({
+                    root,
+                    sandbox::detail::make_system_error(
+                        "recursive_directory_iterator",
+                        iterator_error,
+                        root),
+                });
                 return;
             }
 
@@ -88,13 +116,27 @@ namespace sandbox::detail::filesystem::linux
                     if (iterator->is_directory(directory_error))
                         iterator.disable_recursion_pending();
                     if (directory_error)
-                        path_errors.push_back({path, directory_error});
+                    {
+                        path_errors.push_back({
+                            path,
+                            sandbox::detail::make_system_error(
+                                "directory_entry::is_directory",
+                                directory_error,
+                                path),
+                        });
+                    }
                 }
 
                 iterator.increment(iterator_error);
                 if (iterator_error)
                 {
-                    path_errors.push_back({path, iterator_error});
+                    path_errors.push_back({
+                        path,
+                        sandbox::detail::make_system_error(
+                            "recursive_directory_iterator::increment",
+                            iterator_error,
+                            path),
+                    });
                     iterator_error.clear();
                 }
             }
@@ -161,10 +203,14 @@ namespace sandbox::detail::filesystem::linux
                 request.access);
             if (existing == nullptr)
             {
-                throw std::system_error(
-                    ENOENT,
-                    std::generic_category(),
-                    "sandbox filesystem policy is not registered");
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "reuse_filesystem_policy",
+                        "not_registered",
+                        "sandbox filesystem policy is not registered",
+                        {{{"path", sandbox::detail::error_path_text(canonical_path)},
+                          {"code", ENOENT},
+                          {"category", std::generic_category().name()}}}));
             }
 
             const std::wstring expected = policy_identity(
@@ -172,8 +218,12 @@ namespace sandbox::detail::filesystem::linux
                 request.access);
             if (existing->policy_name != expected)
             {
-                throw std::runtime_error(
-                    "sandbox registry state policy identity mismatch");
+                sandbox::detail::throw_error(
+                    sandbox::detail::make_error(
+                        "reuse_filesystem_policy",
+                        "identity_mismatch",
+                        "sandbox registry state policy identity mismatch",
+                        {{{"path", sandbox::detail::error_path_text(canonical_path)}}}));
             }
 
             return registered_permission{
@@ -209,9 +259,14 @@ namespace sandbox::detail::filesystem::linux
                 if (permission)
                     result.permissions.push_back(std::move(*permission));
             }
-            catch (const std::system_error& exception)
+            catch (...)
             {
-                result.path_errors.push_back({request.path, exception.code()});
+                result.path_errors.push_back({
+                    request.path,
+                    sandbox::detail::capture_exception(
+                        "refresh_filesystem_policy", std::current_exception(),
+                        {{"path", sandbox::detail::error_path_text(request.path)}}),
+                });
             }
         }
 
@@ -219,9 +274,11 @@ namespace sandbox::detail::filesystem::linux
         {
             save_registry_state(state_path, state);
         }
-        catch (const std::system_error& exception)
+        catch (...)
         {
-            result.final_error = exception.code();
+            result.final_error = sandbox::detail::capture_exception(
+                "save_registry_state", std::current_exception(),
+                {{"path", sandbox::detail::error_path_text(state_path)}});
         }
         return result;
     }
@@ -249,9 +306,14 @@ namespace sandbox::detail::filesystem::linux
                 if (permission)
                     result.permissions.push_back(std::move(*permission));
             }
-            catch (const std::system_error& exception)
+            catch (...)
             {
-                result.path_errors.push_back({request.path, exception.code()});
+                result.path_errors.push_back({
+                    request.path,
+                    sandbox::detail::capture_exception(
+                        "reuse_filesystem_policy", std::current_exception(),
+                        {{"path", sandbox::detail::error_path_text(request.path)}}),
+                });
             }
         }
         return result;
@@ -265,9 +327,14 @@ namespace sandbox::detail::filesystem::linux
         {
             canonical_path = canonical_existing_path(path);
         }
-        catch (const std::system_error& exception)
+        catch (...)
         {
-            result.path_errors.push_back({path, exception.code()});
+            result.path_errors.push_back({
+                path,
+                sandbox::detail::capture_exception(
+                    "canonical_existing_path", std::current_exception(),
+                        {{"path", sandbox::detail::error_path_text(path)}}),
+            });
             return result;
         }
         const std::string wanted_path = canonical_path.native();
@@ -289,9 +356,11 @@ namespace sandbox::detail::filesystem::linux
         {
             save_registry_state(state_path, state);
         }
-        catch (const std::system_error& exception)
+        catch (...)
         {
-            result.final_error = exception.code();
+            result.final_error = sandbox::detail::capture_exception(
+                "save_registry_state", std::current_exception(),
+                {{"path", sandbox::detail::error_path_text(state_path)}});
         }
         return result;
     }
@@ -310,9 +379,11 @@ namespace sandbox::detail::filesystem::linux
         {
             save_registry_state(state_path, state);
         }
-        catch (const std::system_error& exception)
+        catch (...)
         {
-            result.final_error = exception.code();
+            result.final_error = sandbox::detail::capture_exception(
+                "save_registry_state", std::current_exception(),
+                {{"path", sandbox::detail::error_path_text(state_path)}});
         }
         return result;
     }

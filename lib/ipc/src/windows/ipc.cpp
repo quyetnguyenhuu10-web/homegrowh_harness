@@ -1,17 +1,10 @@
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-
 #include <ipc>
 
-#include <Windows.h>
+#include "io.h"
+#include "resource.h"
 
-#include <array>
-#include <cstddef>
-#include <cstdint>
 #include <limits>
 #include <mutex>
-#include <string>
 #include <utility>
 
 namespace ipc
@@ -19,565 +12,238 @@ namespace ipc
     namespace
     {
         constexpr DWORD pipe_buffer_size = 64 * 1024;
-        constexpr std::uint32_t max_message_size = 16 * 1024 * 1024;
-
-        std::error_code win32_error(DWORD error) noexcept
-        {
-            return std::error_code(
-                static_cast<int>(error),
-                std::system_category());
-        }
-
-        std::error_code validate_name(const std::string& name) noexcept
-        {
-            if (name.empty()
-                || name.find('\0') != std::string::npos
-                || name.find('\\') != std::string::npos
-                || name.find('/') != std::string::npos)
-            {
-                return std::make_error_code(std::errc::invalid_argument);
-            }
-            return {};
-        }
 
         struct path_result
         {
-            std::wstring value;
-            std::error_code error;
+            std::wstring wide;
+            std::string value;
+            std::optional<Error> error;
         };
 
-        path_result pipe_path(const std::string& name)
+        path_result pipe_path(const std::string& name, std::string_view operation)
         {
-            path_result result;
-            result.error = validate_name(name);
-            if (result.error)
-                return result;
+            if (auto error = detail::validate_name(name, operation))
+                return {{}, {}, std::move(error)};
+            if (name.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)()))
+                return {{}, {}, detail::make_error(operation, "validation_error",
+                    "Endpoint name exceeds UTF-8 conversion capacity", {{"size", name.size()}})};
 
-            const int count = MultiByteToWideChar(
-                CP_UTF8,
-                MB_ERR_INVALID_CHARS,
-                name.data(),
-                static_cast<int>(name.size()),
-                nullptr,
-                0);
+            const int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                name.data(), static_cast<int>(name.size()), nullptr, 0);
             if (count == 0)
             {
-                result.error = win32_error(GetLastError());
-                return result;
+                const DWORD code = GetLastError();
+                // Keep even invalid UTF-8 losslessly serializable as bytes.
+                return {{}, {}, detail::win32_error(operation, code, "MultiByteToWideChar",
+                    {{"encoding", "utf-8"}, {"name_bytes", std::vector<std::uint8_t>(name.begin(), name.end())}})};
             }
-
             std::wstring wide(static_cast<std::size_t>(count), L'\0');
-            if (MultiByteToWideChar(
-                    CP_UTF8,
-                    MB_ERR_INVALID_CHARS,
-                    name.data(),
-                    static_cast<int>(name.size()),
-                    wide.data(),
-                    count) == 0)
+            if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS,
+                    name.data(), static_cast<int>(name.size()), wide.data(), count) == 0)
             {
-                result.error = win32_error(GetLastError());
-                return result;
+                const DWORD code = GetLastError();
+                return {{}, {}, detail::win32_error(operation, code, "MultiByteToWideChar", {{"name", name}})};
             }
-
-            result.value = L"\\\\.\\pipe\\" + wide;
-            return result;
+            return {L"\\\\.\\pipe\\" + wide, "\\\\.\\pipe\\" + name, std::nullopt};
         }
 
         struct handle_result
         {
-            HANDLE value = INVALID_HANDLE_VALUE;
-            std::error_code error;
+            detail::unique_handle value;
+            std::optional<Error> error;
         };
 
-        handle_result create_pipe(const std::wstring& path, bool first) noexcept
+        handle_result create_pipe(
+            const std::wstring& path, const std::string& path_text,
+            std::string_view operation, bool first)
         {
             const DWORD open_mode = PIPE_ACCESS_DUPLEX
                 | (first ? FILE_FLAG_FIRST_PIPE_INSTANCE : 0);
-
-            const HANDLE handle = CreateNamedPipeW(
-                path.c_str(),
-                open_mode,
+            const HANDLE created = CreateNamedPipeW(path.c_str(), open_mode,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                PIPE_UNLIMITED_INSTANCES,
-                pipe_buffer_size,
-                pipe_buffer_size,
-                0,
-                nullptr);
-            if (handle == INVALID_HANDLE_VALUE)
-                return {INVALID_HANDLE_VALUE, win32_error(GetLastError())};
-            return {handle, {}};
-        }
-
-        void close_handle(HANDLE& handle) noexcept
-        {
-            if (handle != INVALID_HANDLE_VALUE)
-                CloseHandle(handle);
-            handle = INVALID_HANDLE_VALUE;
-        }
-
-        std::array<std::uint8_t, 4> encode_size(std::uint32_t size) noexcept
-        {
-            std::array<std::uint8_t, 4> bytes{};
-            for (std::size_t index = 0; index < bytes.size(); ++index)
+                PIPE_UNLIMITED_INSTANCES, pipe_buffer_size, pipe_buffer_size, 0, nullptr);
+            if (created == INVALID_HANDLE_VALUE)
             {
-                bytes[index] = static_cast<std::uint8_t>(
-                    (size >> (index * 8)) & 0xffu);
+                const DWORD code = GetLastError();
+                return {{}, detail::win32_error(operation, code, "CreateNamedPipeW", {{"path", path_text}})};
             }
-            return bytes;
+            return {detail::unique_handle(created), std::nullopt};
         }
 
-        std::uint32_t decode_size(const std::array<std::uint8_t, 4>& bytes) noexcept
+        void cleanup_handle(
+            detail::unique_handle& handle, std::string_view operation,
+            const std::string& path, std::optional<Error>& error)
         {
-            std::uint32_t size = 0;
-            for (std::size_t index = 0; index < bytes.size(); ++index)
-                size |= static_cast<std::uint32_t>(bytes[index]) << (index * 8);
-            return size;
-        }
-
-        bool peer_closed_error(DWORD error) noexcept
-        {
-            return error == ERROR_BROKEN_PIPE
-                || error == ERROR_NO_DATA
-                || error == ERROR_PIPE_NOT_CONNECTED;
-        }
-
-        struct exact_read_result
-        {
-            bool closed = false;
-            std::error_code error;
-        };
-
-        struct event_handle final
-        {
-            event_handle() noexcept
-                : value(CreateEventW(nullptr, TRUE, FALSE, nullptr))
-            {
-            }
-
-            ~event_handle()
-            {
-                if (value != nullptr)
-                    CloseHandle(value);
-            }
-
-            event_handle(const event_handle&) = delete;
-            event_handle& operator=(const event_handle&) = delete;
-
-            HANDLE value = nullptr;
-        };
-
-        exact_read_result read_exact_overlapped(
-            HANDLE handle,
-            void* output,
-            std::size_t size) noexcept
-        {
-            auto* bytes = static_cast<unsigned char*>(output);
-            std::size_t offset = 0;
-            while (offset < size)
-            {
-                const std::size_t remaining = size - offset;
-                const DWORD request = static_cast<DWORD>(
-                    (std::min)(remaining,
-                        static_cast<std::size_t>((std::numeric_limits<DWORD>::max)())));
-
-                event_handle event;
-                if (event.value == nullptr)
-                    return {false, win32_error(GetLastError())};
-
-                OVERLAPPED overlapped{};
-                overlapped.hEvent = event.value;
-
-                const BOOL started = ReadFile(
-                    handle,
-                    bytes + offset,
-                    request,
-                    nullptr,
-                    &overlapped);
-                if (!started)
-                {
-                    const DWORD error = GetLastError();
-                    if (peer_closed_error(error) && offset == 0)
-                        return {true, {}};
-                    if (error != ERROR_IO_PENDING)
-                        return {false, win32_error(error)};
-                }
-
-                DWORD received = 0;
-                if (!GetOverlappedResult(
-                        handle,
-                        &overlapped,
-                        &received,
-                        TRUE))
-                {
-                    const DWORD error = GetLastError();
-                    if (peer_closed_error(error) && offset == 0)
-                        return {true, {}};
-                    return {false, win32_error(error)};
-                }
-
-                if (received == 0)
-                {
-                    if (offset == 0)
-                        return {true, {}};
-                    return {
-                        false,
-                        std::make_error_code(std::errc::protocol_error)
-                    };
-                }
-                offset += received;
-            }
-            return {};
-        }
-
-        exact_read_result read_exact(
-            HANDLE handle,
-            void* output,
-            std::size_t size,
-            bool overlapped) noexcept
-        {
-            if (overlapped)
-                return read_exact_overlapped(handle, output, size);
-
-            auto* bytes = static_cast<unsigned char*>(output);
-            std::size_t offset = 0;
-            while (offset < size)
-            {
-                const std::size_t remaining = size - offset;
-                const DWORD request = static_cast<DWORD>(
-                    (std::min)(remaining,
-                        static_cast<std::size_t>((std::numeric_limits<DWORD>::max)())));
-
-                DWORD received = 0;
-                if (!ReadFile(handle, bytes + offset, request, &received, nullptr))
-                {
-                    const DWORD error = GetLastError();
-                    if (peer_closed_error(error) && offset == 0)
-                        return {true, {}};
-                    return {false, win32_error(error)};
-                }
-
-                if (received == 0)
-                {
-                    if (offset == 0)
-                        return {true, {}};
-                    return {
-                        false,
-                        std::make_error_code(std::errc::protocol_error)
-                    };
-                }
-                offset += received;
-            }
-            return {};
-        }
-
-        std::error_code write_exact_overlapped(
-            HANDLE handle,
-            const void* input,
-            std::size_t size) noexcept
-        {
-            const auto* bytes = static_cast<const unsigned char*>(input);
-            std::size_t offset = 0;
-            while (offset < size)
-            {
-                const std::size_t remaining = size - offset;
-                const DWORD request = static_cast<DWORD>(
-                    (std::min)(remaining,
-                        static_cast<std::size_t>((std::numeric_limits<DWORD>::max)())));
-
-                event_handle event;
-                if (event.value == nullptr)
-                    return win32_error(GetLastError());
-
-                OVERLAPPED overlapped{};
-                overlapped.hEvent = event.value;
-
-                const BOOL started = WriteFile(
-                    handle,
-                    bytes + offset,
-                    request,
-                    nullptr,
-                    &overlapped);
-                if (!started)
-                {
-                    const DWORD error = GetLastError();
-                    if (error != ERROR_IO_PENDING)
-                        return win32_error(error);
-                }
-
-                DWORD written = 0;
-                if (!GetOverlappedResult(
-                        handle,
-                        &overlapped,
-                        &written,
-                        TRUE))
-                {
-                    return win32_error(GetLastError());
-                }
-                if (written == 0)
-                    return std::make_error_code(std::errc::io_error);
-                offset += written;
-            }
-            return {};
-        }
-
-        std::error_code write_exact(
-            HANDLE handle,
-            const void* input,
-            std::size_t size,
-            bool overlapped) noexcept
-        {
-            if (overlapped)
-                return write_exact_overlapped(handle, input, size);
-
-            const auto* bytes = static_cast<const unsigned char*>(input);
-            std::size_t offset = 0;
-            while (offset < size)
-            {
-                const std::size_t remaining = size - offset;
-                const DWORD request = static_cast<DWORD>(
-                    (std::min)(remaining,
-                        static_cast<std::size_t>((std::numeric_limits<DWORD>::max)())));
-
-                DWORD written = 0;
-                if (!WriteFile(handle, bytes + offset, request, &written, nullptr))
-                    return win32_error(GetLastError());
-                if (written == 0)
-                    return std::make_error_code(std::errc::io_error);
-                offset += written;
-            }
-            return {};
+            const DWORD code = handle.close();
+            if (code != ERROR_SUCCESS)
+                detail::add_cleanup_error(error,
+                    detail::win32_error(operation, code, "CloseHandle", {{"path", path}}));
         }
     }
 
     struct server::impl final
     {
-        impl(std::wstring path_value, HANDLE pending_value) noexcept
-            : path(std::move(path_value)), pending(pending_value)
-        {
-        }
-
-        ~impl()
-        {
-            close_handle(pending);
-        }
+        impl(std::wstring&& path_value, std::string&& path_text_value,
+            detail::unique_handle&& pending_value) noexcept
+            : path(std::move(path_value)), path_text(std::move(path_text_value)),
+              pending(std::move(pending_value)) {}
 
         std::wstring path;
-        HANDLE pending = INVALID_HANDLE_VALUE;
+        std::string path_text;
+        detail::unique_handle pending;
     };
 
     struct connection::impl final
     {
-        explicit impl(HANDLE value, bool overlapped_value) noexcept
-            : handle(value), overlapped(overlapped_value)
-        {
-        }
+        impl(detail::unique_handle&& handle_value, std::string&& path_value,
+            bool overlapped_value) noexcept
+            : handle(std::move(handle_value)), path(std::move(path_value)),
+              overlapped(overlapped_value) {}
 
-        ~impl()
-        {
-            close_handle(handle);
-        }
-
-        HANDLE handle = INVALID_HANDLE_VALUE;
+        detail::unique_handle handle;
+        std::string path;
         bool overlapped = false;
         std::mutex read_mutex;
         std::mutex write_mutex;
     };
 
     server::server() noexcept = default;
-    server::server(std::unique_ptr<impl>&& implementation) noexcept
-        : impl_(std::move(implementation))
-    {
-    }
+    server::server(std::unique_ptr<impl>&& implementation) noexcept : impl_(std::move(implementation)) {}
     server::server(server&&) noexcept = default;
     server& server::operator=(server&&) noexcept = default;
     server::~server() = default;
-
     connection::connection() noexcept = default;
-    connection::connection(std::unique_ptr<impl>&& implementation) noexcept
-        : impl_(std::move(implementation))
-    {
-    }
+    connection::connection(std::unique_ptr<impl>&& implementation) noexcept : impl_(std::move(implementation)) {}
     connection::connection(connection&&) noexcept = default;
     connection& connection::operator=(connection&&) noexcept = default;
     connection::~connection() = default;
 
-    server_result listen(std::string name)
+    server_result listen(const std::string& name)
     {
         server_result result;
-        path_result path = pipe_path(name);
-        if (path.error)
+        detail::unique_handle pending;
+        path_result path;
+        try
         {
-            result.error = path.error;
-            return result;
+            path = pipe_path(name, "listen");
+            if (path.error)
+                return {{}, std::move(path.error)};
+            auto created = create_pipe(path.wide, path.value, "listen", true);
+            if (created.error)
+                return {{}, std::move(created.error)};
+            pending = std::move(created.value);
+            result.value = server(std::make_unique<server::impl>(
+                std::move(path.wide), std::move(path.value), std::move(pending)));
         }
-
-        handle_result created = create_pipe(path.value, true);
-        if (created.error)
+        catch (const std::exception& exception)
         {
-            result.error = created.error;
-            return result;
+            result.error = detail::make_exception_error("listen", exception, {{"name", name}, {"path", path.value}});
+            cleanup_handle(pending, "listen", path.value, result.error);
         }
-
-        result.value = server(std::make_unique<server::impl>(
-            std::move(path.value),
-            created.value));
         return result;
     }
 
     connection_result accept(server& listener)
     {
-        connection_result result;
         if (!listener.impl_)
+            return {{}, detail::make_error("accept", "validation_error", "Listener has no endpoint")};
+        connection_result result;
+        detail::unique_handle accepted;
+        const std::string& path = listener.impl_->path_text;
+        try
         {
-            result.error = std::make_error_code(std::errc::invalid_argument);
-            return result;
-        }
-
-        if (listener.impl_->pending == INVALID_HANDLE_VALUE)
-        {
-            handle_result created = create_pipe(listener.impl_->path, false);
-            if (created.error)
+            if (!listener.impl_->pending.valid())
             {
-                result.error = created.error;
-                return result;
+                auto created = create_pipe(listener.impl_->path, path, "accept", false);
+                if (created.error)
+                    return {{}, std::move(created.error)};
+                listener.impl_->pending = std::move(created.value);
             }
-            listener.impl_->pending = created.value;
-        }
-
-        const HANDLE accepted = listener.impl_->pending;
-        if (!ConnectNamedPipe(accepted, nullptr))
-        {
-            const DWORD error = GetLastError();
-            if (error != ERROR_PIPE_CONNECTED)
+            if (!ConnectNamedPipe(listener.impl_->pending.get(), nullptr))
             {
-                result.error = win32_error(error);
-                return result;
+                const DWORD code = GetLastError();
+                if (code != ERROR_PIPE_CONNECTED)
+                    return {{}, detail::win32_error("accept", code, "ConnectNamedPipe", {{"path", path}})};
             }
+            accepted = std::move(listener.impl_->pending);
+            std::string connection_path = path;
+            result.value = connection(std::make_unique<connection::impl>(
+                std::move(accepted), std::move(connection_path), false));
         }
-
-        listener.impl_->pending = INVALID_HANDLE_VALUE;
-        result.value = connection(
-            std::make_unique<connection::impl>(accepted, false));
+        catch (const std::exception& exception)
+        {
+            result.error = detail::make_exception_error("accept", exception, {{"path", path}});
+            cleanup_handle(accepted, "accept", path, result.error);
+        }
         return result;
     }
 
-    connection_result connect(std::string name)
+    connection_result connect(const std::string& name)
     {
         connection_result result;
-        path_result path = pipe_path(name);
-        if (path.error)
+        detail::unique_handle handle;
+        path_result path;
+        try
         {
-            result.error = path.error;
-            return result;
+            path = pipe_path(name, "connect");
+            if (path.error)
+                return {{}, std::move(path.error)};
+            const HANDLE created = CreateFileW(path.wide.c_str(),
+                GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, nullptr);
+            if (created == INVALID_HANDLE_VALUE)
+            {
+                const DWORD code = GetLastError();
+                return {{}, detail::win32_error("connect", code, "CreateFileW", {{"path", path.value}})};
+            }
+            handle = detail::unique_handle(created);
+            result.value = connection(std::make_unique<connection::impl>(
+                std::move(handle), std::move(path.value), true));
         }
-
-        const HANDLE handle = CreateFileW(
-            path.value.c_str(),
-            GENERIC_READ | GENERIC_WRITE,
-            0,
-            nullptr,
-            OPEN_EXISTING,
-            FILE_FLAG_OVERLAPPED,
-            nullptr);
-        if (handle == INVALID_HANDLE_VALUE)
+        catch (const std::exception& exception)
         {
-            result.error = win32_error(GetLastError());
-            return result;
+            result.error = detail::make_exception_error("connect", exception, {{"name", name}, {"path", path.value}});
+            cleanup_handle(handle, "connect", path.value, result.error);
         }
-
-        result.value = connection(
-            std::make_unique<connection::impl>(handle, true));
         return result;
     }
 
-    write_result write(
-        connection& target,
-        std::span<const std::uint8_t> data)
+    write_result write(connection& target, std::span<const std::uint8_t> data)
     {
-        write_result result;
         if (!target.impl_)
+            return {detail::make_error("write", "validation_error", "Connection has no endpoint")};
+        try
         {
-            result.error = std::make_error_code(std::errc::invalid_argument);
-            return result;
+            std::lock_guard lock(target.impl_->write_mutex);
+            return detail::write_frame(data, target.impl_->path,
+                [&](const void* input, std::size_t size, std::string_view phase)
+                {
+                    return detail::write_exact(target.impl_->handle.get(), input, size,
+                        target.impl_->overlapped, target.impl_->path, phase);
+                });
         }
-        if (data.size() > max_message_size)
+        catch (const std::exception& exception)
         {
-            result.error = std::make_error_code(std::errc::message_size);
-            return result;
+            return {detail::make_exception_error("write", exception, {{"path", target.impl_->path}})};
         }
-
-        std::lock_guard lock(target.impl_->write_mutex);
-        const auto header = encode_size(static_cast<std::uint32_t>(data.size()));
-        result.error = write_exact(
-            target.impl_->handle,
-            header.data(),
-            header.size(),
-            target.impl_->overlapped);
-        if (result.error || data.empty())
-            return result;
-
-        result.error = write_exact(
-            target.impl_->handle,
-            data.data(),
-            data.size(),
-            target.impl_->overlapped);
-        return result;
     }
 
     read_result read(connection& source)
     {
-        read_result result;
         if (!source.impl_)
+            return {{}, false, detail::make_error("read", "validation_error", "Connection has no endpoint")};
+        try
         {
-            result.error = std::make_error_code(std::errc::invalid_argument);
-            return result;
+            std::lock_guard lock(source.impl_->read_mutex);
+            return detail::read_frame(source.impl_->path,
+                [&](void* output, std::size_t size, std::string_view phase)
+                {
+                    return detail::read_exact(source.impl_->handle.get(), output, size,
+                        source.impl_->overlapped, source.impl_->path, phase);
+                });
         }
-
-        std::lock_guard lock(source.impl_->read_mutex);
-        std::array<std::uint8_t, 4> header{};
-        exact_read_result header_read = read_exact(
-            source.impl_->handle,
-            header.data(),
-            header.size(),
-            source.impl_->overlapped);
-        if (header_read.closed)
+        catch (const std::exception& exception)
         {
-            result.closed = true;
-            return result;
+            return {{}, false, detail::make_exception_error("read", exception, {{"path", source.impl_->path}})};
         }
-        if (header_read.error)
-        {
-            result.error = header_read.error;
-            return result;
-        }
-
-        const std::uint32_t size = decode_size(header);
-        if (size > max_message_size)
-        {
-            result.error = std::make_error_code(std::errc::message_size);
-            return result;
-        }
-
-        result.data.resize(size);
-        if (result.data.empty())
-            return result;
-
-        exact_read_result payload_read = read_exact(
-            source.impl_->handle,
-            result.data.data(),
-            result.data.size(),
-            source.impl_->overlapped);
-        if (payload_read.closed)
-        {
-            result.data.clear();
-            result.error = std::make_error_code(std::errc::protocol_error);
-            return result;
-        }
-        if (payload_read.error)
-        {
-            result.data.clear();
-            result.error = payload_read.error;
-        }
-        return result;
     }
 }

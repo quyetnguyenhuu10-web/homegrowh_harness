@@ -1,6 +1,7 @@
 import { readdir } from "node:fs/promises";
 import path from "node:path";
 import type { PluginHandle } from "../plugin.js";
+import { captureError, makeError } from "../error.js";
 import { failure, success } from "../result.js";
 import type { PluginLoaderError, PluginResult } from "../result.js";
 import { PluginHandleImpl } from "./handles.js";
@@ -28,16 +29,14 @@ export class PluginRegistry {
         const pluginId = loaded.value.manifest.id;
         try {
             if (this.#plugins.has(pluginId)) {
-                return failure({
-                    operation: "register", manifestPath, pluginId,
-                    cause: { code: "duplicate_plugin_id", value: pluginId },
-                });
+                return failure(makeError("register", "protocol_error", "Plugin ID is already registered",
+                    [{ manifestPath, pluginId, code: "duplicate_plugin_id", value: pluginId }]));
             }
             const handle = new PluginHandleImpl(loaded.value);
             this.#plugins.set(pluginId, handle);
             return success(handle);
         } catch (cause) {
-            return failure({ operation: "register", manifestPath, pluginId, cause });
+            return failure(captureError("register", cause, { manifestPath, pluginId }));
         }
     }
 
@@ -53,13 +52,12 @@ export class PluginRegistry {
                 manifestPath = path.join(rootDirectory, entry.name, "plugin.json");
                 const result = await this.load(manifestPath);
                 if (result.error !== null) {
-                    const { operation, cause } = result.error;
                     // A directory without a manifest is not a plugin.
                     if (
-                        operation === "manifest_read"
-                        && typeof cause === "object"
-                        && cause !== null
-                        && (cause as { code?: unknown }).code === "ENOENT"
+                        result.error.operation === "manifest_read"
+                        && result.error.type === "system_error"
+                        && result.error.data.some((item) => typeof item === "object" && item !== null
+                            && (item as { code?: unknown }).code === "ENOENT")
                     ) {
                         continue;
                     }
@@ -71,7 +69,7 @@ export class PluginRegistry {
         } catch (cause) {
             return {
                 plugins,
-                error: { operation: "directory_read", manifestPath, cause },
+                error: captureError("directory_read", cause, { rootDirectory, manifestPath }),
             };
         }
     }

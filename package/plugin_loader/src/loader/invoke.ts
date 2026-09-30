@@ -1,4 +1,5 @@
 import { failure, success } from "../result.js";
+import { captureError, is_hh_error, makeError, normalize_error } from "../error.js";
 import type { PluginLoaderOperation, PluginResult } from "../result.js";
 import type { LoadedApi, LoadedPlugin } from "./types.js";
 
@@ -11,24 +12,25 @@ export async function invokeLoadedApi(
     const context = { pluginId: loaded.manifest.id, apiId: api.descriptor.id };
     try {
         if (!api.validateInput(input)) {
-            return failure({
-                ...context, operation, direction: "input",
-                cause: api.validateInput.errors,
-            });
+            return failure(makeError(operation, "validation_error", "Plugin input validation failed",
+                [{ ...context, direction: "input", schema_errors: structuredClone(api.validateInput.errors) }]));
         }
 
         operation = "invoke";
-        const output = await loaded.plugin.invoke({ api: api.descriptor.id, input });
+        let output = await loaded.plugin.invoke({ api: api.descriptor.id, input });
         operation = "output_validate";
+        if (api.descriptor.name === "get_error" && Array.isArray(output) && !output.every(is_hh_error)) {
+            output = output.map((error) => normalize_error(error, {
+                source: loaded.manifest.id, operation: "invoke", data: [context],
+            }));
+        }
         if (!api.validateOutput(output)) {
-            return failure({
-                ...context, operation, direction: "output",
-                cause: api.validateOutput.errors,
-            });
+            return failure(makeError(operation, "validation_error", "Plugin output validation failed",
+                [{ ...context, direction: "output", schema_errors: structuredClone(api.validateOutput.errors) }]));
         }
         return success(output);
     } catch (cause) {
-        return failure({ ...context, operation, cause });
+        return failure(captureError(operation, cause, context));
     }
 }
 

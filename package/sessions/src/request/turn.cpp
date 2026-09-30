@@ -1,8 +1,10 @@
 #include "turn.h"
 #include <request/request.h>
 #include <tool/tool_stream_parser.h>
+#include <error/error.h>
 
 #include <event_port>
+#include <error/event_port.h>
 
 #include <atomic>
 #include <exception>
@@ -41,7 +43,7 @@ namespace sessions::detail
             std::string&& type,
             nlohmann::json&& data)
         {
-            return event_port::port(event_port::Emit{
+            return sessions::detail::checked_port(event_port::Emit{
                 "provider",
                 level,
                 std::move(type),
@@ -50,42 +52,70 @@ namespace sessions::detail
             });
         }
 
-        void receive_provider_event(void* raw_context, std::string&& raw)
+        provider::Result<void> receive_provider_event(void* raw_context, std::string&& raw)
         {
-            auto* context = static_cast<PortSinkContext*>(raw_context);
-
-            nlohmann::json data = {
-                {"phase", context->phase},
-                {"delta_sequence", context->delta_sequence++},
-                {"raw", std::move(raw)}
-            };
-
-            const event_port::EventPtr emitted = publish_port_event(
-                *context,
-                event_port::Level::info,
-                "data",
-                std::move(data));
-
-            if (context->tool_parser != nullptr)
+            try
             {
-                context->tool_parser->append(
-                    emitted->data.at("raw").get_ref<const std::string&>());
+                auto* context = static_cast<PortSinkContext*>(raw_context);
+
+                nlohmann::json data = {
+                    {"phase", context->phase},
+                    {"delta_sequence", context->delta_sequence++},
+                    {"raw", std::move(raw)}
+                };
+
+                const event_port::EventPtr emitted = publish_port_event(
+                    *context,
+                    event_port::Level::info,
+                    "data",
+                    std::move(data));
+
+                if (context->tool_parser != nullptr)
+                {
+                    context->tool_parser->append(
+                        emitted->data.at("raw").get_ref<const std::string&>());
+                }
+                return provider::Result<void>::success();
+            }
+            catch (const std::exception& exception)
+            {
+                return provider::Result<void>::failure(convert_error<provider::Error>(
+                    exception_error("receive_provider_event", exception)));
+            }
+            catch (...)
+            {
+                return provider::Result<void>::failure(
+                    provider::Error{"sessions", "receive_provider_event", "unknown_exception", "", {}, {}});
             }
         }
 
-        void finish_provider_stream(void* raw_context)
+        provider::Result<void> finish_provider_stream(void* raw_context)
         {
-            auto* context = static_cast<PortSinkContext*>(raw_context);
-
-            publish_port_event(
-                *context,
-                event_port::Level::info,
-                "finished",
-                nlohmann::json{{"phase", context->phase}});
-
-            if (context->finished != nullptr)
+            try
             {
-                *context->finished = true;
+                auto* context = static_cast<PortSinkContext*>(raw_context);
+
+                publish_port_event(
+                    *context,
+                    event_port::Level::info,
+                    "finished",
+                    nlohmann::json{{"phase", context->phase}});
+
+                if (context->finished != nullptr)
+                {
+                    *context->finished = true;
+                }
+                return provider::Result<void>::success();
+            }
+            catch (const std::exception& exception)
+            {
+                return provider::Result<void>::failure(convert_error<provider::Error>(
+                    exception_error("finish_provider_stream", exception)));
+            }
+            catch (...)
+            {
+                return provider::Result<void>::failure(
+                    provider::Error{"sessions", "finish_provider_stream", "unknown_exception", "", {}, {}});
             }
         }
 
@@ -116,32 +146,17 @@ namespace sessions::detail
     {
         try
         {
-            nlohmann::json raw = nullptr;
-
-            if (failure.exception != nullptr)
-            {
-                try
-                {
-                    std::rethrow_exception(failure.exception);
-                }
-                catch (const std::exception& error)
-                {
-                    raw = error.what();
-                }
-                catch (...)
-                {
-                }
-            }
-
-            event_port::port(event_port::Emit{
+            const char* phase = session_failure_phase(failure.state);
+            nlohmann::json payload = {
+                {"phase", phase},
+                {"error", exception_error(phase, failure.exception)}
+            };
+            sessions::detail::checked_port(event_port::Emit{
                 "sessions",
                 event_port::Level::error,
                 "failed",
                 {},
-                nlohmann::json{
-                    {"phase", session_failure_phase(failure.state)},
-                    {"raw", std::move(raw)}
-                }
+                std::move(payload)
             });
         }
         catch (...)
@@ -210,23 +225,9 @@ namespace sessions::detail
                         : provider::EventSink{},
                     nullptr);
             }
-            catch (const provider::HttpError& error)
+            catch (const ErrorException&)
             {
-                const PortSinkContext& context = summary_finished
-                    ? request_context
-                    : summary_context;
-
-                publish_port_event(
-                    context,
-                    event_port::Level::error,
-                    "http_error",
-                    nlohmann::json{
-                        {"phase", context.phase},
-                        {"status_code", error.status_code},
-                        {"status_line", error.status_line},
-                        {"reason", error.reason},
-                        {"body", error.body}
-                    });
+                // The Session boundary publishes this structured failure once.
                 throw;
             }
             catch (const std::exception& error)
@@ -241,7 +242,7 @@ namespace sessions::detail
                     "failed",
                     nlohmann::json{
                         {"phase", context.phase},
-                        {"raw", error.what()}
+                        {"error", exception_error("request", error)}
                     });
                 throw;
             }
@@ -257,7 +258,7 @@ namespace sessions::detail
                     "failed",
                     nlohmann::json{
                         {"phase", context.phase},
-                        {"raw", nullptr}
+                        {"error", exception_error("request", std::current_exception())}
                     });
                 throw;
             }

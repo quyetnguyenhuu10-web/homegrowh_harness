@@ -1,493 +1,255 @@
 #include "linux_credential.h"
+#include "keyutils_api.h"
+#include "credential/validation.h"
+#include "memory/wipe.h"
 
 #include <cerrno>
-#include <cstddef>
-#include <cstdint>
-#include <dlfcn.h>
 #include <limits>
-#include <memory>
-#include <string>
-#include <sys/types.h>
+#include <system_error>
 #include <utility>
 
 namespace secrets::linux
 {
     namespace
     {
-        using key_serial_t = std::int32_t;
+        using detail::KeyutilsApi;
+        using detail::key_serial_t;
+        enum class StorageScope { persistent, session };
 
-        constexpr key_serial_t key_spec_session_keyring = -3;
-        constexpr key_serial_t key_spec_user_keyring = -4;
-        constexpr const char* key_type = "user";
-
-        enum class storage_scope
+        Error system_error(
+            const char* operation,
+            const char* api,
+            int code,
+            long result,
+            nlohmann::json&& context = {})
         {
-            persistent,
-            session,
-        };
+            context["code"] = code;
+            context["errno"] = code;
+            context["category"] = "generic";
+            context["api"] = api;
+            context["result"] = result;
+            return secrets::detail::make_error(
+                operation, code == ENOKEY ? "not_found" : "system_error",
+                code == 0 ? "" : std::generic_category().message(code), {std::move(context)});
+        }
 
-        struct library_deleter
+        Result<key_serial_t> key_id(const char* api, long value)
         {
-            void operator()(void* library) const noexcept
+            if (value > (std::numeric_limits<key_serial_t>::max)())
             {
-                if (library != nullptr)
-                    dlclose(library);
+                return Result<key_serial_t>::failure(secrets::detail::make_error(
+                    api, "protocol_error", "Key identifier exceeds the backend result range",
+                    {{{"api", api}, {"result", value},
+                      {"maximum", (std::numeric_limits<key_serial_t>::max)()}}}));
             }
-        };
-
-        using unique_library = std::unique_ptr<void, library_deleter>;
-
-        using add_key_fn = key_serial_t (*)(
-            const char*,
-            const char*,
-            const void*,
-            std::size_t,
-            key_serial_t);
-        using keyctl_get_persistent_fn = long (*)(uid_t, key_serial_t);
-        using keyctl_search_fn = long (*)(
-            key_serial_t,
-            const char*,
-            const char*,
-            key_serial_t);
-        using keyctl_read_fn = long (*)(key_serial_t, char*, std::size_t);
-        using keyctl_update_fn = long (*)(
-            key_serial_t,
-            const void*,
-            std::size_t);
-        using keyctl_unlink_fn = long (*)(key_serial_t, key_serial_t);
-
-        struct keyutils_api
-        {
-            unique_library library;
-            add_key_fn add_key = nullptr;
-            keyctl_get_persistent_fn get_persistent = nullptr;
-            keyctl_search_fn search = nullptr;
-            keyctl_read_fn read = nullptr;
-            keyctl_update_fn update = nullptr;
-            keyctl_unlink_fn unlink = nullptr;
-        };
-
-        SecretError error(const char* operation, int code)
-        {
-            return {
-                static_cast<std::uint32_t>(code),
-                operation,
-            };
+            return Result<key_serial_t>::success(static_cast<key_serial_t>(value));
         }
 
-        template <typename Function>
-        Function symbol(void* library, const char* name) noexcept
+        Result<key_serial_t> storage_keyring(const KeyutilsApi& keyutils, StorageScope scope)
         {
-            return reinterpret_cast<Function>(dlsym(library, name));
-        }
-
-        bool load_keyutils(keyutils_api& api, SecretError& load_error)
-        {
-            void* raw_library = dlopen("libkeyutils.so.1", RTLD_NOW | RTLD_LOCAL);
-            if (raw_library == nullptr)
-                raw_library = dlopen("libkeyutils.so", RTLD_NOW | RTLD_LOCAL);
-
-            if (raw_library == nullptr)
-            {
-                load_error = error("dlopen(libkeyutils)", ENOSYS);
-                return false;
-            }
-
-            unique_library library(raw_library);
-            keyutils_api loaded;
-            loaded.add_key = symbol<add_key_fn>(raw_library, "add_key");
-            loaded.get_persistent = symbol<keyctl_get_persistent_fn>(
-                raw_library,
-                "keyctl_get_persistent");
-            loaded.search = symbol<keyctl_search_fn>(raw_library, "keyctl_search");
-            loaded.read = symbol<keyctl_read_fn>(raw_library, "keyctl_read");
-            loaded.update = symbol<keyctl_update_fn>(raw_library, "keyctl_update");
-            loaded.unlink = symbol<keyctl_unlink_fn>(raw_library, "keyctl_unlink");
-
-            if (
-                loaded.add_key == nullptr ||
-                loaded.search == nullptr ||
-                loaded.read == nullptr ||
-                loaded.update == nullptr ||
-                loaded.unlink == nullptr)
-            {
-                load_error = error("dlsym(libkeyutils)", ENOSYS);
-                return false;
-            }
-
-            loaded.library = std::move(library);
-            api = std::move(loaded);
-            return true;
-        }
-
-        const keyutils_api* api(SecretError& load_error)
-        {
-            struct state
-            {
-                keyutils_api value;
-                SecretError error;
-                bool loaded = false;
-
-                state()
-                {
-                    loaded = load_keyutils(value, error);
-                }
-            };
-
-            static const state shared;
-            if (!shared.loaded)
-            {
-                load_error = shared.error;
-                return nullptr;
-            }
-            return &shared.value;
-        }
-
-        bool validate_signature(
-            const std::string& signature,
-            SecretError& validation_error)
-        {
-            if (!signature.empty())
-                return true;
-
-            validation_error = error("validate credential signature", EINVAL);
-            return false;
-        }
-
-        bool validate_value(
-            const std::string& value,
-            SecretError& validation_error)
-        {
-            if (!value.empty())
-                return true;
-
-            validation_error = error("validate credential value", EINVAL);
-            return false;
-        }
-
-        bool storage_keyring(
-            const keyutils_api& keyutils,
-            storage_scope scope,
-            key_serial_t& keyring,
-            SecretError& operation_error)
-        {
-            if (scope == storage_scope::session)
-            {
-                keyring = key_spec_session_keyring;
-                return true;
-            }
-
+            if (scope == StorageScope::session)
+                return Result<key_serial_t>::success(key_serial_t{detail::session_keyring});
             if (keyutils.get_persistent == nullptr)
-            {
-                keyring = key_spec_user_keyring;
-                return true;
-            }
+                return Result<key_serial_t>::success(key_serial_t{detail::user_keyring});
 
             errno = 0;
-            const long result = keyutils.get_persistent(
-                static_cast<uid_t>(-1),
-                key_spec_user_keyring);
+            const long result = keyutils.get_persistent(static_cast<uid_t>(-1), detail::user_keyring);
             if (result < 0)
             {
-                const int code = errno == 0 ? EIO : errno;
+                const int code = errno;
                 if (code == EOPNOTSUPP || code == ENOSYS)
+                    return Result<key_serial_t>::success(key_serial_t{detail::user_keyring});
+                return Result<key_serial_t>::failure(system_error(
+                    "storage_keyring", "keyctl_get_persistent", code, result,
+                    {{"keyring", detail::user_keyring}}));
+            }
+            return key_id("keyctl_get_persistent", result);
+        }
+
+        Result<key_serial_t> search_key(
+            const KeyutilsApi& keyutils, key_serial_t keyring, const std::string& signature)
+        {
+            errno = 0;
+            const long result = keyutils.search(keyring, detail::key_type, signature.c_str(), 0);
+            if (result < 0)
+            {
+                const int code = errno;
+                return Result<key_serial_t>::failure(system_error(
+                    "search_key", "keyctl_search", code, result,
+                    {{"keyring", keyring}, {"signature_bytes", std::vector<unsigned char>(
+                        signature.begin(), signature.end())}}));
+            }
+            return key_id("keyctl_search", result);
+        }
+
+        SecretResult read_key(const KeyutilsApi& keyutils, key_serial_t key)
+        {
+            return secrets::detail::guard<std::string>("read_key", [&]
+            {
+                errno = 0;
+                const long required = keyutils.read(key, nullptr, 0);
+                if (required < 0)
                 {
-                    keyring = key_spec_user_keyring;
-                    return true;
+                    const int code = errno;
+                    Error error = system_error("read_key", "keyctl_read", code, required, {{"key", key}});
+                    error.data.front()["stage"] = "size";
+                    return SecretResult::failure(std::move(error));
                 }
 
-                operation_error = error(
-                    "keyctl_get_persistent",
-                    code);
-                return false;
-            }
+                std::string value(static_cast<std::size_t>(required), '\0');
+                secrets::detail::StringWiper wipe(value);
+                for (;;)
+                {
+                    errno = 0;
+                    const long bytes = keyutils.read(
+                        key, value.empty() ? nullptr : value.data(), value.size());
+                    if (bytes < 0)
+                    {
+                        const int code = errno;
+                        return SecretResult::failure(
+                            system_error("read_key", "keyctl_read", code, bytes, {{"key", key}}));
+                    }
+                    const auto size = static_cast<std::size_t>(bytes);
+                    if (size <= value.size())
+                    {
+                        value.resize(size);
+                        return SecretResult::success(std::move(value));
+                    }
+                    secrets::detail::secure_zero(value.data(), value.size());
+                    value.resize(size);
+                }
+            });
+        }
 
-            if (result > (std::numeric_limits<key_serial_t>::max)())
+        SecretResult get_in_scope(
+            const char* operation, const std::string& signature, StorageScope scope)
+        {
+            return secrets::detail::guard<std::string>(operation, [&]
             {
-                operation_error = error("keyctl_get_persistent", EOVERFLOW);
-                return false;
-            }
-
-            keyring = static_cast<key_serial_t>(result);
-            return true;
+                auto validated = secrets::detail::validate_inputs(operation, signature);
+                if (validated.error)
+                    return SecretResult::failure(std::move(*validated.error));
+                auto api = detail::keyutils_api();
+                if (api.error)
+                    return SecretResult::failure(std::move(*api.error));
+                auto keyring = storage_keyring(**api.value, scope);
+                if (keyring.error)
+                    return SecretResult::failure(std::move(*keyring.error));
+                auto key = search_key(**api.value, *keyring.value, signature);
+                if (key.error)
+                    return SecretResult::failure(std::move(*key.error));
+                return read_key(**api.value, *key.value);
+            });
         }
 
-        long search_key(
-            const keyutils_api& keyutils,
-            key_serial_t keyring,
-            const std::string& signature) noexcept
+        SecretOperationResult set_in_scope(
+            const char* operation,
+            const std::string& signature,
+            const std::string& value,
+            StorageScope scope)
         {
-            errno = 0;
-            return keyutils.search(
-                keyring,
-                key_type,
-                signature.c_str(),
-                0);
-        }
-    }
-
-    static SecretResult get_secret_in_scope(
-        const std::string& signature,
-        storage_scope scope)
-    {
-        SecretError operation_error;
-        if (!validate_signature(signature, operation_error))
-        {
-            return {
-                SecretStatus::failed,
-                {},
-                std::move(operation_error),
-            };
-        }
-
-        const keyutils_api* keyutils = api(operation_error);
-        if (keyutils == nullptr)
-        {
-            return {
-                SecretStatus::failed,
-                {},
-                std::move(operation_error),
-            };
-        }
-
-        key_serial_t keyring = 0;
-        if (!storage_keyring(*keyutils, scope, keyring, operation_error))
-        {
-            return {
-                SecretStatus::failed,
-                {},
-                std::move(operation_error),
-            };
-        }
-
-        const long key = search_key(*keyutils, keyring, signature);
-        if (key < 0)
-        {
-            const int code = errno == 0 ? EIO : errno;
-            return {
-                code == ENOKEY ? SecretStatus::not_found : SecretStatus::failed,
-                {},
-                error("keyctl_search", code),
-            };
-        }
-
-        errno = 0;
-        long required = keyutils->read(
-            static_cast<key_serial_t>(key),
-            nullptr,
-            0);
-        if (required < 0)
-        {
-            return {
-                SecretStatus::failed,
-                {},
-                error("keyctl_read(size)", errno == 0 ? EIO : errno),
-            };
-        }
-
-        std::string value(static_cast<std::size_t>(required), '\0');
-        for (;;)
-        {
-            errno = 0;
-            const long bytes = keyutils->read(
-                static_cast<key_serial_t>(key),
-                value.empty() ? nullptr : value.data(),
-                value.size());
-            if (bytes < 0)
+            return secrets::detail::guard<std::monostate>(operation, [&]
             {
-                return {
-                    SecretStatus::failed,
-                    {},
-                    error("keyctl_read", errno == 0 ? EIO : errno),
-                };
-            }
+                auto validated = secrets::detail::validate_inputs(operation, signature, &value);
+                if (validated.error)
+                    return validated;
+                auto api = detail::keyutils_api();
+                if (api.error)
+                    return SecretOperationResult::failure(std::move(*api.error));
+                const auto& keyutils = **api.value;
+                auto keyring = storage_keyring(keyutils, scope);
+                if (keyring.error)
+                    return SecretOperationResult::failure(std::move(*keyring.error));
+                auto key = search_key(keyutils, *keyring.value, signature);
+                if (key.value)
+                {
+                    errno = 0;
+                    const long result = keyutils.update(*key.value, value.data(), value.size());
+                    if (result < 0)
+                    {
+                        const int code = errno;
+                        return SecretOperationResult::failure(system_error(
+                            operation, "keyctl_update", code, result, {{"key", *key.value}}));
+                    }
+                    return SecretOperationResult::success(std::monostate{});
+                }
+                if (key.error->type != "not_found")
+                    return SecretOperationResult::failure(std::move(*key.error));
 
-            const std::size_t size = static_cast<std::size_t>(bytes);
-            if (size <= value.size())
-            {
-                value.resize(size);
-                break;
-            }
-
-            value.resize(size);
+                errno = 0;
+                const key_serial_t result = keyutils.add_key(
+                    detail::key_type, signature.c_str(), value.data(), value.size(), *keyring.value);
+                if (result < 0)
+                {
+                    const int code = errno;
+                    return SecretOperationResult::failure(system_error(
+                        operation, "add_key", code, result,
+                        {{"keyring", *keyring.value}, {"signature_bytes", std::vector<unsigned char>(
+                            signature.begin(), signature.end())}}));
+                }
+                return SecretOperationResult::success(std::monostate{});
+            });
         }
 
-        return {
-            SecretStatus::success,
-            std::move(value),
-            {},
-        };
+        SecretOperationResult erase_in_scope(
+            const char* operation, const std::string& signature, StorageScope scope)
+        {
+            return secrets::detail::guard<std::monostate>(operation, [&]
+            {
+                auto validated = secrets::detail::validate_inputs(operation, signature);
+                if (validated.error)
+                    return validated;
+                auto api = detail::keyutils_api();
+                if (api.error)
+                    return SecretOperationResult::failure(std::move(*api.error));
+                const auto& keyutils = **api.value;
+                auto keyring = storage_keyring(keyutils, scope);
+                if (keyring.error)
+                    return SecretOperationResult::failure(std::move(*keyring.error));
+                auto key = search_key(keyutils, *keyring.value, signature);
+                if (key.error)
+                    return SecretOperationResult::failure(std::move(*key.error));
+                errno = 0;
+                const long result = keyutils.unlink(*key.value, *keyring.value);
+                if (result < 0)
+                {
+                    const int code = errno;
+                    return SecretOperationResult::failure(system_error(
+                        operation, "keyctl_unlink", code, result,
+                        {{"key", *key.value}, {"keyring", *keyring.value}}));
+                }
+                return SecretOperationResult::success(std::monostate{});
+            });
+        }
     }
 
     SecretResult get_secret(const std::string& signature)
     {
-        return get_secret_in_scope(signature, storage_scope::persistent);
+        return get_in_scope("get", signature, StorageScope::persistent);
     }
 
     SecretResult get_session_secret(const std::string& signature)
     {
-        return get_secret_in_scope(signature, storage_scope::session);
+        return get_in_scope("get_session", signature, StorageScope::session);
     }
 
-    static SecretOperationResult set_secret_in_scope(
-        const std::string& signature,
-        const std::string& value,
-        storage_scope scope)
+    SecretOperationResult set_secret(const std::string& signature, const std::string& value)
     {
-        SecretError operation_error;
-        if (!validate_signature(signature, operation_error)
-            || !validate_value(value, operation_error))
-        {
-            return {
-                SecretStatus::failed,
-                std::move(operation_error),
-            };
-        }
-
-        const keyutils_api* keyutils = api(operation_error);
-        if (keyutils == nullptr)
-        {
-            return {
-                SecretStatus::failed,
-                std::move(operation_error),
-            };
-        }
-
-        key_serial_t keyring = 0;
-        if (!storage_keyring(*keyutils, scope, keyring, operation_error))
-        {
-            return {
-                SecretStatus::failed,
-                std::move(operation_error),
-            };
-        }
-
-        const long key = search_key(*keyutils, keyring, signature);
-        if (key >= 0)
-        {
-            errno = 0;
-            if (keyutils->update(
-                    static_cast<key_serial_t>(key),
-                    value.data(),
-                    value.size()) < 0)
-            {
-                return {
-                    SecretStatus::failed,
-                    error("keyctl_update", errno == 0 ? EIO : errno),
-                };
-            }
-
-            return {SecretStatus::success, {}};
-        }
-
-        const int search_error = errno == 0 ? EIO : errno;
-        if (search_error != ENOKEY)
-        {
-            return {
-                SecretStatus::failed,
-                error("keyctl_search", search_error),
-            };
-        }
-
-        errno = 0;
-        if (keyutils->add_key(
-                key_type,
-                signature.c_str(),
-                value.data(),
-                value.size(),
-                keyring) < 0)
-        {
-            return {
-                SecretStatus::failed,
-                error("add_key", errno == 0 ? EIO : errno),
-            };
-        }
-
-        return {SecretStatus::success, {}};
+        return set_in_scope("set", signature, value, StorageScope::persistent);
     }
 
-    SecretOperationResult set_secret(
-        const std::string& signature,
-        const std::string& value)
+    SecretOperationResult set_session_secret(const std::string& signature, const std::string& value)
     {
-        return set_secret_in_scope(
-            signature,
-            value,
-            storage_scope::persistent);
-    }
-
-    SecretOperationResult set_session_secret(
-        const std::string& signature,
-        const std::string& value)
-    {
-        return set_secret_in_scope(
-            signature,
-            value,
-            storage_scope::session);
-    }
-
-    static SecretOperationResult erase_secret_in_scope(
-        const std::string& signature,
-        storage_scope scope)
-    {
-        SecretError operation_error;
-        if (!validate_signature(signature, operation_error))
-        {
-            return {
-                SecretStatus::failed,
-                std::move(operation_error),
-            };
-        }
-
-        const keyutils_api* keyutils = api(operation_error);
-        if (keyutils == nullptr)
-        {
-            return {
-                SecretStatus::failed,
-                std::move(operation_error),
-            };
-        }
-
-        key_serial_t keyring = 0;
-        if (!storage_keyring(*keyutils, scope, keyring, operation_error))
-        {
-            return {
-                SecretStatus::failed,
-                std::move(operation_error),
-            };
-        }
-
-        const long key = search_key(*keyutils, keyring, signature);
-        if (key < 0)
-        {
-            const int code = errno == 0 ? EIO : errno;
-            return {
-                code == ENOKEY ? SecretStatus::not_found : SecretStatus::failed,
-                error("keyctl_search", code),
-            };
-        }
-
-        errno = 0;
-        if (keyutils->unlink(
-                static_cast<key_serial_t>(key),
-                keyring) < 0)
-        {
-            return {
-                SecretStatus::failed,
-                error("keyctl_unlink", errno == 0 ? EIO : errno),
-            };
-        }
-
-        return {SecretStatus::success, {}};
+        return set_in_scope("set_session", signature, value, StorageScope::session);
     }
 
     SecretOperationResult erase_secret(const std::string& signature)
     {
-        return erase_secret_in_scope(signature, storage_scope::persistent);
+        return erase_in_scope("erase", signature, StorageScope::persistent);
     }
 
     SecretOperationResult erase_session_secret(const std::string& signature)
     {
-        return erase_secret_in_scope(signature, storage_scope::session);
+        return erase_in_scope("erase_session", signature, StorageScope::session);
     }
 }

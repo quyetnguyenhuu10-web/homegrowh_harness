@@ -1,6 +1,7 @@
 #include <event_port>
 
 #include "detail/event_access.h"
+#include "detail/error.h"
 
 #include <utility>
 
@@ -30,7 +31,7 @@ namespace event_port
     {
     }
 
-    EventPtr detail::EventAccess::make(
+    Result<EventPtr> detail::EventAccess::make(
         std::uint64_t sequence,
         std::chrono::system_clock::time_point timestamp,
         std::string&& package,
@@ -39,13 +40,16 @@ namespace event_port
         References&& references,
         nlohmann::json&& data)
     {
-        return EventPtr(new Event(
-            sequence,
-            timestamp,
-            std::move(package),
-            level,
-            std::move(type),
-            std::move(references),
-            std::move(data)));
+        return guard<EventPtr>("make_event", [&]() -> Result<EventPtr>
+        {
+            return Result<EventPtr>::success(EventPtr(new Event(
+                sequence,
+                timestamp,
+                std::move(package),
+                level,
+                std::move(type),
+                std::move(references),
+                std::move(data))));
+        });
     }
 }

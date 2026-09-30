@@ -6,18 +6,23 @@
 
 #include <Windows.h>
 
-#include <stdexcept>
+#include "../error_schema.h"
+
+#include <filesystem>
 #include <string>
 #include <string_view>
-#include <system_error>
 
 namespace sandbox::detail::filesystem::windows
 {
-    [[noreturn]] inline void throw_win32(std::string_view action, DWORD error)
+    [[noreturn]] inline void throw_win32(
+        std::string_view action,
+        DWORD error,
+        const std::optional<std::filesystem::path>& path = std::nullopt)
     {
-        throw std::system_error(
-            static_cast<int>(error),
-            std::system_category(),
-            std::string(action));
+        sandbox::detail::throw_error(
+            sandbox::detail::make_native_error(
+                std::string(action),
+                    error,
+                path));
     }
 }

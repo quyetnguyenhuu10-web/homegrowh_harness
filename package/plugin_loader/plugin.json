@@ -26,127 +26,27 @@
       "input": {
         "type": "object",
         "additionalProperties": false,
-        "required": [
-          "result"
-        ],
-        "properties": {
-          "result": {
-            "type": "object",
-            "required": [
-              "error"
-            ],
-            "properties": {
-              "error": {
-                "$ref": "#/$defs/plugin_error"
-              }
-            },
-            "additionalProperties": true
-          }
-        },
-        "$defs": {
-          "plugin_error": {
-            "anyOf": [
-              {
-                "type": "null"
-              },
-              {
-                "type": "object",
-                "additionalProperties": false,
-                "required": [
-                  "operation"
-                ],
-                "properties": {
-                  "operation": {
-                    "enum": [
-                      "manifest_read",
-                      "manifest_parse",
-                      "manifest_validate",
-                      "module_resolve",
-                      "module_import",
-                      "module_validate",
-                      "schema_compile",
-                      "register",
-                      "directory_read",
-                      "input_validate",
-                      "invoke",
-                      "output_validate"
-                    ]
-                  },
-                  "cause": {
-                    "$comment": "Original in-process value, including Error, AJV errors, primitives or undefined. Not required because AJV treats undefined as an absent property."
-                  },
-                  "manifestPath": {
-                    "type": "string"
-                  },
-                  "pluginId": {
-                    "type": "string"
-                  },
-                    "apiId": {
-                      "type": "integer",
-                      "minimum": 1
-                  },
-                  "direction": {
-                    "enum": [
-                      "input",
-                      "output"
-                    ]
-                  }
-                }
-              }
-            ]
-          }
-        }
+        "required": [],
+        "properties": {}
       },
       "output": {
-        "anyOf": [
-          {
-            "type": "null"
-          },
-          {
+        "type": "array",
+        "items": { "$ref": "#/$defs/hh_error" },
+        "$defs": {
+          "hh_error": {
             "type": "object",
             "additionalProperties": false,
-            "required": [
-              "operation"
-            ],
+            "required": ["source", "operation", "type", "message", "data", "causes"],
             "properties": {
-              "operation": {
-                "enum": [
-                  "manifest_read",
-                  "manifest_parse",
-                  "manifest_validate",
-                  "module_resolve",
-                  "module_import",
-                  "module_validate",
-                  "schema_compile",
-                  "register",
-                  "directory_read",
-                  "input_validate",
-                  "invoke",
-                  "output_validate"
-                ]
-              },
-              "cause": {
-                "$comment": "Original in-process value, including Error, AJV errors, primitives or undefined. Not required because AJV treats undefined as an absent property."
-              },
-              "manifestPath": {
-                "type": "string"
-              },
-              "pluginId": {
-                "type": "string"
-              },
-              "apiId": {
-                "type": "integer",
-                "minimum": 1
-              },
-              "direction": {
-                "enum": [
-                  "input",
-                  "output"
-                ]
-              }
+              "source": { "type": "string" },
+              "operation": { "type": "string" },
+              "type": { "type": "string" },
+              "message": { "type": "string" },
+              "data": { "type": "array", "items": true },
+              "causes": { "type": "array", "items": { "$ref": "#/$defs/hh_error" } }
             }
           }
-        ]
+        }
       }
     }
   ],

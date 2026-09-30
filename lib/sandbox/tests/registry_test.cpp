@@ -18,6 +18,8 @@
 #include <Windows.h>
 #include <Aclapi.h>
 #include <sddl.h>
+
+#include "window/state.h"
 #endif
 
 namespace
@@ -28,6 +30,20 @@ namespace
             throw std::runtime_error(message);
     }
 
+    template <typename T>
+    T error_data_value(
+        const sandbox::Error& error,
+        std::string_view key,
+        T fallback)
+    {
+        for (const nlohmann::json& item : error.data)
+        {
+            if (item.is_object() && item.contains(key))
+                return item.value(std::string(key), fallback);
+        }
+        return fallback;
+    }
+
     bool has_path_error(
         const sandbox::registry_result& result,
         const std::filesystem::path& path,
@@ -35,10 +51,24 @@ namespace
     {
         for (const auto& item : result.path_errors)
         {
-            if (item.path == path && item.error.value() == error_value)
+            if (
+                item.path == path
+                && error_data_value(item.error, "code", 0) == error_value)
                 return true;
         }
         return false;
+    }
+
+    const sandbox::Error* find_path_error(
+        const sandbox::registry_result& result,
+        const std::filesystem::path& path)
+    {
+        for (const auto& item : result.path_errors)
+        {
+            if (item.path == path)
+                return &item.error;
+        }
+        return nullptr;
     }
 
     bool has_path_error(
@@ -48,7 +78,9 @@ namespace
     {
         for (const auto& item : result.path_errors)
         {
-            if (item.path == path && item.error.value() == error_value)
+            if (
+                item.path == path
+                && error_data_value(item.error, "code", 0) == error_value)
                 return true;
         }
         return false;
@@ -337,6 +369,24 @@ int main()
         require(
             has_path_error(first, hard_link_alias, ERROR_NOT_SUPPORTED),
             "hard-link alias was not reported as a path-level OS error");
+        const sandbox::Error* hard_link_error =
+            find_path_error(first, hard_link_source);
+        require(hard_link_error != nullptr, "hard-link schema error is missing");
+        require(hard_link_error->source == "sandbox", "hard-link error source mismatch");
+        require(
+            hard_link_error->operation == "inspect_registry_path",
+            "hard-link error operation mismatch");
+        require(
+            hard_link_error->type == "unsupported_path",
+            "hard-link error type mismatch");
+        require(!hard_link_error->message.empty(), "hard-link error message is empty");
+        require(
+            error_data_value(
+                *hard_link_error,
+                "reason",
+                std::string{}) == "hard_link",
+            "hard-link error data reason mismatch");
+        require(hard_link_error->causes.empty(), "hard-link error unexpectedly has causes");
         require(
             has_capability_acl(
                 existing_directory,
@@ -400,6 +450,41 @@ int main()
                 sandbox::permission::read_only,
                 true),
             "new file did not inherit read-only ACL");
+
+        {
+            using namespace sandbox::detail::filesystem::windows;
+            registry_state_lock state_lock;
+            registry_state state = load_registry_state(state_path);
+            registry_entry* entry = find_registry_entry(
+                state,
+                std::filesystem::canonical(root),
+                sandbox::permission::read_only);
+            require(entry != nullptr, "durable read-only registry entry is missing");
+            require(entry->acl_ready, "committed registry entry was not marked ready");
+            entry->acl_ready = false;
+            save_registry_state(state_path, state);
+        }
+
+        const auto pending_reuse = sandbox::registry({
+            {root, sandbox::permission::read_only},
+        }, false);
+        require(
+            pending_reuse.permissions.empty(),
+            "reuse accepted an incomplete durable registry transaction");
+        const sandbox::Error* pending_reuse_error =
+            find_path_error(pending_reuse, root);
+        require(
+            pending_reuse_error != nullptr
+                && pending_reuse_error->type == "incomplete_registration",
+            "incomplete durable transaction was not reported explicitly");
+
+        const auto recovered_pending = sandbox::registry({
+            {root, sandbox::permission::read_only},
+        }, true);
+        require(
+            recovered_pending.permissions.size() == 1
+                && !recovered_pending.permissions[0].reused,
+            "explicit refresh did not recover an incomplete transaction");
 
         const auto second = sandbox::registry({
             {root, sandbox::permission::read_only},
@@ -549,6 +634,22 @@ int main()
                 root,
                 ERROR_FILE_NOT_FOUND),
             "released read-only capability did not preserve missing-state error");
+        const sandbox::Error* missing_reuse_error =
+            find_path_error(released_read_only_reuse, root);
+        require(missing_reuse_error != nullptr, "missing reuse schema error is absent");
+        require(
+            missing_reuse_error->source == "sandbox",
+            "missing reuse error source mismatch");
+        require(
+            missing_reuse_error->operation == "reuse_filesystem_capability",
+            "missing reuse error operation mismatch");
+        require(
+            missing_reuse_error->type == "not_registered",
+            "missing reuse error type mismatch");
+        require(
+            error_data_value(*missing_reuse_error, "code", 0)
+                == ERROR_FILE_NOT_FOUND,
+            "missing reuse error code mismatch");
 
         const auto released_read_write_reuse = sandbox::registry({
             {root, sandbox::permission::read_write},
@@ -622,9 +723,14 @@ int main()
             {failed_release_root, sandbox::permission::read_only},
         }, false);
         require(
-            failed_release_reuse.permissions.size() == 1
-                && failed_release_reuse.permissions[0].reused,
-            "failed cleanup entry incorrectly advanced to state removal");
+            failed_release_reuse.permissions.empty(),
+            "reuse accepted a release transaction that did not finish");
+        const sandbox::Error* failed_release_reuse_error =
+            find_path_error(failed_release_reuse, failed_release_root);
+        require(
+            failed_release_reuse_error != nullptr
+                && failed_release_reuse_error->type == "incomplete_registration",
+            "failed release transaction was not preserved as pending state");
 
         const auto cleanup_failed_entry = sandbox::release_all();
         require(
@@ -851,7 +957,8 @@ int main()
             {root, sandbox::permission::read_only},
         }, false);
         require(
-            missing_state.final_error.value() == ENOENT,
+            missing_state.final_error.has_value()
+                && error_data_value(*missing_state.final_error, "code", 0) == ENOENT,
             "Linux missing registry state did not preserve OS ENOENT");
 
         std::filesystem::remove_all(root);

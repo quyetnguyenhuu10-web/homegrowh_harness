@@ -10,6 +10,7 @@ add_library(event_port
     src/event_port/detail/clock.cpp
     src/event_port/detail/clock.h
     src/event_port/detail/event_access.h
+    src/event_port/detail/error.h
     src/event_port/detail/registration_state.cpp
     src/event_port/detail/registration_state.h
     src/event_port/detail/registry.cpp
@@ -49,4 +50,10 @@ if(EVENT_PORT_BUILD_TESTS)
     target_link_libraries(event_port_test PRIVATE event_port::event_port)
 
     add_test(NAME event_port_test COMMAND event_port_test)
+
+    add_executable(event_port_error_schema_test tests/error_schema_test.cpp)
+    target_include_directories(event_port_error_schema_test PRIVATE src)
+    target_link_libraries(event_port_error_schema_test PRIVATE event_port::event_port)
+    add_test(NAME event_port_error_schema_test COMMAND event_port_error_schema_test)
+    set_tests_properties(event_port_test event_port_error_schema_test PROPERTIES TIMEOUT 15)
 endif()

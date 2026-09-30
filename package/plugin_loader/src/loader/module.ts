@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Plugin } from "../plugin.js";
+import { captureError, makeError } from "../error.js";
 import { failure, success } from "../result.js";
 import type { PluginLoaderOperation, PluginResult } from "../result.js";
 import { parseManifest } from "./manifest.js";
@@ -17,22 +18,20 @@ export async function loadPlugin(
     try {
         const raw = await readFile(manifestPath, "utf8");
         operation = "manifest_parse";
-        const parsed = parseManifest(JSON.parse(raw));
+        const parsed = parseManifest(JSON.parse(raw), { manifestPath });
         if (parsed.error !== null) {
-            return failure({ ...parsed.error, manifestPath });
+            return parsed;
         }
 
         const manifest = parsed.value;
         pluginId = manifest.id;
         if (manifest.api_version !== supportedApiVersion) {
-            return failure({
-                operation: "manifest_validate", manifestPath, pluginId,
-                cause: {
+            return failure(makeError("manifest_validate", "protocol_error", "Unsupported plugin API version",
+                [{ manifestPath, pluginId,
                     code: "unsupported_api_version",
                     value: manifest.api_version,
                     expected: supportedApiVersion,
-                },
-            });
+                }]));
         }
 
         operation = "module_resolve";
@@ -44,10 +43,8 @@ export async function loadPlugin(
             || relativeEntry.startsWith(".." + path.sep)
             || path.isAbsolute(relativeEntry)
         ) {
-            return failure({
-                operation, manifestPath, pluginId,
-                cause: { code: "entry_outside_plugin_directory", entryPath, root },
-            });
+            return failure(makeError(operation, "protocol_error", "Plugin entry is outside its directory",
+                [{ manifestPath, pluginId, code: "entry_outside_plugin_directory", entryPath, root }]));
         }
 
         operation = "module_import";
@@ -61,19 +58,19 @@ export async function loadPlugin(
             || plugin === null
             || typeof (plugin as { invoke?: unknown }).invoke !== "function"
         ) {
-            return failure({
-                operation, manifestPath, pluginId,
-                cause: { code: "invalid_plugin_export", expected: "plugin.invoke(request)" },
-            });
+            return failure(makeError(operation, "protocol_error", "Plugin export is invalid",
+                [{ manifestPath, pluginId, code: "invalid_plugin_export", expected: "plugin.invoke(request)" }]));
         }
 
-        const apis = compileApis(manifest);
+        const apis = compileApis(manifest, { manifestPath });
         if (apis.error !== null) {
-            return failure({ ...apis.error, manifestPath });
+            return apis;
         }
         return success({ manifest, plugin: plugin as Plugin, apis: apis.value });
     } catch (cause) {
-        return failure({ operation, cause, manifestPath, pluginId });
+        return failure(captureError(operation, cause, {
+            manifestPath, ...(pluginId === undefined ? {} : { pluginId }),
+        }));
     }
 }
 

@@ -4,10 +4,10 @@
 
 namespace event_port::detail
 {
-    void validate_event(
+    Result<void> validate_event(
         const std::string& package,
         const std::string& type,
         const References& references);
 
-    void validate_registration(const References& references);
+    Result<void> validate_registration(const References& references);
 }

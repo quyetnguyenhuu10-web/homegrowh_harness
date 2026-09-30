@@ -2,6 +2,7 @@
   "providers": [
     {
       "id": "openai",
+      "stream_request_options": { "stream_options": { "include_usage": true } },
       "usage_type": "OpenAIUsage",
       "usage_key": "usage",
       "fields": [
@@ -36,6 +37,7 @@
     },
     {
       "id": "deepseek",
+      "stream_request_options": { "stream_options": { "include_usage": true } },
       "usage_type": "DeepSeekUsage",
       "usage_key": "usage",
       "fields": [
