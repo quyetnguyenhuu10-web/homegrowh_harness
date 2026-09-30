@@ -4,10 +4,11 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "esModuleInterop": true,
+    "resolveJsonModule": true,
     "strict": true,
     "declaration": true,
     "sourceMap": true,
-    "rootDir": ".",
+    "rootDir": "src",
     "outDir": "dist",
     "noEmitOnError": true,
     "skipLibCheck": true,
@@ -16,13 +17,10 @@
     ]
   },
   "include": [
-    "index.ts",
-    "loader.ts",
-    "plugin.ts"
+    "src/**/*.ts"
   ],
   "exclude": [
     "dist",
-    "node_modules",
-    "session-api"
+    "node_modules"
   ]
 }

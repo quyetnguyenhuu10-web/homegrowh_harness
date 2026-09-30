@@ -1,7 +1,7 @@
 import type {
     Plugin,
     PluginRequest,
-} from "@hh/plugins";
+} from "@hh/plugin-loader";
 
 type UInt64 = number | bigint;
 type CommandId = UInt64;

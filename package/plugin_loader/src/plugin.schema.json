@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://hh.local/schemas/plugin.schema.json",
   "title": "HH Plugin Manifest",
+  "$comment": "HH JSON Schema extension: any API input/output schema may use x-hh-type. Supported values are uint64 and uint64-positive. The @hh/plugin-loader loader validates this keyword in addition to standard JSON Schema. For PluginHandle.call(name, ...args), input.required defines positional argument order.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -15,6 +16,27 @@
     "apis",
     "data"
   ],
+  "$defs": {
+    "api_schema": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "x-hh-type": {
+              "description": "HH integer extension understood by @hh/plugin-loader. uint64 accepts integer values from 0 through 18446744073709551615. uint64-positive accepts integer values from 1 through 18446744073709551615. JavaScript callers may use a safe integer number or bigint; values outside Number safe-integer range must use bigint.",
+              "enum": [
+                "uint64",
+                "uint64-positive"
+              ]
+            }
+          }
+        },
+        {
+          "type": "boolean"
+        }
+      ]
+    }
+  },
   "properties": {
     "id": {
       "type": "string",
@@ -155,24 +177,10 @@
             "minLength": 1
           },
           "input": {
-            "oneOf": [
-              {
-                "type": "object"
-              },
-              {
-                "type": "boolean"
-              }
-            ]
+            "$ref": "#/$defs/api_schema"
           },
           "output": {
-            "oneOf": [
-              {
-                "type": "object"
-              },
-              {
-                "type": "boolean"
-              }
-            ]
+            "$ref": "#/$defs/api_schema"
           }
         }
       }

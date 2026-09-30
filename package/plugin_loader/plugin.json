@@ -1,0 +1,154 @@
+{
+  "id": "plugin-loader",
+  "version": "0.1.0",
+  "api_version": 1,
+  "execution": {
+    "mode": "module",
+    "runtimes": [
+      "node",
+      "bun"
+    ],
+    "entry": "./dist/api.js"
+  },
+  "lifecycle": {
+    "scope": "host"
+  },
+  "sandbox": {
+    "enabled": false,
+    "filesystem": [],
+    "network": "none"
+  },
+  "references": [],
+  "apis": [
+    {
+      "id": 1,
+      "name": "get_error",
+      "input": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "result"
+        ],
+        "properties": {
+          "result": {
+            "type": "object",
+            "required": [
+              "error"
+            ],
+            "properties": {
+              "error": {
+                "$ref": "#/$defs/plugin_error"
+              }
+            },
+            "additionalProperties": true
+          }
+        },
+        "$defs": {
+          "plugin_error": {
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "operation"
+                ],
+                "properties": {
+                  "operation": {
+                    "enum": [
+                      "manifest_read",
+                      "manifest_parse",
+                      "manifest_validate",
+                      "module_resolve",
+                      "module_import",
+                      "module_validate",
+                      "schema_compile",
+                      "register",
+                      "directory_read",
+                      "input_validate",
+                      "invoke",
+                      "output_validate"
+                    ]
+                  },
+                  "cause": {
+                    "$comment": "Original in-process value, including Error, AJV errors, primitives or undefined. Not required because AJV treats undefined as an absent property."
+                  },
+                  "manifestPath": {
+                    "type": "string"
+                  },
+                  "pluginId": {
+                    "type": "string"
+                  },
+                    "apiId": {
+                      "type": "integer",
+                      "minimum": 1
+                  },
+                  "direction": {
+                    "enum": [
+                      "input",
+                      "output"
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "output": {
+        "anyOf": [
+          {
+            "type": "null"
+          },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "operation"
+            ],
+            "properties": {
+              "operation": {
+                "enum": [
+                  "manifest_read",
+                  "manifest_parse",
+                  "manifest_validate",
+                  "module_resolve",
+                  "module_import",
+                  "module_validate",
+                  "schema_compile",
+                  "register",
+                  "directory_read",
+                  "input_validate",
+                  "invoke",
+                  "output_validate"
+                ]
+              },
+              "cause": {
+                "$comment": "Original in-process value, including Error, AJV errors, primitives or undefined. Not required because AJV treats undefined as an absent property."
+              },
+              "manifestPath": {
+                "type": "string"
+              },
+              "pluginId": {
+                "type": "string"
+              },
+              "apiId": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "direction": {
+                "enum": [
+                  "input",
+                  "output"
+                ]
+              }
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "data": {}
+}

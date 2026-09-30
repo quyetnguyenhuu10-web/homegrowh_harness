@@ -22,6 +22,8 @@
   },
   "homepage": "https://github.com/quyetnguyenhuu10-web/homegrowh_harness#readme",
   "dependencies": {
+    "@hh/ipc-client": "file:lib/ipc-client",
+    "@hh/plugin-loader": "file:package/plugin_loader",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

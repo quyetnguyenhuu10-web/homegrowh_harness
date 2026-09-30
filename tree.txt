@@ -15,11 +15,14 @@ homegrowh_harness/
 │   ├── model_architech.md
 │   └── model_architech.png
 ├── host
-│   └── cli
-│       ├── src
-│       ├── bun.lock
-│       ├── package.json
-│       └── tsconfig.json
+│   ├── cli
+│   │   ├── src
+│   │   │   ├── linux
+│   │   │   └── windows
+│   │   ├── bun.lock
+│   │   ├── package.json
+│   │   └── tsconfig.json
+│   └── desktop
 ├── include
 │   └── homegrowh_harness
 ├── lib
@@ -199,6 +202,30 @@ homegrowh_harness/
 │   │   ├── .gitignore
 │   │   ├── package-lock.json
 │   │   ├── package.json
+│   │   └── tsconfig.json
+│   ├── plugin_loader
+│   │   ├── src
+│   │   │   ├── loader
+│   │   │   │   ├── handles.ts
+│   │   │   │   ├── invoke.ts
+│   │   │   │   ├── manifest.ts
+│   │   │   │   ├── module.ts
+│   │   │   │   ├── registry.ts
+│   │   │   │   ├── schema.ts
+│   │   │   │   └── types.ts
+│   │   │   ├── api.ts
+│   │   │   ├── index.ts
+│   │   │   ├── loader.ts
+│   │   │   ├── plugin.schema.json
+│   │   │   ├── plugin.ts
+│   │   │   └── result.ts
+│   │   ├── tests
+│   │   │   ├── error-api.test.mjs
+│   │   │   └── loader.test.mjs
+│   │   ├── package-lock.json
+│   │   ├── package.json
+│   │   ├── plugin.json
+│   │   ├── README.md
 │   │   └── tsconfig.json
 │   ├── provider
 │   │   ├── codegen
@@ -421,25 +448,20 @@ homegrowh_harness/
 │       │   └── tool_stream_parser_test.cpp
 │       └── CMakeLists.txt
 ├── plugins
-│   ├── session-api
-│   │   ├── src
-│   │   │   └── index.ts
-│   │   ├── package.json
-│   │   ├── plugin.json
-│   │   └── tsconfig.json
-│   ├── bun.lock
-│   ├── index.ts
-│   ├── loader.ts
-│   ├── package.json
-│   ├── plugin.schema.json
-│   ├── plugin.ts
-│   └── tsconfig.json
+│   └── session-api
+│       ├── src
+│       │   └── index.ts
+│       ├── package-lock.json
+│       ├── package.json
+│       ├── plugin.json
+│       └── tsconfig.json
 ├── tests
 │   ├── session.json
 │   ├── session_current.review_tool.json
 │   └── session_runtime_cli.ts
 ├── .gitattributes
 ├── .gitignore
+├── .npmrc
 ├── AGENTS.md
 ├── CMakeLists.txt
 ├── CMakePresets.json

@@ -8,7 +8,6 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
-    "@hh/plugins": "file:..",
     "typescript": "^7.0.2"
   }
 }

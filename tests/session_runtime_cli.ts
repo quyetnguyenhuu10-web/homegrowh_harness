@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
     type IpcConnection,
     listen,
-} from "../lib/ipc-client/src/index.ts";
+} from "@hh/ipc-client";
 
 const opcode = {
     registerSession: 1,

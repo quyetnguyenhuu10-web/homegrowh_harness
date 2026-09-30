@@ -1,3 +1,5 @@
+import type { PluginResult } from "./result.js";
+
 export type PluginReference = readonly [
     type: string,
     value: string,
@@ -64,10 +66,12 @@ export interface PluginApiHandle {
     readonly input: JsonSchema;
     readonly output: JsonSchema;
 
-    invoke(input: unknown): Promise<unknown>;
+    invoke(input: unknown): Promise<PluginResult<unknown>>;
 }
 
 export interface PluginHandle {
     readonly manifest: PluginManifest;
     readonly apis: readonly PluginApiHandle[];
+
+    call(name: string, ...args: unknown[]): Promise<PluginResult<unknown>>;
 }
