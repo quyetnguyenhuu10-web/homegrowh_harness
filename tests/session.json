@@ -1,5 +1,5 @@
 {
-  "api_key": "Bearer ywJLhy-V4IS90DhCMvVtdQWCL91x3WllFP5ajdM1Fx0",
+  "api_key": "Bearer ",
   "provider": "bonsai",
   "endpoint": "https://steersman-devoutly-repent.ngrok-free.dev/v1/chat/completions",
   "model_id": "bonsai",
